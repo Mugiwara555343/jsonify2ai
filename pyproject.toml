@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jsonify2ai"
+version = "0.1.0"
+description = "Ingest → embed → store → retrieve. note2json inside."
+requires-python = ">=3.10"
+dependencies = [
+  "typer>=0.12",
+  "rich>=13",
+  "pydantic>=2",
+  "qdrant-client>=1.8",
+  "psycopg[binary]>=3.2",
+  "uvloop; platform_system != 'Windows'",
+]
+
+[project.scripts]
+jsonify2ai = "jsonify2ai.cli:app"
