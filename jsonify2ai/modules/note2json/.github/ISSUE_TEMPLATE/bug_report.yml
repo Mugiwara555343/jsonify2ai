@@ -1,0 +1,28 @@
+name: Bug report
+description: Create a report to help us improve
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect to happen, and what actually happened?
+      placeholder: Clear steps to reproduce + expected vs actual
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: note-to-json version
+      placeholder: e.g., 0.2.0
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Minimal files/commands to reproduce the bug
+      render: shell
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output / logs
+      render: shell
