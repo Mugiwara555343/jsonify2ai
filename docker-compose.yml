@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "${PORT_API:-8080}:8080"
+    environment:
+      - POSTGRES_DSN=${POSTGRES_DSN}
+      - QDRANT_URL=${QDRANT_URL}
+      - OLLAMA_URL=${OLLAMA_URL}
+    networks:
+      - default
+
+  worker:
+    build: ./worker
+    ports:
+      - "${PORT_WORKER:-8090}:8090"
+    environment:
+      - POSTGRES_DSN=${POSTGRES_DSN}
+      - QDRANT_URL=${QDRANT_URL}
+      - OLLAMA_URL=${OLLAMA_URL}
+      - PORT_WORKER=${PORT_WORKER:-8090}
+    networks:
+      - default
+
+  web:
+    build: ./web
+    ports:
+      - "${PORT_WEB:-5173}:5173"
+    environment:
+      - PORT_WEB=${PORT_WEB:-5173}
+    networks:
+      - default
+
+networks:
+  default:
+    driver: bridge
