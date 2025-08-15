@@ -4,11 +4,12 @@ services:
   api:
     build: ./api
     ports:
-      - "${PORT_API:-8080}:8080"
+      - "${PORT_API:-8082}:8082"
     environment:
       - POSTGRES_DSN=${POSTGRES_DSN}
       - QDRANT_URL=${QDRANT_URL}
       - OLLAMA_URL=${OLLAMA_URL}
+      - WORKER_BASE=http://worker:8090
     networks:
       - default
 
