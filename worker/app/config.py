@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     EMBEDDING_DIM: int = 768
     CHUNK_SIZE: int = 800
     CHUNK_OVERLAP: int = 100
+    DEBUG_CONFIG: str = "0"
 
     class Config:
         env_file = ".env"

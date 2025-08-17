@@ -6,7 +6,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from ..services.chunker import chunk_text
 from ..services.embed_ollama import embed_texts
-from ..services.qdrant_client import get_qdrant_client, ensure_collection, upsert_points
+from ..services.qdrant_client import get_qdrant_client, upsert_points
+from ..services.qdrant_minimal import ensure_collection_minimal
 from ..config import settings
 
 router = APIRouter()
@@ -66,17 +67,40 @@ async def process_text(request: ProcessTextRequest):
             raise HTTPException(status_code=400, detail="No chunks generated")
         
         # Generate embeddings
-        embeddings = embed_texts(chunks, settings.EMBEDDINGS_MODEL, settings.OLLAMA_URL)
-        
-        if len(embeddings) != len(chunks):
-            raise HTTPException(status_code=500, detail="Embedding count mismatch")
+        try:
+            embeddings = embed_texts(chunks, settings.EMBEDDINGS_MODEL, settings.OLLAMA_URL, settings.EMBEDDING_DIM)
+            
+            if len(embeddings) != len(chunks):
+                raise ValueError("Embedding count mismatch")
+                
+        except ValueError as e:
+            # Return 502 for embedding errors
+            return ProcessTextResponse(
+                ok=False,
+                document_id=request.document_id,
+                chunks=len(chunks),
+                embedded=0,
+                upserted=0,
+                collection=settings.QDRANT_COLLECTION,
+                error=f"Embedding error: {str(e)}"
+            )
         
         # Prepare Qdrant data
         qdrant_client = get_qdrant_client()
         collection_name = settings.QDRANT_COLLECTION
         
-        # Ensure collection exists with correct dimensions
-        ensure_collection(qdrant_client, collection_name, settings.EMBEDDING_DIM)
+        # Ensure collection exists with correct dimensions using minimal helper
+        success, error_msg = ensure_collection_minimal(collection_name, settings.EMBEDDING_DIM)
+        if not success:
+            return ProcessTextResponse(
+                ok=False,
+                document_id=request.document_id,
+                chunks=len(chunks),
+                embedded=len(embeddings),
+                upserted=0,
+                collection=collection_name,
+                error=f"Collection error: {error_msg}"
+            )
         
         # Prepare payloads and IDs
         payloads = []

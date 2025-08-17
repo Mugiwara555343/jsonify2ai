@@ -74,6 +74,7 @@ The endpoint accepts text content (either raw text or file path) and:
 | `EMBEDDING_DIM` | `768` | Vector dimension size |
 | `CHUNK_SIZE` | `800` | Maximum chunk size in characters |
 | `CHUNK_OVERLAP` | `100` | Overlap between chunks |
+| `EMBED_DEV_MODE` | `0` | Enable dev mode for deterministic dummy embeddings |
 
 ### Usage Examples
 
@@ -98,6 +99,66 @@ The system automatically creates collections if they don't exist, but **never re
 - Change the embedding model to match the existing collection
 
 This prevents data loss and ensures vector compatibility.
+
+### Dev Mode for Embeddings
+
+Set `EMBED_DEV_MODE=1` in your `.env` file to bypass Ollama and generate deterministic dummy embeddings. This is useful for local smoke tests when Ollama isn't running.
+
+**Example `.env` configuration:**
+```bash
+EMBED_DEV_MODE=1
+EMBEDDING_DIM=768
+DEBUG_CONFIG=1
+```
+
+**Note:** The API `/upload` endpoint now returns HTTP 502 (Bad Gateway) if the worker service fails during processing.
+
+### Dev Mode Verification
+
+To verify that dev mode is working correctly:
+
+1. **Set `.env` configuration:**
+   ```bash
+   EMBED_DEV_MODE=1
+   EMBEDDING_DIM=768
+   DEBUG_CONFIG=1
+   ```
+
+2. **Rebuild & restart only the worker:**
+   ```bash
+   docker compose build worker
+   docker compose up -d worker
+   ```
+
+3. **Verify environment variables inside the container:**
+   - **Linux/mac:**
+     ```bash
+     docker compose exec worker env | grep EMBED
+     ```
+   - **PowerShell:**
+     ```powershell
+     docker compose exec worker cmd /c set | findstr EMBED
+     ```
+
+4. **Check the debug endpoint:**
+   ```bash
+   GET http://localhost:${PORT_WORKER:-8090}/debug/config
+   ```
+   
+   Expected response with `dev_mode: "1"` and `dim: 768`:
+   ```json
+   {
+     "model": "nomic-embed-text",
+     "dim": 768,
+     "dev_mode": "1",
+     "qdrant_url": "http://host.docker.internal:6333",
+     "ollama_url": "http://host.docker.internal:11434",
+     "collection": "jsonify2ai_chunks",
+     "chunk_size": 800,
+     "chunk_overlap": 100,
+     "debug_enabled": true
+   }
+   ```
 
 ### CI Status
 

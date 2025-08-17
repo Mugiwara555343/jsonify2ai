@@ -29,12 +29,12 @@ type WorkerResponse struct {
 }
 
 type UploadResponse struct {
-	Ok           bool           `json:"ok"`
-	DocumentID   string         `json:"document_id"`
-	Filename     string         `json:"filename"`
-	Size         int64          `json:"size"`
-	Mime         string         `json:"mime"`
-	Worker       WorkerResponse `json:"worker"`
+	Ok         bool           `json:"ok"`
+	DocumentID string         `json:"document_id"`
+	Filename   string         `json:"filename"`
+	Size       int64          `json:"size"`
+	Mime       string         `json:"mime"`
+	Worker     WorkerResponse `json:"worker"`
 }
 
 func UploadHandler(c *gin.Context) {
@@ -119,6 +119,16 @@ func UploadHandler(c *gin.Context) {
 		return
 	}
 
+	// Check if worker returned ok=false
+	if !workerResp.Ok {
+		c.JSON(http.StatusBadGateway, gin.H{
+			"ok":     false,
+			"error":  fmt.Sprintf("Worker processing failed: %s", workerResp.Error),
+			"worker": workerResp,
+		})
+		return
+	}
+
 	// Build response
 	response := UploadResponse{
 		Ok:         true,
@@ -159,7 +169,7 @@ func callWorkerService(url string, payload map[string]interface{}) (*WorkerRespo
 
 func detectMimeType(filename string, content []byte) string {
 	ext := strings.ToLower(filepath.Ext(filename))
-	
+
 	switch ext {
 	case ".txt":
 		return "text/plain"
