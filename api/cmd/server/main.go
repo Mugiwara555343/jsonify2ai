@@ -2,29 +2,26 @@ package main
 
 import (
 	"log"
-	"os"
 
+	"github.com/Mugiwara555343/jsonify2ai/api/internal/config"
 	"github.com/Mugiwara555343/jsonify2ai/api/internal/http"
 )
 
 func main() {
-	// Read environment variables
-	postgresDSN := os.Getenv("POSTGRES_DSN")
-	qdrantURL := os.Getenv("QDRANT_URL")
-	ollamaURL := os.Getenv("OLLAMA_URL")
-	workerBase := os.Getenv("WORKER_BASE")
-	if workerBase == "" {
-		workerBase = "http://worker:8090"
-	}
+	// Load configuration
+	cfg := config.Load()
 
 	log.Printf("Starting API server with:")
-	log.Printf("  POSTGRES_DSN: %s", postgresDSN)
-	log.Printf("  QDRANT_URL: %s", qdrantURL)
-	log.Printf("  OLLAMA_URL: %s", ollamaURL)
-	log.Printf("  WORKER_BASE: %s", workerBase)
+	log.Printf("  POSTGRES_DSN: %s", cfg.PostgresDSN)
+	log.Printf("  QDRANT_URL: %s", cfg.QdrantURL)
+	log.Printf("  OLLAMA_URL: %s", cfg.OllamaURL)
+	log.Printf("  WORKER_BASE: %s", cfg.WorkerBase)
+	log.Printf("  QDRANT_COLLECTION: %s", cfg.QdrantCollection)
+	log.Printf("  EMBEDDINGS_MODEL: %s", cfg.EmbeddingsModel)
+	log.Printf("  SEARCH_TOPK: %d", cfg.SearchTopK)
 
 	// Setup router
-	r := http.SetupRouter()
+	r := http.SetupRouter(cfg)
 
 	// Start server
 	if err := r.Run(":8082"); err != nil {

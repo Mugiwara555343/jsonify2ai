@@ -1,0 +1,11 @@
+﻿# Editor/runtime state
+.continue/
+.venv/
+__pycache__/
+
+# Local scan outputs
+project.map.json
+images.candidates.json
+
+# Env files
+.env
