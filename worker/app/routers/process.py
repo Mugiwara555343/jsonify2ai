@@ -15,21 +15,31 @@ Important updates in this file:
 
 from __future__ import annotations
 
+# -------- stdlib
 import hashlib
 import os
 from pathlib import Path
 from typing import List, Optional
 
+# -------- fastapi/pydantic
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from uuid import UUID, uuid5  # --- NEW: for deterministic UUID point IDs
+from uuid import uuid4, UUID  # --- NEW: for deterministic UUID point IDs
 
-# ---------- TEXT pipeline imports (existing) ----------
+# -------- TEXT pipeline imports (existing)
 from ..services.chunker import chunk_text
 from ..services.embed_ollama import embed_texts
 from ..services.qdrant_client import get_qdrant_client, upsert_points  # text path uses helper
+
+# -------- IMAGE: direct qdrant structs
+from qdrant_client.models import PointStruct
+
+# -------- IMAGE helpers (minimal create & dim safety)
 from ..services.qdrant_minimal import ensure_collection_minimal
+
+# -------- config (env/settings)
 from ..config import settings
+
 
 # ---------- IMAGE: direct Qdrant structs ----------
 from qdrant_client.models import PointStruct
