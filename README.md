@@ -1,12 +1,12 @@
 # jsonify2ai
 
-Ingest → embed → store → retrieve. Ships with `note2json` as a module.
+Ingest → embed → store → retrieve. Ships with [`not2json`](https://github.com/Mugiwara555343/note-to-json-demo) as a module.
 
 ![CI](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml/badge.svg)
 
 ## Description
 
-jsonify2ai is a comprehensive AI data pipeline that processes, normalizes, embeds, and stores various types of content for intelligent retrieval and question answering. It includes the powerful `note2json` module for converting markdown and text files to structured JSON.
+jsonify2ai is a comprehensive AI data pipeline that processes, normalizes, embeds, and stores various types of content for intelligent retrieval and question answering. It includes the powerful [`not2json`](https://github.com/Mugiwara555343/note-to-json-demo) module for converting markdown and text files to structured JSON.
 
 ## Installation
 
