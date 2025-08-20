@@ -1,4 +1,4 @@
-name: CI
+name: CI / test-worker
 
 on:
   push:
@@ -6,9 +6,17 @@ on:
   pull_request:
     branches: [ main ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   test-worker:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
@@ -16,6 +24,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      # Speed up installs between runs
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('worker/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
       - name: Install deps (worker-only)
         run: |
@@ -26,6 +43,7 @@ jobs:
         env:
           PYTHONPATH: worker
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+          # Worker config for unit tests (no live services required)
           OLLAMA_URL: http://host.docker.internal:11434
           QDRANT_URL: http://host.docker.internal:6333
           QDRANT_COLLECTION: jsonify2ai_chunks
@@ -33,4 +51,5 @@ jobs:
           EMBEDDING_DIM: "768"
           CHUNK_SIZE: "800"
           CHUNK_OVERLAP: "100"
+          DEBUG_CONFIG: "1"
         run: python -m pytest --rootdir=./ -q worker/tests
