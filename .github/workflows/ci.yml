@@ -17,17 +17,20 @@ jobs:
           python-version: '3.11'
 
       - run: python -m pip install --upgrade pip
-      - run: pip install -e .[dev] || pip install -e .
 
-      - name: Run tests
+      # ✨ install only what the worker tests need (no editable install of repo root)
+      - name: Install test deps
+        run: |
+          pip install pytest pydantic-settings python-dotenv qdrant-client httpx requests
+
+      - name: Run worker tests
         env:
           PYTHONPATH: worker
-          SERVICES_UP: "0"
-          EMBED_DEV_MODE: "1"
+          OLLAMA_URL: http://host.docker.internal:11434
+          QDRANT_URL: http://host.docker.internal:6333
+          QDRANT_COLLECTION: jsonify2ai_chunks
+          EMBEDDINGS_MODEL: nomic-embed-text
           EMBEDDING_DIM: "768"
-          OLLAMA_URL: "http://host.docker.internal:11434"
-          QDRANT_URL: "http://host.docker.internal:6333"
-          QDRANT_COLLECTION: "jsonify2ai_chunks"
           CHUNK_SIZE: "800"
-          CHUNK_OVERLAP: "100"        
-        run: pytest -q worker/tests
+          CHUNK_OVERLAP: "100"
+        run: python -m pytest -q worker/tests
