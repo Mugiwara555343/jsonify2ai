@@ -21,6 +21,13 @@ jobs:
 
       - name: Run tests
         env:
-          PYTHONPATH: worker        # <- makes `app/` importable
-          SERVICES_UP: "0"          # <- keep integration deps off in CI
+          PYTHONPATH: worker
+          SERVICES_UP: "0"
+          EMBED_DEV_MODE: "1"
+          EMBEDDING_DIM: "768"
+          OLLAMA_URL: "http://host.docker.internal:11434"
+          QDRANT_URL: "http://host.docker.internal:6333"
+          QDRANT_COLLECTION: "jsonify2ai_chunks"
+          CHUNK_SIZE: "800"
+          CHUNK_OVERLAP: "100"        
         run: pytest -q worker/tests
