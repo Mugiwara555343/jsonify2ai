@@ -2,7 +2,7 @@
 
 Ingest → embed → store → retrieve. Ships with [`not2json`](https://github.com/Mugiwara555343/note-to-json-demo) as a module.
 
-![CI](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml/badge.svg)
+[![CI](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml)
 
 ## Description
 
