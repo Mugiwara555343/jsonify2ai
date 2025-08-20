@@ -9,3 +9,6 @@ images.candidates.json
 
 # Env files
 .env
+
+__pycache__/
+*.pyc
