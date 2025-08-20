@@ -1,4 +1,3 @@
-feat/audio-stt
 # worker/tests/test_parse_audio_unit.py
 import os
 from app.services.parse_audio import transcribe_audio
@@ -11,7 +10,3 @@ def test_transcribe_audio_dev(tmp_path, monkeypatch):
     out = transcribe_audio(str(p))
     assert "transcript" in out.lower()
     assert "a.wav" in out
-=======
-import pytest
-pytestmark = pytest.mark.skip("Audio STT requires models; run locally with AUDIO_DEV_MODE=1")
-main
