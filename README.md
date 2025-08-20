@@ -1,5 +1,7 @@
 # jsonify2ai
 
+[![CI / test-worker](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml)
+
 Ingest → embed → store → retrieve. Ships with [`not2json`](https://github.com/Mugiwara555343/note-to-json-demo) as a module.
 
 ## Description
