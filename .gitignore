@@ -1,14 +1,43 @@
-﻿# Editor/runtime state
+﻿# Editor/runtime
+.vscode/
+.idea/
 .continue/
 .venv/
 __pycache__/
+.pytest_cache/
+*.pyc
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Env / secrets
+.env
+.env.*
+
+# Web/node
+web/node_modules/
+web/.vite/
+web/dist/
+
+# Build/coverage
+dist/
+build/
+.coverage
+coverage.xml
+
+# Docker volumes / model caches
+data/qdrant/
+data/ollama/
+
+# App data: keep folders via .gitkeep
+data/dropzone/*
+!data/dropzone/.gitkeep
+data/exports/*
+!data/exports/.gitkeep
+data/documents/*
+!data/documents/.gitkeep
 
 # Local scan outputs
 project.map.json
 images.candidates.json
-
-# Env files
-.env
-
-__pycache__/
-*.pyc
