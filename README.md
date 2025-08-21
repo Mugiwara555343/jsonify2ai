@@ -44,7 +44,7 @@ PYTHONPATH=worker python scripts/ingest_dropzone.py \
 ```
 
 ### 5) Ask your data (two modes)
-=======
+
 ---
 
 ## What’s in this repo
@@ -197,7 +197,6 @@ These make the pipeline fully offline and fast for demos/tests.
 
 `worker/app/config.py` loads `.env` from repo root. Defaults are safe for local dev:
 
-=======
 # 0) venv (Windows Git Bash shown; use your shell equivalents)
 python -m venv .venv && source .venv/Scripts/activate
 
