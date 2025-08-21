@@ -1,11 +1,12 @@
-from pypdf import PdfReader
-
 def extract_text_from_pdf(path: str) -> str:
+    try:
+        from pypdf import PdfReader
+    except Exception as e:
+        raise RuntimeError("pypdf is required to parse PDF files. Install with: pip install pypdf") from e
     reader = PdfReader(path)
-    chunks = []
+    out = []
     for page in reader.pages:
-        text = page.extract_text() or ""
-        text = text.strip()
+        text = (page.extract_text() or "").strip()
         if text:
-            chunks.append(text)
-    return "\n".join(chunks)
+            out.append(text)
+    return "\n".join(out)
