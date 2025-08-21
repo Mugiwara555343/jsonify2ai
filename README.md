@@ -3,12 +3,33 @@
 [![CI / test-worker](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml)
 
 Local-first “throw anything at it” memory pipeline: **drop files → extract text → chunk → embed → Qdrant → search/ask.**  
-Small, CPU-friendly, and opt‑in for heavy features.
+_Local‑first "throw‑anything‑at‑it" memory pipeline._
+
+
+**Problem:** Private, offline capture of messy files (txt/md/pdf/docx/csv/audio) into **structured JSON + searchable embeddings** without heavy frameworks.
+
+**Solution:** Drop files → extract → chunk → embed → Qdrant → search/ask. CPU‑friendly defaults; heavy bits optional.
+
+### Why jsonify2ai (30s)
+- **Local‑first:** no cloud calls; works offline.
+- **CPU‑friendly:** dev stubs + tiny models.
+- **Simple ingest:** a drop‑zone and one command.
+- **Small surface area:** no chains/agents to learn.
+- **Extensible:** add parsers; keep the pipeline.
+
+> Need orchestration frameworks? Use LangChain/LlamaIndex.  
+> Want files → JSON + vectors today? Use **jsonify2ai**.
+
+=======
 
 
 ## Quick Start (5-minute local demo)
 
 > Works on plain CPU. No Docker required for the demo.
+
+> Want concrete examples? See **Demo Recipes** near the bottom.
+
+
 
 ### 1) Setup
 ```bash
@@ -367,6 +388,31 @@ echo "hello from jsonify2ai" > data/dropzone/sample.txt
 export EMBED_DEV_MODE=1 AUDIO_DEV_MODE=1 PYTHONPATH=worker
 python scripts/ingest_dropzone.py --dir data/dropzone --export data/exports/ingest.jsonl
 ```
+
+---
+
+## Demo Recipes (quick copy-paste)
+
+### Resume Q&A (txt/pdf/docx)
+```bash
+mkdir -p data/dropzone data/exports
+# drop resume.pdf into data/dropzone first
+export EMBED_DEV_MODE=1 AUDIO_DEV_MODE=1 PYTHONPATH=worker
+python scripts/ingest_dropzone.py --dir data/dropzone --export data/exports/resume.jsonl
+python examples/ask_local.py --q "What roles does this resume target?" --k 6 --show-sources
+```
+
+### CSV snapshot (structured)
+```bash
+mkdir -p data/dropzone data/exports
+printf "name,dept,salary\nalice,eng,140000\nbob,ops,90000\n" > data/dropzone/pay.csv
+export EMBED_DEV_MODE=1 PYTHONPATH=worker
+python scripts/ingest_dropzone.py --dir data/dropzone --export data/exports/csv.jsonl
+python examples/ask_local.py --q "Which departments and salaries are present?" --k 6 --show-sources
+```
+
+**Linux/macOS:** `chmod +x examples/demo_*.sh && ./examples/demo_resume.sh`  
+**Windows:** `.\examples\demo_resume.ps1`
 
 ---
 
