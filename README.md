@@ -5,6 +5,46 @@
 Local-first “throw anything at it” memory pipeline: **drop files → extract text → chunk → embed → Qdrant → search/ask.**  
 Small, CPU-friendly, and opt‑in for heavy features.
 
+
+## Quick Start (5-minute local demo)
+
+> Works on plain CPU. No Docker required for the demo.
+
+### 1) Setup
+```bash
+# 1) create/activate venv
+python -m venv .venv && source .venv/Scripts/activate || source .venv/bin/activate
+
+# 2) install jsonify2ai in editable mode + worker extras
+pip install -e . -r worker/requirements.all.txt
+```
+
+### 2) Point to Qdrant
+**Use an existing Qdrant (fastest):**
+```bash
+export QDRANT_URL=http://localhost:6333  # or your external Qdrant
+```
+
+**Or run via Docker:**
+```bash
+docker compose up -d qdrant
+```
+
+### 3) Dev modes (no Ollama required)
+```bash
+export EMBED_DEV_MODE=1    # deterministic dummy embeddings
+export AUDIO_DEV_MODE=1    # faster-whisper stub
+```
+
+### 4) Ingest a folder (drop-zone)
+```bash
+# Drop files into data/dropzone/ then:
+PYTHONPATH=worker python scripts/ingest_dropzone.py \
+  --dir data/dropzone --export data/exports/ingest.jsonl
+```
+
+### 5) Ask your data (two modes)
+=======
 ---
 
 ## What’s in this repo
@@ -35,7 +75,129 @@ docs/         # Docs & runbooks (optional)
 
 ## Quickstart (2 minutes)
 
+
+**Retrieval-only (no LLM):**
 ```bash
+python examples/ask_local.py --q "what's in the pdf?" --k 6 --show-sources
+```
+
+**LLM-mode (optional, needs Ollama):**
+```bash
+python examples/ask_local.py --q "summarize the resume" --llm --model llama3.1 --k 6 --show-sources
+```
+
+### 6) Guided "Control Panel"
+If you prefer an interactive guide that sets env, ingests, and queries:
+```bash
+python examples/control_panel.py --help
+```
+
+---
+
+## What’s in this repo
+
+- **Drop‑Zone ingest**: batch a folder of mixed files into JSONL + Qdrant.
+- **Parsers** (all CPU; heavy ones are optional):
+  - Built-in: **Text/Markdown**, **CSV/TSV**, **JSON**, **JSONL**
+  - Optional: **DOCX** (`python-docx`), **PDF** (`pypdf`), **Audio** via faster‑whisper (CPU)
+- **Dev-mode toggles** to avoid heavy installs while developing.
+- **Worker tests** with lean CI; optional features auto‑skip if deps are missing.
+
+### Monorepo layout
+
+```
+api/          # Go (upload/search/ask) - WIP
+worker/       # FastAPI worker + services/parsers + tests
+web/          # React (upload/search/ask) - WIP
+scripts/      # Utilities (ingest_dropzone.py)
+data/         # Local data (dropzone, exports, documents)
+docs/         # Docs & runbooks (optional)
+```
+
+---
+
+## Quickstart (2 minutes)
+
+```bash
+# 0) create & activate a venv (Windows Git Bash shown; use your favorite shell)
+python -m venv .venv && source .venv/Scripts/activate
+
+# 1) minimal deps (tiny install)
+pip install -r worker/requirements.txt
+
+# 2) start Qdrant locally
+docker compose up -d qdrant
+
+# 3) prep folders
+mkdir -p data/dropzone data/exports
+
+# 4) dev-modes so no heavy models are needed
+export EMBED_DEV_MODE=1
+export AUDIO_DEV_MODE=1
+
+# 5) drop files into data/dropzone (txt, md, csv, json, jsonl, docx, pdf, wav/mp3…)
+# 6) ingest → Qdrant + JSONL
+PYTHONPATH=worker python scripts/ingest_dropzone.py \
+  --dir data/dropzone --export data/exports/ingest.jsonl
+```
+
+**Windows PowerShell**
+
+```powershell
+python -m venv .venv; .\.venv\Scripts\Activate.ps1
+pip install -r worker\requirements.txt
+docker compose up -d qdrant
+mkdir data\dropzone, data\exports
+$env:EMBED_DEV_MODE="1"; $env:AUDIO_DEV_MODE="1"
+$env:PYTHONPATH="worker"; python scripts\ingest_dropzone.py --dir data\dropzone --export data\exports\ingest.jsonl
+```
+
+### One‑stop “Control Panel”
+
+Run common tasks without remembering flags:
+
+```bash
+python examples/control_panel.py ingest --dir data/dropzone --export data/exports/ingest.jsonl
+python examples/control_panel.py ask --q "what's in the pdf?" --k 6 --show-sources
+python examples/control_panel.py ask --q "summarize the resume" --llm --model llama3.1 --k 6 --show-sources
+python examples/control_panel.py peek
+python examples/control_panel.py reset --rename
+```
+
+---
+
+## What gets parsed?
+
+| Type     | Extensions                                  | Extra install (optional)                                  | If missing…           |
+|----------|---------------------------------------------|------------------------------------------------------------|-----------------------|
+| Text     | `.txt`, `.md`                               | —                                                          | read as UTF‑8 text    |
+| CSV/TSV  | `.csv`, `.tsv`                              | —                                                          | parsed via `csv`      |
+| JSON     | `.json`                                     | —                                                          | flattened key paths   |
+| JSONL    | `.jsonl`                                    | —                                                          | per-line flattened    |
+| DOCX     | `.docx`                                     | `pip install -r worker/requirements.docx.txt`              | skipped with message  |
+| PDF      | `.pdf`                                      | `pip install -r worker/requirements.pdf.txt`               | skipped with message  |
+| Audio    | `.wav`, `.mp3`, `.m4a`, `.flac`, `.ogg`     | `pip install -r worker/requirements.audio.txt` + ffmpeg    | dev‑mode stub or CPU STT |
+
+> Images are ignored in batch ingest (captioning will come later).
+
+All optional parsers are **lazy‑imported**. If an optional dependency isn’t installed, ingest **won’t crash**: the file is skipped with a clear note unless you pass `--strict`.
+
+---
+
+## Dev‑mode toggles (no heavy installs required)
+
+- `EMBED_DEV_MODE=1` → deterministic stub vectors (no Ollama/embeddings).  
+- `AUDIO_DEV_MODE=1` → quick “\[DEV] transcript of file.ext” (no faster‑whisper/ffmpeg).
+
+These make the pipeline fully offline and fast for demos/tests.
+
+---
+
+## Configuration
+
+`worker/app/config.py` loads `.env` from repo root. Defaults are safe for local dev:
+
+=======
 # 0) venv (Windows Git Bash shown; use your shell equivalents)
 python -m venv .venv && source .venv/Scripts/activate
 
@@ -105,6 +267,7 @@ These make the pipeline fully offline and fast for demos/tests.
 ## Configuration
 
 `worker/app/config.py` loads `.env` from repo root. Defaults are safe for local dev:
+
 
 ```env
 # Qdrant and Embeddings
