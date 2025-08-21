@@ -16,6 +16,10 @@ Small, CPU-friendly, and opt‑in for heavy features.
 - **Dev-mode toggles** to avoid heavy installs while developing.
 - **Worker tests** with lean CI; optional features auto‑skip if deps are missing.
 
+ ## [User drops file] → [Parser auto-detects type] → [Embeds text/audio] → [JSONL + Qdrant]  
+
+
+
 ### Monorepo layout
 
 ```
