@@ -5,6 +5,61 @@
 Local-first “throw anything at it” memory pipeline: **drop files → extract text → chunk → embed → Qdrant → search/ask.**  
 Small, CPU-friendly, and opt‑in for heavy features.
 
+## Quick Start (5-minute local demo)
+
+> Works on plain CPU. No Docker required for the demo.
+
+### 1) Setup
+```bash
+# 1) create/activate venv
+python -m venv .venv && source .venv/Scripts/activate || source .venv/bin/activate
+
+# 2) install jsonify2ai in editable mode + worker extras
+pip install -e . -r worker/requirements.all.txt
+```
+
+### 2) Point to Qdrant
+**Use an existing Qdrant (fastest):**
+```bash
+export QDRANT_URL=http://localhost:6333  # or your external Qdrant
+```
+
+**Or run via Docker:**
+```bash
+docker compose up -d qdrant
+```
+
+### 3) Dev modes (no Ollama required)
+```bash
+export EMBED_DEV_MODE=1    # deterministic dummy embeddings
+export AUDIO_DEV_MODE=1    # faster-whisper stub
+```
+
+### 4) Ingest a folder (drop-zone)
+```bash
+# Drop files into data/dropzone/ then:
+PYTHONPATH=worker python scripts/ingest_dropzone.py \
+  --dir data/dropzone --export data/exports/ingest.jsonl
+```
+
+### 5) Ask your data (two modes)
+
+**Retrieval-only (no LLM):**
+```bash
+python examples/ask_local.py --q "what's in the pdf?" --k 6 --show-sources
+```
+
+**LLM-mode (optional, needs Ollama):**
+```bash
+python examples/ask_local.py --q "summarize the resume" --llm --model llama3.1 --k 6 --show-sources
+```
+
+### 6) Guided "Control Panel"
+If you prefer an interactive guide that sets env, ingests, and queries:
+```bash
+python examples/control_panel.py --help
+```
+
 ---
 
 ## What’s in this repo
@@ -63,6 +118,18 @@ docker compose up -d qdrant
 mkdir data\dropzone, data\exports
 $env:EMBED_DEV_MODE="1"; $env:AUDIO_DEV_MODE="1"
 $env:PYTHONPATH="worker"; python scripts\ingest_dropzone.py --dir data\dropzone --export data\exports\ingest.jsonl
+```
+
+### One‑stop “Control Panel”
+
+Run common tasks without remembering flags:
+
+```bash
+python examples/control_panel.py ingest --dir data/dropzone --export data/exports/ingest.jsonl
+python examples/control_panel.py ask --q "what's in the pdf?" --k 6 --show-sources
+python examples/control_panel.py ask --q "summarize the resume" --llm --model llama3.1 --k 6 --show-sources
+python examples/control_panel.py peek
+python examples/control_panel.py reset --rename
 ```
 
 ---
