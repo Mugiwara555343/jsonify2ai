@@ -1,7 +1,7 @@
 # jsonify2ai
 ![CI / test-worker](https://img.shields.io/badge/CI%20%2F%20test--worker-passing-brightgreen)
 
-Local-first "throw anything at it" memory pipeline: drop files → extract text → chunk → embed → Qdrant → search/ask.
+Local-first "throw anything at it" memory pipeline: **drop files → extract text → chunk → embed → Qdrant → search/ask.**
 
 **Problem:** Private, offline capture of messy files (txt/md/pdf/docx/csv/audio) into **structured JSON + searchable embeddings** without heavy frameworks.
 
@@ -21,10 +21,6 @@ Local-first "throw anything at it" memory pipeline: drop files → extract text 
 
 > Works on plain CPU. No Docker required for the demo.
 > Want concrete examples? See **Demo Recipes** near the bottom.
-
-> Want concrete examples? See **Demo Recipes** near the bottom.
-
-
 
 ### 1) Setup
 ```bash
@@ -129,7 +125,7 @@ PYTHONPATH=worker python scripts/ingest_dropzone.py \
 **Windows PowerShell**
 
 ```powershell
-python -m venv .venv; .\.venv\Scripts\Activate.ps1
+python -m venv .venv; .\.\.venv\Scripts\Activate.ps1
 pip install -r worker\requirements.txt
 docker compose up -d qdrant
 mkdir data\dropzone, data\exports
