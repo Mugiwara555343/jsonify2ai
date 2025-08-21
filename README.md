@@ -2,224 +2,207 @@
 
 [![CI / test-worker](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml)
 
-Ingest → embed → store → retrieve. Ships with [`not2json`](https://github.com/Mugiwara555343/note-to-json-demo) as a module.
+Local-first “throw anything at it” memory pipeline: **drop files → extract text → chunk → embed → Qdrant → search/ask.**  
+Small, CPU-friendly, and opt‑in for heavy features.
 
-## Description
+---
 
-jsonify2ai is a comprehensive AI data pipeline that processes, normalizes, embeds, and stores various types of content for intelligent retrieval and question answering. It includes the powerful [`not2json`](https://github.com/Mugiwara555343/note-to-json-demo) module for converting markdown and text files to structured JSON.
+## What’s in this repo
 
-## Installation
+- **Drop‑Zone ingest**: batch a folder of mixed files into JSONL + Qdrant.
+- **Parsers** (all CPU; heavy ones are optional):
+  - Built-in: **Text/Markdown**, **CSV/TSV**, **JSON**, **JSONL**
+  - Optional: **DOCX** (`python-docx`), **PDF** (`pypdf`), **Audio** via faster‑whisper (CPU)
+- **Dev-mode toggles** to avoid heavy installs while developing.
+- **Worker tests** with lean CI; optional features auto‑skip if deps are missing.
 
-```bash
-pip install -e .
+### Monorepo layout
+
+```
+api/          # Go (upload/search/ask) - WIP
+worker/       # FastAPI worker + services/parsers + tests
+web/          # React (upload/search/ask) - WIP
+scripts/      # Utilities (ingest_dropzone.py)
+data/         # Local data (dropzone, exports, documents)
+docs/         # Docs & runbooks (optional)
 ```
 
-## Quickstart
+---
 
-### Convert markdown to JSON
-
-Convert a markdown file to structured JSON:
+## Quickstart (2 minutes)
 
 ```bash
-jsonify2ai note2json convert demo_entries/team_collaboration.md -o out.json --pretty
+# 0) create & activate a venv (Windows Git Bash shown; use your favorite shell)
+python -m venv .venv && source .venv/Scripts/activate
+
+# 1) minimal deps (tiny install)
+pip install -r worker/requirements.txt
+
+# 2) start Qdrant locally
+docker compose up -d qdrant
+
+# 3) prep folders
+mkdir -p data/dropzone data/exports
+
+# 4) dev-modes so no heavy models are needed
+export EMBED_DEV_MODE=1
+export AUDIO_DEV_MODE=1
+
+# 5) drop files into data/dropzone (txt, md, csv, json, jsonl, docx, pdf, wav/mp3…)
+# 6) ingest → Qdrant + JSONL
+PYTHONPATH=worker python scripts/ingest_dropzone.py \
+  --dir data/dropzone --export data/exports/ingest.jsonl
 ```
 
-### Index & Search
+**Windows PowerShell**
 
-Index a text file for semantic search:
-
-```bash
-jsonify2ai index-text -i README.md
-```
-
-Search for content:
-
-```bash
-jsonify2ai search -q "installation"
-```
-
-## Features
-
-- **note2json**: Convert markdown/text to structured JSON
-- **Vector Embeddings**: Generate embeddings using BAAI/bge-small
-- **Vector Storage**: Store and search using Qdrant
-- **Metadata Storage**: PostgreSQL integration for structured data
-- **Local LLM**: Ollama integration for question answering
-- **CLI Interface**: Easy-to-use command-line tools
-
-## Architecture
-
-See [docs/architecture.md](docs/architecture.md) for detailed system architecture and component descriptions.
-
-## Phase 1 – Text Pipeline
-
-The worker service now provides a complete text processing pipeline that chunks, embeds, and stores text content in Qdrant for semantic search.
-
-### What `/process/text` Does
-
-The endpoint accepts text content (either raw text or file path) and:
-1. **Chunks** the text using configurable size and overlap
-2. **Embeds** chunks using Ollama's embedding API
-3. **Stores** vectors in Qdrant with metadata
-4. **Returns** processing statistics and collection info
-
-### Configuration
-
-| Environment Variable | Default | Description |
-|---------------------|---------|-------------|
-| `OLLAMA_URL` | `http://host.docker.internal:11434` | Ollama service URL |
-| `QDRANT_URL` | `http://host.docker.internal:6333` | Qdrant vector database URL |
-| `QDRANT_COLLECTION` | `jsonify2ai_chunks` | Collection name for chunks |
-| `EMBEDDINGS_MODEL` | `nomic-embed-text` | Ollama model for embeddings |
-| `EMBEDDING_DIM` | `768` | Vector dimension size |
-| `CHUNK_SIZE` | `800` | Maximum chunk size in characters |
-| `CHUNK_OVERLAP` | `100` | Overlap between chunks |
-| `EMBED_DEV_MODE` | `0` | Enable dev mode for deterministic dummy embeddings |
-
-### Usage Examples
-
-#### PowerShell (curl.exe)
 ```powershell
-curl.exe -X POST "http://localhost:${PORT_WORKER:-8090}/process/text" `
-  -H "Content-Type: application/json" `
-  -d "{\"document_id\":\"00000000-0000-0000-0000-000000000000\",\"text\":\"hello world\"}"
+python -m venv .venv; .\.venv\Scripts\Activate.ps1
+pip install -r worker\requirements.txt
+docker compose up -d qdrant
+mkdir data\dropzone, data\exports
+$env:EMBED_DEV_MODE="1"; $env:AUDIO_DEV_MODE="1"
+$env:PYTHONPATH="worker"; python scripts\ingest_dropzone.py --dir data\dropzone --export data\exports\ingest.jsonl
 ```
 
-#### Bash
-```bash
-curl -X POST "http://localhost:${PORT_WORKER:-8090}/process/text" \
-  -H "Content-Type: application/json" \
-  -d '{"document_id":"00000000-0000-0000-0000-000000000000","text":"hello world"}'
-```
+---
 
-### Qdrant Collection Safety
+## What gets parsed?
 
-The system automatically creates collections if they don't exist, but **never recreates** existing ones. If a collection exists with different dimensions than expected, the system will raise a clear error asking you to either:
-- Use a different collection name, or
-- Change the embedding model to match the existing collection
+| Type     | Extensions                                  | Extra install (optional)                                  | If missing…           |
+|----------|---------------------------------------------|------------------------------------------------------------|-----------------------|
+| Text     | `.txt`, `.md`                               | —                                                          | read as UTF‑8 text    |
+| CSV/TSV  | `.csv`, `.tsv`                              | —                                                          | parsed via `csv`      |
+| JSON     | `.json`                                     | —                                                          | flattened key paths   |
+| JSONL    | `.jsonl`                                    | —                                                          | per-line flattened    |
+| DOCX     | `.docx`                                     | `pip install -r worker/requirements.docx.txt`              | skipped with message  |
+| PDF      | `.pdf`                                      | `pip install -r worker/requirements.pdf.txt`               | skipped with message  |
+| Audio    | `.wav`, `.mp3`, `.m4a`, `.flac`, `.ogg`     | `pip install -r worker/requirements.audio.txt` + ffmpeg    | dev‑mode stub or CPU STT |
 
-This prevents data loss and ensures vector compatibility.
+> Images are ignored in batch ingest (captioning will come later).
 
-### Dev Mode for Embeddings
+All optional parsers are **lazy‑imported**. If an optional dependency isn’t installed, ingest **won’t crash**: the file is skipped with a clear note unless you pass `--strict`.
 
-Set `EMBED_DEV_MODE=1` in your `.env` file to bypass Ollama and generate deterministic dummy embeddings. This is useful for local smoke tests when Ollama isn't running.
+---
 
-**Example `.env` configuration:**
-```bash
-EMBED_DEV_MODE=1
+## Dev‑mode toggles (no heavy installs required)
+
+- `EMBED_DEV_MODE=1` → deterministic stub vectors (no Ollama/embeddings).  
+- `AUDIO_DEV_MODE=1` → quick “\[DEV] transcript of file.ext” (no faster‑whisper/ffmpeg).
+
+These make the pipeline fully offline and fast for demos/tests.
+
+---
+
+## Configuration
+
+`worker/app/config.py` loads `.env` from repo root. Defaults are safe for local dev:
+
+```env
+# Qdrant and Embeddings
+OLLAMA_URL=http://host.docker.internal:11434
+QDRANT_URL=http://host.docker.internal:6333
+QDRANT_COLLECTION=jsonify2ai_chunks
+EMBEDDINGS_MODEL=nomic-embed-text
 EMBEDDING_DIM=768
-DEBUG_CONFIG=1
+CHUNK_SIZE=800
+CHUNK_OVERLAP=100
+
+# Dev toggles
+EMBED_DEV_MODE=0
+AUDIO_DEV_MODE=0
+STT_MODEL=tiny
+
+# Drop-zone defaults
+DROPZONE_DIR=data/dropzone
+EXPORT_JSONL=data/exports/ingest.jsonl
 ```
 
-**Note:** The API `/upload` endpoint now returns HTTP 502 (Bad Gateway) if the worker service fails during processing.
+---
 
-### Dev Mode Verification
+## Drop‑Zone ingest usage
 
-To verify that dev mode is working correctly:
+```bash
+# Standard run
+PYTHONPATH=worker python scripts/ingest_dropzone.py \
+  --dir data/dropzone --export data/exports/ingest.jsonl
 
-1. **Set `.env` configuration:**
-   ```bash
-   EMBED_DEV_MODE=1
-   EMBEDDING_DIM=768
-   DEBUG_CONFIG=1
-   ```
-
-2. **Rebuild & restart only the worker:**
-   ```bash
-   docker compose build worker
-   docker compose up -d worker
-   ```
-
-3. **Verify environment variables inside the container:**
-   - **Linux/mac:**
-     ```bash
-     docker compose exec worker env | grep EMBED
-     ```
-   - **PowerShell:**
-     ```powershell
-     docker compose exec worker cmd /c set | findstr EMBED
-     ```
-
-4. **Check the debug endpoint:**
-   ```bash
-   GET http://localhost:${PORT_WORKER:-8090}/debug/config
-   ```
-   
-   Expected response with `dev_mode: "1"` and `dim: 768`:
-   ```json
-   {
-     "model": "nomic-embed-text",
-     "dim": 768,
-     "dev_mode": "1",
-     "qdrant_url": "http://host.docker.internal:6333",
-     "ollama_url": "http://host.docker.internal:11434",
-     "collection": "jsonify2ai_chunks",
-     "chunk_size": 800,
-     "chunk_overlap": 100,
-     "debug_enabled": true
-   }
-   ```
-
-### CI Status
-
-Continuous Integration runs on both `master` and `main` branches, executing worker service tests with network calls disabled by default. Set `SERVICES_UP=1` to enable integration tests that require Ollama and Qdrant.
-
-## Phase 1.1 – Upload → Process
-
-The API service now provides a complete file upload and processing workflow that automatically wires uploaded text files to the worker service for chunking, embedding, and storage.
-
-### What `/upload` Does
-
-The endpoint accepts multipart file uploads and:
-1. **Saves** files to `./data/documents/<document_id>/<filename>`
-2. **Generates** unique UUID v4 document identifiers
-3. **Reads** file content as UTF-8 text (5MB limit)
-4. **Calls** worker service to process the text
-5. **Returns** comprehensive metadata and processing results
-
-### Usage Examples
-
-#### PowerShell (curl.exe)
-```powershell
-$env:PORT_API=8082
-curl.exe -F "file=@.\README.md" "http://localhost:$env:PORT_API/upload"
+# Fail on missing optional deps
+PYTHONPATH=worker python scripts/ingest_dropzone.py --strict
 ```
 
-### Response Format
+### JSONL export format
+
+Each chunk is one line in the export file:
 
 ```json
 {
-  "ok": true,
-  "document_id": "550e8400-e29b-41d4-a716-446655440000",
-  "filename": "README.md",
-  "size": 1529,
-  "mime": "text/markdown",
-  "worker": {
-    "ok": true,
-    "chunks": 2,
-    "embedded": 2,
-    "upserted": 2,
-    "collection": "jsonify2ai_chunks"
-  }
+  "id": "document_uuid:idx",
+  "document_id": "document_uuid",
+  "path": "data/dropzone/file.ext",
+  "idx": 0,
+  "text": "chunk text …",
+  "meta": { "source_ext": ".pdf" }
 }
 ```
 
-### File Storage
+---
 
-Uploaded files are automatically organized under:
-```
-./data/documents/
-├── <document_id_1>/
-│   └── <original_filename_1>
-├── <document_id_2>/
-│   └── <original_filename_2>
-└── ...
+## Tests & CI
+
+```bash
+PYTHONPATH=worker python -m pytest --rootdir=./ -q worker/tests
 ```
 
-### Error Handling
+CI runs the worker tests with a minimal dependency set, and optional parsers automatically skip if not installed. The build badge reflects the status of `main`.
 
-- **No file**: Returns 400 with error message
-- **File too large (>5MB)**: Returns 413 with error message
-- **Worker service failure**: Returns 502 with error details
-- **Invalid UTF-8**: Automatically coerced to valid UTF-8
+---
 
+## (Legacy) Text processing endpoints
+
+The worker previously shipped an HTTP pipeline (`/process/text`) to chunk, embed, and upsert text; that still exists for integration with the API service. The drop‑zone CLI uses the same internal chunking/embedding logic under the hood.
+
+---
+
+## Optional installs (one‑liners)
+
+```bash
+# base only (minimal)
+pip install -r worker/requirements.txt
+
+# enable PDF
+pip install -r worker/requirements.pdf.txt
+
+# enable DOCX
+pip install -r worker/requirements.docx.txt
+
+# enable Audio (CPU)
+pip install -r worker/requirements.audio.txt
+
+# everything (pdf + docx + audio)
+pip install -r worker/requirements.all.txt
+```
+
+> For real audio transcription, also install **ffmpeg**:  
+> Windows (Chocolatey): `choco install ffmpeg` • macOS (Homebrew): `brew install ffmpeg` • Debian/Ubuntu: `sudo apt-get install -y ffmpeg`
+
+---
+
+## One‑liner smoke test
+
+```bash
+mkdir -p data/dropzone data/exports
+printf "name,age\nalice,30\n" > data/dropzone/sample.csv
+echo "hello from jsonify2ai" > data/dropzone/sample.txt
+export EMBED_DEV_MODE=1 AUDIO_DEV_MODE=1 PYTHONPATH=worker
+python scripts/ingest_dropzone.py --dir data/dropzone --export data/exports/ingest.jsonl
+```
+
+---
+
+## Roadmap
+
+- Image captioning (BLIP/CLIP) → text → chunk/embed
+- Web UI for drop‑zone status & preview
+- Watch mode (auto‑ingest on file changes)
+- API/upload wiring to reuse the same `extract_text_auto` path
