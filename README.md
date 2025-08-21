@@ -5,6 +5,7 @@
 Local-first “throw anything at it” memory pipeline: **drop files → extract text → chunk → embed → Qdrant → search/ask.**  
 Small, CPU-friendly, and opt‑in for heavy features.
 
+
 ## Quick Start (5-minute local demo)
 
 > Works on plain CPU. No Docker required for the demo.
@@ -43,6 +44,37 @@ PYTHONPATH=worker python scripts/ingest_dropzone.py \
 ```
 
 ### 5) Ask your data (two modes)
+=======
+---
+
+## What’s in this repo
+
+- **Drop‑Zone ingest**: batch a folder of mixed files into JSONL + Qdrant.
+- **Parsers** (all CPU; heavy ones are optional):
+  - Built-in: **Text/Markdown**, **CSV/TSV**, **JSON**, **JSONL**
+  - Optional: **DOCX** (`python-docx`), **PDF** (`pypdf`), **Audio** via faster‑whisper (CPU)
+- **Dev-mode toggles** to avoid heavy installs while developing.
+- **Worker tests** with lean CI; optional features auto‑skip if deps are missing.
+
+ ## [User drops file] → [Parser auto-detects type] → [Embeds text/audio] → [JSONL + Qdrant]  
+
+
+
+### Monorepo layout
+
+```
+api/          # Go (upload/search/ask) - WIP
+worker/       # FastAPI worker + services/parsers + tests
+web/          # React (upload/search/ask) - WIP
+scripts/      # Utilities (ingest_dropzone.py)
+data/         # Local data (dropzone, exports, documents)
+docs/         # Docs & runbooks (optional)
+```
+
+---
+
+## Quickstart (2 minutes)
+
 
 **Retrieval-only (no LLM):**
 ```bash
@@ -164,6 +196,78 @@ These make the pipeline fully offline and fast for demos/tests.
 ## Configuration
 
 `worker/app/config.py` loads `.env` from repo root. Defaults are safe for local dev:
+
+=======
+# 0) venv (Windows Git Bash shown; use your shell equivalents)
+python -m venv .venv && source .venv/Scripts/activate
+
+# 1) tiny install (base worker deps only)
+pip install -r worker/requirements.txt
+
+# 2) bring up qdrant (compose includes a qdrant service)
+docker compose up -d qdrant
+
+# 3) create the folders you’ll touch
+mkdir -p data/dropzone data/exports
+
+# 4) go “fast demo mode” (no heavy models)
+export EMBED_DEV_MODE=1
+export AUDIO_DEV_MODE=1
+
+# 5) put a few files into the drop‑zone (txt/csv/json/pdf/docx/wav/mp3…)
+#    e.g.:
+printf "name,age\nalice,30\n" > data/dropzone/sample.csv
+echo "hello from jsonify2ai" > data/dropzone/sample.txt
+
+# 6) ingest ⇒ JSONL + Qdrant
+PYTHONPATH=worker python scripts/ingest_dropzone.py \
+  --dir data/dropzone --export data/exports/ingest.jsonl
+```
+
+**Windows PowerShell**
+
+```powershell
+python -m venv .venv; .\.venv\Scripts\Activate.ps1
+pip install -r worker\requirements.txt
+docker compose up -d qdrant
+mkdir data\dropzone, data\exports
+$env:EMBED_DEV_MODE="1"; $env:AUDIO_DEV_MODE="1"
+$env:PYTHONPATH="worker"; python scripts\ingest_dropzone.py --dir data\dropzone --export data\exports\ingest.jsonl
+```
+
+---
+
+## What gets parsed?
+
+| Type     | Extensions                                  | Extra install (optional)                                  | If missing…           |
+|----------|---------------------------------------------|------------------------------------------------------------|-----------------------|
+| Text     | `.txt`, `.md`                               | —                                                          | read as UTF‑8 text    |
+| CSV/TSV  | `.csv`, `.tsv`                              | —                                                          | parsed via `csv`      |
+| JSON     | `.json`                                     | —                                                          | flattened key paths   |
+| JSONL    | `.jsonl`                                    | —                                                          | per-line flattened    |
+| DOCX     | `.docx`                                     | `pip install -r worker/requirements.docx.txt`              | skipped with message  |
+| PDF      | `.pdf`                                      | `pip install -r worker/requirements.pdf.txt`               | skipped with message  |
+| Audio    | `.wav`, `.mp3`, `.m4a`, `.flac`, `.ogg`     | `pip install -r worker/requirements.audio.txt` + ffmpeg    | dev‑mode stub or CPU STT |
+
+> Images are ignored in batch ingest (captioning will come later).
+
+All optional parsers are **lazy‑imported**. If an optional dependency isn’t installed, ingest **won’t crash**: the file is skipped with a clear note unless you pass `--strict`.
+
+---
+
+## Dev‑mode toggles (no heavy installs required)
+
+- `EMBED_DEV_MODE=1` → deterministic stub vectors (no Ollama/embeddings).  
+- `AUDIO_DEV_MODE=1` → quick “\[DEV] transcript of file.ext” (no faster‑whisper/ffmpeg).
+
+These make the pipeline fully offline and fast for demos/tests.
+
+---
+
+## Configuration
+
+`worker/app/config.py` loads `.env` from repo root. Defaults are safe for local dev:
+
 
 ```env
 # Qdrant and Embeddings
