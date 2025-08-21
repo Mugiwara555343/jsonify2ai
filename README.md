@@ -3,7 +3,6 @@
 [![CI / test-worker](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml)
 
 Local-first “throw anything at it” memory pipeline: **drop files → extract text → chunk → embed → Qdrant → search/ask.**  
-_Local‑first "throw‑anything‑at‑it" memory pipeline._
 
 
 **Problem:** Private, offline capture of messy files (txt/md/pdf/docx/csv/audio) into **structured JSON + searchable embeddings** without heavy frameworks.
