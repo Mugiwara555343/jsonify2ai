@@ -1,32 +1,72 @@
-
 services:
+  # ---- Vector DB -----------------------------------------------------------
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    ports:
+      - "6333:6333"   # REST (host -> container)
+      - "6334:6334"   # gRPC (optional)
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:6333/readyz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # ---- (Optional) local LLM endpoint for embeddings etc. -------------------
+  # If you prefer running Ollama outside Docker, delete this block and set
+  # OLLAMA_URL=http://host.docker.internal:11434 in your .env for containers
+  # and http://localhost:11434 for host tools.
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./data/ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:11434/api/tags || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # ---- API -----------------------------------------------------------------
   api:
     build: ./api
     ports:
       - "${PORT_API:-8082}:8082"
     environment:
       - POSTGRES_DSN=${POSTGRES_DSN}
-      - QDRANT_URL=${QDRANT_URL}
-      - OLLAMA_URL=${OLLAMA_URL}
+      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
       - WORKER_BASE=${WORKER_BASE:-http://worker:8090}
+    depends_on:
+      qdrant:
+        condition: service_healthy
     networks:
       - default
 
+  # ---- Worker --------------------------------------------------------------
   worker:
     build: ./worker
     ports:
       - "${PORT_WORKER:-8090}:8090"
     environment:
       - POSTGRES_DSN=${POSTGRES_DSN}
-      - QDRANT_URL=${QDRANT_URL}
-      - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434}
+      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
       - EMBED_DEV_MODE=${EMBED_DEV_MODE:-0}
       - EMBEDDING_DIM=${EMBEDDING_DIM:-768}
       - DEBUG_CONFIG=${DEBUG_CONFIG:-0}
       - PORT_WORKER=${PORT_WORKER:-8090}
+    depends_on:
+      qdrant:
+        condition: service_healthy
     networks:
       - default
 
+  # ---- Web (Vite dev server) ----------------------------------------------
   web:
     build: ./web
     ports:

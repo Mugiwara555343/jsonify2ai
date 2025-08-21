@@ -34,6 +34,9 @@ class Settings(BaseSettings):
 
     EMBED_DEV_MODE: int = 0      # 1 to bypass real embeddings in dev/tests
     DEBUG_CONFIG: Optional[int] = 0
+    STT_MODEL: str = "tiny"
+    AUDIO_DEV_MODE: int = 0
+
 
 # Singleton-style instance used by the app/tests
 settings = Settings()
