@@ -211,6 +211,13 @@ PYTHONPATH=worker python scripts/ingest_dropzone.py \
 PYTHONPATH=worker python scripts/ingest_dropzone.py --strict
 ```
 
+### Watch mode (auto‑ingest)
+```bash
+pip install watchdog
+PYTHONPATH=worker python scripts/watch_dropzone.py
+# drop files into data/dropzone and they are ingested automatically
+```
+
 ### JSONL export format
 
 Each chunk is one line in the export file:
