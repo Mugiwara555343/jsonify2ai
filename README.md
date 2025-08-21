@@ -2,8 +2,27 @@
 
 [![CI / test-worker](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml)
 
+
 Local-first "throw anything at it" memory pipeline: **drop files → extract text → chunk → embed → Qdrant → search/ask.**  
 _Local‑first "throw‑anything‑at‑it" memory pipeline._
+
+Local-first “throw anything at it” memory pipeline: **drop files → extract text → chunk → embed → Qdrant → search/ask.**  
+
+
+**Problem:** Private, offline capture of messy files (txt/md/pdf/docx/csv/audio) into **structured JSON + searchable embeddings** without heavy frameworks.
+
+**Solution:** Drop files → extract → chunk → embed → Qdrant → search/ask. CPU‑friendly defaults; heavy bits optional.
+
+### Why jsonify2ai (30s)
+- **Local‑first:** no cloud calls; works offline.
+- **CPU‑friendly:** dev stubs + tiny models.
+- **Simple ingest:** a drop‑zone and one command.
+- **Small surface area:** no chains/agents to learn.
+- **Extensible:** add parsers; keep the pipeline.
+
+> Need orchestration frameworks? Use LangChain/LlamaIndex.  
+> Want files → JSON + vectors today? Use **jsonify2ai**.
+
 
 **Problem:** Private, offline capture of messy files (txt/md/pdf/docx/csv/audio) into **structured JSON + searchable embeddings** without heavy frameworks.
 
@@ -23,6 +42,10 @@ _Local‑first "throw‑anything‑at‑it" memory pipeline._
 
 > Works on plain CPU. No Docker required for the demo.
 > Want concrete examples? See **Demo Recipes** near the bottom.
+
+> Want concrete examples? See **Demo Recipes** near the bottom.
+
+
 
 ### 1) Setup
 ```bash
