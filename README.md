@@ -5,6 +5,7 @@
 Local-first “throw anything at it” memory pipeline: **drop files → extract text → chunk → embed → Qdrant → search/ask.**  
 _Local‑first "throw‑anything‑at‑it" memory pipeline._
 
+
 **Problem:** Private, offline capture of messy files (txt/md/pdf/docx/csv/audio) into **structured JSON + searchable embeddings** without heavy frameworks.
 
 **Solution:** Drop files → extract → chunk → embed → Qdrant → search/ask. CPU‑friendly defaults; heavy bits optional.
@@ -19,11 +20,16 @@ _Local‑first "throw‑anything‑at‑it" memory pipeline._
 > Need orchestration frameworks? Use LangChain/LlamaIndex.  
 > Want files → JSON + vectors today? Use **jsonify2ai**.
 
+=======
+
 
 ## Quick Start (5-minute local demo)
 
 > Works on plain CPU. No Docker required for the demo.
+
 > Want concrete examples? See **Demo Recipes** near the bottom.
+
+
 
 ### 1) Setup
 ```bash
@@ -59,7 +65,7 @@ PYTHONPATH=worker python scripts/ingest_dropzone.py \
 ```
 
 ### 5) Ask your data (two modes)
-=======
+
 ---
 
 ## What’s in this repo
@@ -212,7 +218,6 @@ These make the pipeline fully offline and fast for demos/tests.
 
 `worker/app/config.py` loads `.env` from repo root. Defaults are safe for local dev:
 
-=======
 # 0) venv (Windows Git Bash shown; use your shell equivalents)
 python -m venv .venv && source .venv/Scripts/activate
 
