@@ -20,8 +20,6 @@ _Local‑first "throw‑anything‑at‑it" memory pipeline._
 > Need orchestration frameworks? Use LangChain/LlamaIndex.  
 > Want files → JSON + vectors today? Use **jsonify2ai**.
 
-=======
-
 
 ## Quick Start (5-minute local demo)
 
