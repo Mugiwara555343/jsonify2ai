@@ -36,24 +36,28 @@ docs/         # Docs & runbooks (optional)
 ## Quickstart (2 minutes)
 
 ```bash
-# 0) create & activate a venv (Windows Git Bash shown; use your favorite shell)
+# 0) venv (Windows Git Bash shown; use your shell equivalents)
 python -m venv .venv && source .venv/Scripts/activate
 
-# 1) minimal deps (tiny install)
+# 1) tiny install (base worker deps only)
 pip install -r worker/requirements.txt
 
-# 2) start Qdrant locally
+# 2) bring up qdrant (compose includes a qdrant service)
 docker compose up -d qdrant
 
-# 3) prep folders
+# 3) create the folders you’ll touch
 mkdir -p data/dropzone data/exports
 
-# 4) dev-modes so no heavy models are needed
+# 4) go “fast demo mode” (no heavy models)
 export EMBED_DEV_MODE=1
 export AUDIO_DEV_MODE=1
 
-# 5) drop files into data/dropzone (txt, md, csv, json, jsonl, docx, pdf, wav/mp3…)
-# 6) ingest → Qdrant + JSONL
+# 5) put a few files into the drop‑zone (txt/csv/json/pdf/docx/wav/mp3…)
+#    e.g.:
+printf "name,age\nalice,30\n" > data/dropzone/sample.csv
+echo "hello from jsonify2ai" > data/dropzone/sample.txt
+
+# 6) ingest ⇒ JSONL + Qdrant
 PYTHONPATH=worker python scripts/ingest_dropzone.py \
   --dir data/dropzone --export data/exports/ingest.jsonl
 ```
