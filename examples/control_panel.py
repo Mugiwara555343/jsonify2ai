@@ -81,6 +81,8 @@ def action_ingest(args: argparse.Namespace) -> None:
     ]
     if reset:
         cmd += ["--reset-collection"]
+    if getattr(args, "recreate_bad_collection", False):
+        cmd += ["--recreate-bad-collection"]
 
     print("Env:", {k: env[k] for k in ["QDRANT_URL","QDRANT_COLLECTION","EMBED_DEV_MODE","AUDIO_DEV_MODE","EMBEDDING_DIM"]})
     print("Cmd:", " ".join(cmd))
@@ -242,6 +244,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dir", default="data/dropzone")
     sp.add_argument("--export", default="data/exports/ingest.jsonl")
     sp.add_argument("--reset", action="store_true", help="Recreate collection before ingest")
+    sp.add_argument(
+        "--recreate-bad-collection",
+        action="store_true",
+        help="If Qdrant collection has wrong/missing dim, drop & recreate it."
+    )
     sp.set_defaults(func=action_ingest)
 
     sp = sub.add_parser("ask", help="Ask a question")
