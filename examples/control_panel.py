@@ -81,6 +81,8 @@ def action_ingest(args: argparse.Namespace) -> None:
     ]
     if reset:
         cmd += ["--reset-collection"]
+    if getattr(args, "recreate_bad_collection", False):
+        cmd += ["--recreate-bad-collection"]
 
     print("Env:", {k: env[k] for k in ["QDRANT_URL","QDRANT_COLLECTION","EMBED_DEV_MODE","AUDIO_DEV_MODE","EMBEDDING_DIM"]})
     print("Cmd:", " ".join(cmd))
@@ -183,6 +185,30 @@ def action_reset(args: argparse.Namespace) -> None:
             print("Reset failed:", e)
             sys.exit(1)
 
+def action_watch(args: argparse.Namespace) -> None:
+    _print_header("Watch dropzone for changes")
+    _ensure_paths()
+    drop = args.dir or "data/dropzone"
+    out = args.export or "data/exports/ingest.jsonl"
+    
+    env = os.environ.copy()
+    env.update(_dev_flags())  # keep your dev-mode defaults
+    env["PYTHONPATH"] = str(REPO_ROOT / "worker")
+    
+    # Build command
+    cmd = [
+        sys.executable, str(REPO_ROOT / "scripts" / "watch_dropzone.py")
+    ]
+    
+    print("Env:", {k: env[k] for k in ["QDRANT_URL","QDRANT_COLLECTION","EMBED_DEV_MODE","AUDIO_DEV_MODE","EMBEDDING_DIM"]})
+    print("Cmd:", " ".join(cmd))
+    print(f"Watching: {drop} -> {out}")
+    print("Press Ctrl+C to stop watching")
+    
+    rc = _run_py(cmd)
+    if rc != 0:
+        sys.exit(rc)
+
 # ------------------------ CLI ------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -207,6 +233,9 @@ def build_parser() -> argparse.ArgumentParser:
 
           # reset collection (with rename safety)
           python examples/control_panel.py reset --rename
+
+          # watch dropzone for changes
+          python examples/control_panel.py watch --dir data/dropzone --export data/exports/ingest.jsonl
         """)
     )
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -215,6 +244,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dir", default="data/dropzone")
     sp.add_argument("--export", default="data/exports/ingest.jsonl")
     sp.add_argument("--reset", action="store_true", help="Recreate collection before ingest")
+    sp.add_argument(
+        "--recreate-bad-collection",
+        action="store_true",
+        help="If Qdrant collection has wrong/missing dim, drop & recreate it."
+    )
     sp.set_defaults(func=action_ingest)
 
     sp = sub.add_parser("ask", help="Ask a question")
@@ -231,6 +265,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("reset", help="Reset/rename the Qdrant collection")
     sp.add_argument("--rename", action="store_true", help="Rename old collection then recreate fresh")
     sp.set_defaults(func=action_reset)
+
+    sp = sub.add_parser("watch", help="Watch dropzone for changes and auto-ingest")
+    sp.add_argument("--dir", default="data/dropzone")
+    sp.add_argument("--export", default="data/exports/ingest.jsonl")
+    sp.set_defaults(func=action_watch)
     return p
 
 def main() -> None:

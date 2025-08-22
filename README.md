@@ -211,6 +211,27 @@ PYTHONPATH=worker python scripts/ingest_dropzone.py \
 PYTHONPATH=worker python scripts/ingest_dropzone.py --strict
 ```
 
+**Qdrant schema mismatch (dimension None / wrong size)**
+```bash
+# one-time repair during ingest
+python scripts/ingest_dropzone.py --dir data/dropzone --export data/exports/ingest.jsonl --recreate-bad-collection
+# or via env (useful in CI)
+export QDRANT_RECREATE_BAD=1
+
+Control Panel:
+python examples/control_panel.py ingest --dir data/dropzone --export data/exports/ingest.jsonl --recreate-bad-collection
+```
+
+### Watch mode (auto‑ingest)
+```bash
+pip install watchdog
+PYTHONPATH=worker python scripts/watch_dropzone.py
+# drop files into data/dropzone and they are ingested automatically
+```
+
+> The watcher ignores temp/hidden files (`~$*`, `.DS_Store`, `Thumbs.db`, `*.tmp`, `*.part`, `*.crdownload`) and prevents overlapping ingests.
+> Tune debounce via `WATCH_DEBOUNCE_SEC` (default `1.0`).
+
 ### JSONL export format
 
 Each chunk is one line in the export file:

@@ -8,7 +8,7 @@ Usage:
   # optional hard-fail on missing optional deps:
   PYTHONPATH=worker python scripts/ingest_dropzone.py --strict
   # optional fix when an old collection has wrong vector size:
-  PYTHONPATH=worker python scripts/ingest_dropzone.py --reset-collection
+  PYTHONPATH=worker python scripts/ingest_dropzone.py --recreate-bad-collection
 """
 
 from __future__ import annotations
@@ -32,6 +32,64 @@ if str(WORKER_DIR) not in sys.path:
 from app.config import settings
 from app.services.chunker import chunk_text
 from app.services.qdrant_minimal import ensure_collection_minimal  # supports SDK/HTTP variants
+
+
+# --- Qdrant helpers ---
+def _extract_existing_dim(coll_info):
+    """
+    Return int dim if available, else None. Supports VectorParams or named vectors {name: VectorParams}.
+    """
+    try:
+        v = getattr(coll_info.config.params, "vectors", None)
+        # qdrant-client may expose as object with .size or a dict
+        if v is None:
+            return None
+        # Direct VectorParams
+        size = getattr(v, "size", None)
+        if isinstance(size, int):
+            return size
+        # NamedVectors (dict-like)
+        if isinstance(v, dict) and v:
+            first = next(iter(v.values()))
+            return int(getattr(first, "size", None)) if hasattr(first, "size") else None
+    except Exception:
+        pass
+    return None
+
+def _ensure_collection(client, name: str, dim: int, distance="Cosine", recreate_bad: bool=False):
+    from qdrant_client.http import models as qm
+    try:
+        info = client.get_collection(name)
+        existing_dim = _extract_existing_dim(info)
+        print(f"[qdrant] collection={name} existing_dim={existing_dim} expected_dim={dim}")
+        if existing_dim in (None, 0) or int(existing_dim) != int(dim):
+            if recreate_bad:
+                print(f"[qdrant] recreating collection {name} with dim={dim}")
+                try:
+                    client.delete_collection(name=name)
+                except Exception:
+                    pass
+                client.recreate_collection(
+                    collection_name=name,
+                    vectors_config=qm.VectorParams(size=int(dim), distance=getattr(qm.Distance, distance.upper()))
+                )
+                return
+            raise RuntimeError(f"Collection '{name}' exists with dimension {existing_dim}, expected {dim}. "
+                               f"Re-run with --recreate-bad-collection or set QDRANT_RECREATE_BAD=1 to auto-fix.")
+        # ok
+        return
+    except Exception as e:
+        # If not found → create
+        msg = str(e)
+        if "Not found" in msg or "doesn't exist" in msg or "404" in msg:
+            client.recreate_collection(
+                collection_name=name,
+                vectors_config=qm.VectorParams(size=int(dim), distance=getattr(qm.Distance, distance.upper()))
+            )
+            print(f"[qdrant] created collection {name} dim={dim}")
+            return
+        # Any other error → bubble
+        raise
 
 
 # ===================== Parser registry (lazy + optional) =====================
@@ -186,33 +244,21 @@ def _iter_files(root: Path) -> Iterable[Path]:
             yield p
 
 def ingest_dir(drop_dir: Path, export_jsonl: Path | None, strict: bool,
-               reset_collection: bool) -> Dict[str, Any]:
+               recreate_bad: bool) -> Dict[str, Any]:
     """Core ingest routine."""
-    # Ensure collection exists (handle both bool and (ok,err) tuple variants)
-    ensured = ensure_collection_minimal(name=settings.QDRANT_COLLECTION,
-                                        dim=int(settings.EMBEDDING_DIM))
-    if isinstance(ensured, tuple):
-        ok, err = ensured
-        if not ok:
-            # Helpful auto-recovery: allow drop & recreate on dim mismatch
-            if reset_collection and isinstance(err, str) and "dimension" in err.lower():
-                from qdrant_client import QdrantClient
-                c = QdrantClient(url=settings.QDRANT_URL)
-                c.delete_collection(settings.QDRANT_COLLECTION)
-                ensured2 = ensure_collection_minimal(name=settings.QDRANT_COLLECTION,
-                                                     dim=int(settings.EMBEDDING_DIM))
-                if isinstance(ensured2, tuple) and not ensured2[0]:
-                    raise RuntimeError(f"Failed to re-create collection: {ensured2[1]}")
-            else:
-                raise RuntimeError(f"Failed to ensure collection: {err}")
+    from qdrant_client import QdrantClient
+    client = QdrantClient(url=settings.QDRANT_URL)
+    
+    # Print one-liner summary before ingest starts
+    print(f"[ingest] target collection={settings.QDRANT_COLLECTION} expected_dim={settings.EMBEDDING_DIM}")
+    
+    # Use the new hardened collection handling
+    _ensure_collection(client, settings.QDRANT_COLLECTION, dim=int(settings.EMBEDDING_DIM), distance="Cosine", recreate_bad=recreate_bad)
 
     export_f = None
     if export_jsonl:
         export_jsonl.parent.mkdir(parents=True, exist_ok=True)
         export_f = export_jsonl.open("w", encoding="utf-8")
-
-    from qdrant_client import QdrantClient
-    client = QdrantClient(url=settings.QDRANT_URL)
 
     total_files = 0
     total_chunks = 0
@@ -274,18 +320,21 @@ def main():
     p.add_argument("--dir", default=os.getenv("DROPZONE_DIR", "data/dropzone"))
     p.add_argument("--export", default=os.getenv("EXPORT_JSONL", "data/exports/ingest.jsonl"))
     p.add_argument("--strict", action="store_true", help="fail on missing optional deps instead of skipping")
-    p.add_argument("--reset-collection", action="store_true",
-                   help="if collection dim mismatches, drop & recreate it automatically")
+    p.add_argument("--recreate-bad-collection", action="store_true",
+                   help="If existing collection has no/incorrect vector dim, drop and recreate it.")
     args = p.parse_args()
 
     drop = Path(args.dir)
     if not drop.exists():
         raise SystemExit(f"Drop zone not found: {drop}")
 
+    # Read env override
+    recreate_bad = args.recreate_bad_collection or os.getenv("QDRANT_RECREATE_BAD", "0") == "1"
+
     res = ingest_dir(drop_dir=drop,
                      export_jsonl=Path(args.export) if args.export else None,
                      strict=args.strict,
-                     reset_collection=args.reset_collection)
+                     recreate_bad=recreate_bad)
     print(json.dumps(res, indent=2))
 
 
