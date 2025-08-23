@@ -1,60 +1,111 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import './App.css'
 
-interface HealthStatus {
-  api: boolean | null
-  worker: boolean | null
-}
+type Status = { ok: boolean; counts: { chunks: number; images: number } }
+type Hit = { id: string; score: number; text?: string; caption?: string; path?: string }
+const WORKER = import.meta.env.VITE_WORKER_URL || 'http://localhost:8090'
 
 function App() {
-  const [healthStatus, setHealthStatus] = useState<HealthStatus>({
-    api: null,
-    worker: null
-  })
+  const [s, setS] = useState<Status | null>(null)
+  const [q, setQ] = useState('')
+  const [kind, setKind] = useState<'text' | 'images'>('text')
+  const [res, setRes] = useState<Hit[]>([])
+  const [msg, setMsg] = useState<string>('')
+  const [busy, setBusy] = useState(false)
 
-  const checkHealth = async () => {
-    try {
-      const apiResponse = await fetch('http://localhost:8080/health')
-      const apiOk = apiResponse.ok
-      setHealthStatus(prev => ({ ...prev, api: apiOk }))
-    } catch (error) {
-      setHealthStatus(prev => ({ ...prev, api: false }))
-    }
+  useEffect(() => {
+    fetch(`${WORKER}/status`)
+      .then(r => r.json())
+      .then(setS)
+      .catch(() => setS(null))
+  }, [])
 
+  const doSearch = async () => {
+    const r = await fetch(`${WORKER}/search?q=${encodeURIComponent(q)}&kind=${kind}&k=8`)
+    const j = await r.json()
+    setRes(j.results || [])
+  }
+
+  const doUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    if (!f) return
+    const fd = new FormData()
+    fd.append('file', f)
+    setBusy(true)
+    setMsg('')
     try {
-      const workerResponse = await fetch('http://localhost:8090/health')
-      const workerOk = workerResponse.ok
-      setHealthStatus(prev => ({ ...prev, worker: workerOk }))
-    } catch (error) {
-      setHealthStatus(prev => ({ ...prev, worker: false }))
+      const r = await fetch(`${WORKER}/upload`, { method: 'POST', body: fd })
+      const j = await r.json()
+      setMsg(j.ok ? 'Uploaded' : 'Failed')
+      // refresh status after a moment (watcher/ingest may update counts)
+      setTimeout(() => {
+        fetch(`${WORKER}/status`)
+          .then(r => r.json())
+          .then(setS)
+          .catch(() => {})
+      }, 1200)
+    } catch {
+      setMsg('Failed')
+    } finally {
+      setBusy(false)
     }
   }
 
-  useEffect(() => {
-    checkHealth()
-    const interval = setInterval(checkHealth, 5000) // Check every 5 seconds
-    return () => clearInterval(interval)
-  }, [])
-
   return (
-    <div className="App">
-      <header className="App-header">
-        <h1>jsonify2ai Memory System</h1>
-        <div className="health-status">
-          <h2>Service Health</h2>
-          <div className="service-status">
-            <div className={`status ${healthStatus.api === null ? 'loading' : healthStatus.api ? 'healthy' : 'unhealthy'}`}>
-              API Service: {healthStatus.api === null ? 'Checking...' : healthStatus.api ? 'Healthy' : 'Unhealthy'}
-            </div>
-            <div className={`status ${healthStatus.worker === null ? 'loading' : healthStatus.worker ? 'healthy' : 'unhealthy'}`}>
-              Worker Service: {healthStatus.worker === null ? 'Checking...' : healthStatus.worker ? 'Healthy' : 'Unhealthy'}
-            </div>
+    <div style={{ fontFamily: 'ui-sans-serif', padding: 24, maxWidth: 720, margin: '0 auto' }}>
+      <h1 style={{ fontSize: 24, marginBottom: 12 }}>jsonify2ai — Status</h1>
+      {!s && <div>Loading…</div>}
+      {s && (
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>
+          <div style={{ padding: 16, borderRadius: 12, boxShadow: '0 1px 4px rgba(0,0,0,.08)' }}>
+            <div style={{ opacity: .6, marginBottom: 6 }}>Text Chunks</div>
+            <div style={{ fontSize: 28, fontWeight: 700 }}>{s.counts.chunks}</div>
           </div>
-          <button onClick={checkHealth} className="refresh-btn">
-            Refresh Health Check
-          </button>
+          <div style={{ padding: 16, borderRadius: 12, boxShadow: '0 1px 4px rgba(0,0,0,.08)' }}>
+            <div style={{ opacity: .6, marginBottom: 6 }}>Images</div>
+            <div style={{ fontSize: 28, fontWeight: 700 }}>{s.counts.images}</div>
+          </div>
         </div>
-      </header>
+      )}
+      <div style={{ marginTop: 24 }}>
+        <div style={{ marginBottom: 8, opacity: .7 }}>Upload to drop‑zone</div>
+        <input type="file" onChange={doUpload} disabled={busy} />
+        {msg && <div style={{ marginTop: 6, fontSize: 12, opacity: .8 }}>{msg}</div>}
+      </div>
+      <div style={{ marginTop: 24, display: 'flex', gap: 8 }}>
+        <input 
+          value={q} 
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQ(e.target.value)} 
+          placeholder="search…" 
+          style={{ flex: 1, padding: 12, borderRadius: 8, border: '1px solid #ddd' }} 
+        />
+        <select 
+          value={kind} 
+          onChange={e => setKind(e.target.value as any)} 
+          style={{ padding: 12, borderRadius: 8, border: '1px solid #ddd' }}
+        >
+          <option value="text">text</option>
+          <option value="images">images</option>
+        </select>
+        <button 
+          onClick={doSearch} 
+          style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid #ddd' }}
+        >
+          Search
+        </button>
+      </div>
+      {res.length > 0 && (
+        <div style={{ marginTop: 16, display: 'grid', gap: 8 }}>
+          {res.map((h, i) => (
+            <div key={i} style={{ padding: 12, border: '1px solid #eee', borderRadius: 10 }}>
+              <div style={{ fontSize: 12, opacity: .6 }}>score {(h.score || 0).toFixed(3)}</div>
+              <div style={{ marginTop: 4 }}>{h.caption || h.text || '(no text)'}</div>
+              {h.path && <div style={{ fontSize: 12, opacity: .6, marginTop: 4 }}>{h.path}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ marginTop: 16, opacity: .7, fontSize: 12 }}>Worker: {WORKER}</div>
     </div>
   )
 }
