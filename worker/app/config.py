@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     OLLAMA_URL: str = "http://host.docker.internal:11434"
     QDRANT_URL: str = "http://host.docker.internal:6333"
     QDRANT_COLLECTION: str = "jsonify2ai_chunks"
+    QDRANT_COLLECTION_IMAGES: str = "jsonify2ai_images_768"
 
     EMBEDDINGS_MODEL: str = "nomic-embed-text"
     EMBEDDING_DIM: int = 768
@@ -36,6 +37,8 @@ class Settings(BaseSettings):
     DEBUG_CONFIG: Optional[int] = 0
     STT_MODEL: str = "tiny"
     AUDIO_DEV_MODE: int = 0
+    IMAGES_CAPTION: int = 0
+    QDRANT_RECREATE_BAD: int = 0
 
 
 # Singleton-style instance used by the app/tests

@@ -1,9 +1,16 @@
 import os
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .routers import process
+from .routers import status as status_router
+from .routers import search as search_router
+from .routers import upload as upload_router
 
 app = FastAPI(title="jsonify2ai Worker", version="1.0.0")
+
+# Add CORS middleware
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # Log configuration on startup
 @app.on_event("startup")
@@ -12,6 +19,9 @@ async def startup_event():
 
 # Include routers
 app.include_router(process.router, prefix="/process", tags=["processing"])
+app.include_router(status_router.router)
+app.include_router(search_router.router)
+app.include_router(upload_router.router)
 
 @app.get("/health")
 async def health():

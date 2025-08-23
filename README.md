@@ -159,7 +159,13 @@ python examples/control_panel.py reset --rename
 | PDF      | `.pdf`                                      | `pip install -r worker/requirements.pdf.txt`               | skipped with message  |
 | Audio    | `.wav`, `.mp3`, `.m4a`, `.flac`, `.ogg`     | `pip install -r worker/requirements.audio.txt` + ffmpeg    | dev‑mode stub or CPU STT |
 
-> Images are ignored in batch ingest (captioning will come later).
+**Images (optional)**: `.jpg/.jpeg/.png/.webp` via BLIP → caption → embed → Qdrant.  
+Enable:
+```bash
+pip install -r worker/requirements.images.txt
+export IMAGES_CAPTION=1 PYTHONPATH=worker
+python scripts/ingest_dropzone.py --dir data/dropzone --export data/exports/ingest.jsonl
+```
 
 All optional parsers are **lazy‑imported**. If an optional dependency isn't installed, ingest **won't crash**: the file is skipped with a clear note unless you pass `--strict`.
 

@@ -21,6 +21,8 @@ import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable, List, Dict, Any, Tuple, Callable, Optional
+from qdrant_client import QdrantClient
+from qdrant_client.models import PointStruct
 
 # --- allow "from app..." imports when running from repo root
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +34,67 @@ if str(WORKER_DIR) not in sys.path:
 from app.config import settings
 from app.services.chunker import chunk_text
 from app.services.qdrant_minimal import ensure_collection_minimal  # supports SDK/HTTP variants
+from app.services.image_caption import caption_image
+from app.services.embed_ollama import embed_texts
+from app.routers.qdrant_utils import ensure_collection
+
+
+# --- Qdrant helpers ---
+def _extract_existing_dim(coll_info):
+    """
+    Return int dim if available, else None. Supports VectorParams or named vectors {name: VectorParams}.
+    """
+    try:
+        v = getattr(coll_info.config.params, "vectors", None)
+        # qdrant-client may expose as object with .size or a dict
+        if v is None:
+            return None
+        # Direct VectorParams
+        size = getattr(v, "size", None)
+        if isinstance(size, int):
+            return size
+        # NamedVectors (dict-like)
+        if isinstance(v, dict) and v:
+            first = next(iter(v.values()))
+            return int(getattr(first, "size", None)) if hasattr(first, "size") else None
+    except Exception:
+        pass
+    return None
+
+def _ensure_collection(client, name: str, dim: int, distance="Cosine", recreate_bad: bool=False):
+    from qdrant_client.http import models as qm
+    try:
+        info = client.get_collection(name)
+        existing_dim = _extract_existing_dim(info)
+        print(f"[qdrant] collection={name} existing_dim={existing_dim} expected_dim={dim}")
+        if existing_dim in (None, 0) or int(existing_dim) != int(dim):
+            if recreate_bad:
+                print(f"[qdrant] recreating collection {name} with dim={dim}")
+                try:
+                    client.delete_collection(name=name)
+                except Exception:
+                    pass
+                client.recreate_collection(
+                    collection_name=name,
+                    vectors_config=qm.VectorParams(size=int(dim), distance=getattr(qm.Distance, distance.upper()))
+                )
+                return
+            raise RuntimeError(f"Collection '{name}' exists with dimension {existing_dim}, expected {dim}. "
+                               f"Re-run with --recreate-bad-collection or set QDRANT_RECREATE_BAD=1 to auto-fix.")
+        # ok
+        return
+    except Exception as e:
+        # If not found → create
+        msg = str(e)
+        if "Not found" in msg or "doesn't exist" in msg or "404" in msg:
+            client.recreate_collection(
+                collection_name=name,
+                vectors_config=qm.VectorParams(size=int(dim), distance=getattr(qm.Distance, distance.upper()))
+            )
+            print(f"[qdrant] created collection {name} dim={dim}")
+            return
+        # Any other error → bubble
+        raise
 
 
 # --- Qdrant helpers ---
@@ -244,7 +307,11 @@ def _iter_files(root: Path) -> Iterable[Path]:
             yield p
 
 def ingest_dir(drop_dir: Path, export_jsonl: Path | None, strict: bool,
+
+               recreate_bad: bool, do_images: bool = False, qdr: QdrantClient = None) -> Dict[str, Any]:
+
                recreate_bad: bool) -> Dict[str, Any]:
+
     """Core ingest routine."""
     from qdrant_client import QdrantClient
     client = QdrantClient(url=settings.QDRANT_URL)
@@ -254,6 +321,12 @@ def ingest_dir(drop_dir: Path, export_jsonl: Path | None, strict: bool,
     
     # Use the new hardened collection handling
     _ensure_collection(client, settings.QDRANT_COLLECTION, dim=int(settings.EMBEDDING_DIM), distance="Cosine", recreate_bad=recreate_bad)
+
+    
+    # Image handling setup
+    IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+
+
 
     export_f = None
     if export_jsonl:
@@ -266,6 +339,20 @@ def ingest_dir(drop_dir: Path, export_jsonl: Path | None, strict: bool,
 
     for fp in _iter_files(drop_dir):
         total_files += 1
+        
+        # Handle images if enabled
+        if do_images and fp.suffix.lower() in IMAGE_EXTS:
+            try:
+                cap = caption_image(fp)
+                vec = embed_texts([cap])[0]
+                qdr.upsert(collection_name=settings.QDRANT_COLLECTION_IMAGES,
+                           points=[PointStruct(id=str(uuid.uuid4()),
+                           vector=vec, payload={"path": str(fp), "caption": cap, "tags": [], "source_ext": fp.suffix.lower()})])
+                print(f"[images] {fp.name} → '{cap[:64]}…'")
+            except Exception as e:
+                print(f"[images][skip] {fp.name}: {e}")
+            continue
+        
         try:
             raw = extract_text_auto(str(fp), strict=strict)
         except SkipFile as e:
@@ -331,10 +418,26 @@ def main():
     # Read env override
     recreate_bad = args.recreate_bad_collection or os.getenv("QDRANT_RECREATE_BAD", "0") == "1"
 
+
+    # Image handling setup
+    IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+    do_images = bool(settings.IMAGES_CAPTION)
+    qdr = QdrantClient(url=settings.QDRANT_URL)
+    if do_images:
+        ensure_collection(qdr, settings.QDRANT_COLLECTION_IMAGES, settings.EMBEDDING_DIM)
+
+    res = ingest_dir(drop_dir=drop,
+                     export_jsonl=Path(args.export) if args.export else None,
+                     strict=args.strict,
+                     recreate_bad=recreate_bad,
+                     do_images=do_images,
+                     qdr=qdr)
+
     res = ingest_dir(drop_dir=drop,
                      export_jsonl=Path(args.export) if args.export else None,
                      strict=args.strict,
                      recreate_bad=recreate_bad)
+
     print(json.dumps(res, indent=2))
 
 
