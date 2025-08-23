@@ -1,0 +1,4 @@
+torch>=2.2
+transformers>=4.44
+pillow>=10.3
+timm>=0.9.16
