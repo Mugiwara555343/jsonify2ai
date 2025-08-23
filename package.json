@@ -1,0 +1,8 @@
+{
+  "name": "jsonify2ai",
+  "private": true,
+  "scripts": {
+    "test": "echo \"no root tests\"",
+    "web:dev": "npm run dev --prefix web"
+  }
+}
