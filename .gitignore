@@ -19,6 +19,7 @@ Thumbs.db
 web/node_modules/
 web/.vite/
 web/dist/
+web/package-lock.json
 
 # Build/coverage
 dist/
