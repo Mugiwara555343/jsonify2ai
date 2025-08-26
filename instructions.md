@@ -1,3 +1,4 @@
+
 # Instruction Framework for Executor-Level Steps (note2json Project)
 
 This framework governs **all step-by-step technical instructions** for the `<PROJECT_NAME>` build.  
@@ -46,4 +47,18 @@ It applies **only** within this project and is designed for a user who is **new 
 - This framework applies only to the **note2json** project context.  
 - If the project is paused, no commands or edits will be provided until you explicitly say “resume.”  
 - All technical edits will assume they will be executed via **Cursor** or **Continue.dev**, so prompts must be copy-paste ready.
+
+---
+
+## 5. Context Sources (Authoritative Project Files)
+
+Cursor / Continue should only rely on the following files for project context:
+
+- **`project.map.json`** → Full repo map; paths + structure used for quick lookups.  
+- **`images.candidates.json`** → Image ingestion candidates (future extension).  
+- **`README.md`** → External overview for users, recruiters, or anyone cloning the repo.  
+- **`instructions.md`** → Internal step-by-step framework (this file).  
+
+> Rule: Do **not** infer context from other docs or stale notes. These files are the single sources of truth.
+
 

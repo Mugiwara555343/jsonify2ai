@@ -8,14 +8,15 @@ import (
 )
 
 // RegisterRoutes registers all routes with the given gin engine
-func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string) {
+func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string) {
 	// Health endpoint
 	RegisterHealth(r)
 
 	// Upload endpoint
 	uploadHandler := &UploadHandler{
-		DB:      db,
-		DocsDir: docsDir,
+		DB:         db,
+		DocsDir:    docsDir,
+		WorkerBase: workerBase,
 	}
 	r.POST("/upload", uploadHandler.Post)
 

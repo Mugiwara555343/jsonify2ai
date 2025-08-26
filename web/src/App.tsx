@@ -4,6 +4,7 @@ import './App.css'
 type Status = { ok: boolean; counts: { chunks: number; images: number } }
 type Hit = { id: string; score: number; text?: string; caption?: string; path?: string }
 const WORKER = import.meta.env.VITE_WORKER_URL || 'http://localhost:8090'
+type AskResp = { ok: boolean; mode: 'search' | 'llm'; model?: string; answer: string; sources: Hit[] }
 
 function App() {
   const [s, setS] = useState<Status | null>(null)
@@ -12,6 +13,8 @@ function App() {
   const [res, setRes] = useState<Hit[]>([])
   const [msg, setMsg] = useState<string>('')
   const [busy, setBusy] = useState(false)
+  const [askQ, setAskQ] = useState('')
+  const [ans, setAns] = useState<AskResp | null>(null)
 
   useEffect(() => {
     fetch(`${WORKER}/status`)
@@ -71,6 +74,33 @@ function App() {
         <div style={{ marginBottom: 8, opacity: .7 }}>Upload to drop‑zone</div>
         <input type="file" onChange={doUpload} disabled={busy} />
         {msg && <div style={{ marginTop: 6, fontSize: 12, opacity: .8 }}>{msg}</div>}
+      </div>
+      <div style={{ marginTop: 24 }}>
+        <h2 style={{ fontSize: 18, marginBottom: 8 }}>Ask</h2>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input 
+            value={askQ} 
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAskQ(e.target.value)} 
+            placeholder="ask your data…" 
+            style={{ flex: 1, padding: 12, borderRadius: 8, border: '1px solid #ddd' }} 
+          />
+          <button onClick={async () => {
+            const r = await fetch(`${WORKER}/ask`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: askQ, k: 6 }) })
+            const j: AskResp = await r.json()
+            setAns(j)
+          }} style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid #ddd' }}>Ask</button>
+        </div>
+        {ans && (
+          <div style={{ marginTop: 12, padding: 12, border: '1px solid #eee', borderRadius: 10 }}>
+            <div style={{ fontSize: 12, opacity: .6, marginBottom: 6 }}>mode: {ans.mode}{ans.model ? ` (${ans.model})` : ''}</div>
+            <div style={{ whiteSpace: 'pre-wrap' }}>{ans.answer}</div>
+            {ans.sources?.length > 0 && (
+              <div style={{ marginTop: 10, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {ans.sources.map((h, i) => (<span key={i} style={{ fontSize: 12, opacity: .75, border: '1px solid #eee', padding: '2px 6px', borderRadius: 999 }}>{h.path?.split('/').pop() || h.id}</span>))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
       <div style={{ marginTop: 24, display: 'flex', gap: 8 }}>
         <input 

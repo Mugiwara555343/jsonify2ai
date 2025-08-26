@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     AUDIO_DEV_MODE: int = 0
     IMAGES_CAPTION: int = 0
     QDRANT_RECREATE_BAD: int = 0
+    
+    # ASK endpoint configuration
+    ASK_MODE: str = "search"     # search|llm
+    ASK_MODEL: str = "qwen2.5:3b-instruct-q4_K_M"
+    ASK_MAX_TOKENS: int = 512
+    ASK_TEMP: float = 0.3
+    ASK_TOP_P: float = 0.9
 
 
 # Singleton-style instance used by the app/tests
