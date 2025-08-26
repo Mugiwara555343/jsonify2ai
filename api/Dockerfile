@@ -1,32 +1,19 @@
-# Build stage
-FROM golang:1.21-alpine AS builder
-
+FROM golang:1.22-alpine AS build
 WORKDIR /app
 
-# Copy go mod files
+# cache deps
 COPY go.mod go.sum ./
-
-# Download dependencies
 RUN go mod download
 
-# Copy source code
+# source
 COPY . .
+RUN go build -o /bin/api ./cmd/server
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o server ./cmd/server
-
-# Final stage
-FROM alpine:latest
-
-RUN apk --no-cache add ca-certificates
-
-WORKDIR /root/
-
-# Copy the binary from builder stage
-COPY --from=builder /app/server .
-
-# Expose port
+FROM golang:1.22-alpine
+WORKDIR /app
+COPY --from=build /bin/api /srv/api
+COPY --from=build /app/go.mod /app/go.sum /app/
+COPY --from=build /app/internal /app/internal/
+COPY --from=build /app/cmd /app/cmd/
 EXPOSE 8082
-
-# Run the binary
-CMD ["./server"]
+CMD ["/srv/api"]
