@@ -1,13 +1,60 @@
-import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from worker.app.routers import health
+from worker.app.routers import status as status_router
+from worker.app.routers import search as search_router
+from worker.app.routers import upload as upload_router
+from worker.app.routers import ask as ask_router
+from worker.app.routers import process as process_router
+from worker.app.config import settings as C
+from worker.app.qdrant_init import ensure_collections, collections_status
+import logging
+
 from .config import settings
 from .routers import process
 from .routers import status as status_router
 from .routers import search as search_router
 from .routers import upload as upload_router
 
-app = FastAPI(title="jsonify2ai Worker", version="1.0.0")
+
+app = FastAPI(title="jsonify2ai-worker")
+# CORS for local dev (Vite + any 3000-series localhost)
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.include_router(health.router)
+app.include_router(status_router.router)
+app.include_router(search_router.router)
+app.include_router(upload_router.router)
+app.include_router(ask_router.router)
+app.include_router(process_router.router)
+
+
+@app.on_event("startup")
+async def _startup_log():
+    logging.info(f"[worker] QDRANT_URL={C.QDRANT_URL}  OLLAMA_URL={getattr(C,'OLLAMA_URL','')}")
+    # idempotent: create collections if missing (skip if no Qdrant URL)
+    try:
+        if getattr(C, "QDRANT_URL", ""):
+            await ensure_collections()
+        else:
+            logging.warning("[worker] QDRANT_URL not set; skipping ensure_collections()")
+    except Exception as e:
+        logging.warning(f"[worker] ensure_collections skipped due to error: {e}")
+    logging.info("[worker] Routes: /health /status /search /upload /ask /process")
 
 # Add CORS middleware
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -61,6 +108,7 @@ async def debug_config():
         "chunk_overlap": settings.CHUNK_OVERLAP,
         "debug_enabled": settings.DEBUG_CONFIG == "1"
     }
+
 
 @app.get("/")
 async def root():
