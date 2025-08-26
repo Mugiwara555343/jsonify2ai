@@ -7,8 +7,27 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/process", tags=["process"])
 
 
+# ✅ what the tests expect:
+class ProcessTextRequest(BaseModel):
+    document_id: str
+    path: str
+    mime: str
+    kind: str
+
+
 class TextPayload(BaseModel):
     document_id: str
+
+    size: int
+
+# (optional) keep your previous name as an alias to avoid breaking anything:
+TextPayload = ProcessTextRequest
+
+@router.post("/text", response_model=ProcessTextResponse)
+def process_text(p: ProcessTextRequest):
+    # Resolve inside-container path; we expect /app/data to be mounted
+    file_path = Path(p.path)
+    if not file_path.is_file():
     path: str
     mime: str
     kind: str
@@ -26,6 +45,11 @@ def process_text(p: TextPayload):
         raise HTTPException(status_code=404, detail="file not found")
 
     size = file_path.stat().st_size
+    log.info("[process/text] received doc=%s kind=%s mime=%s path=%s size=%d",
+             p.document_id, p.kind, p.mime, str(file_path), size)
+
+    return ProcessTextResponse(ok=True, document_id=p.document_id, size=size)
+
     log.info(
         "[process/text] received doc=%s kind=%s mime=%s path=%s size=%d",
         p.document_id,
