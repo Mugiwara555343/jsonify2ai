@@ -1,4 +1,3 @@
-# at top: existing imports
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from pathlib import Path
