@@ -9,7 +9,7 @@ from worker.app.routers import upload as upload_router
 from worker.app.routers import ask as ask_router
 from worker.app.routers import process as process_router
 from worker.app.config import settings as C
-from worker.app.qdrant_init import ensure_collections, collections_status
+from worker.app.qdrant_init import ensure_collections
 
 app = FastAPI(title="jsonify2ai-worker")
 
@@ -39,24 +39,32 @@ app.include_router(upload_router.router)
 app.include_router(ask_router.router)
 app.include_router(process_router.router)
 
+
 @app.on_event("startup")
 async def _startup_log():
-    logging.info(f"[worker] QDRANT_URL={C.QDRANT_URL}  OLLAMA_URL={getattr(C,'OLLAMA_URL','')}")
+    logging.info(
+        f"[worker] QDRANT_URL={C.QDRANT_URL}  OLLAMA_URL={getattr(C,'OLLAMA_URL','')}"
+    )
     # idempotent: create collections if missing (skip if no Qdrant URL)
     try:
         if getattr(C, "QDRANT_URL", ""):
             await ensure_collections()
         else:
-            logging.warning("[worker] QDRANT_URL not set; skipping ensure_collections()")
+            logging.warning(
+                "[worker] QDRANT_URL not set; skipping ensure_collections()"
+            )
     except Exception as e:
         logging.warning(f"[worker] ensure_collections skipped due to error: {e}")
     logging.info("[worker] Routes: /health /status /search /upload /ask /process")
+
 
 @app.get("/")
 async def root():
     return {"message": "jsonify2ai Worker Service"}
 
+
 if __name__ == "__main__":
     import uvicorn
+
     port = int(os.getenv("PORT_WORKER", "8090"))
     uvicorn.run(app, host="0.0.0.0", port=port)

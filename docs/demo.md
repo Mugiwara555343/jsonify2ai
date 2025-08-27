@@ -84,7 +84,7 @@ Check that services can reach external dependencies:
 # Test PostgreSQL connection
 docker compose exec api ping host.docker.internal
 
-# Test Qdrant connection  
+# Test Qdrant connection
 docker compose exec worker ping host.docker.internal
 ```
 

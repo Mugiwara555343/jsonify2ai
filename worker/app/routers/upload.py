@@ -1,10 +1,13 @@
 from fastapi import APIRouter, UploadFile, File
 from pathlib import Path
-import shutil, uuid, os
+import shutil
+import uuid
+import os
 
 router = APIRouter()
 DROP = Path("data/dropzone")
 DROP.mkdir(parents=True, exist_ok=True)
+
 
 @router.post("/upload")
 async def upload(file: UploadFile = File(...)):

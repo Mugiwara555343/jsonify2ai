@@ -1,7 +1,7 @@
 
 # Instruction Framework for Executor-Level Steps (note2json Project)
 
-This framework governs **all step-by-step technical instructions** for the `<PROJECT_NAME>` build.  
+This framework governs **all step-by-step technical instructions** for the `<PROJECT_NAME>` build.
 It applies **only** within this project and is designed for a user who is **new to Go and multi-service Docker**, but comfortable with Python and basic Docker usage.
 
 ---
@@ -34,18 +34,18 @@ It applies **only** within this project and is designed for a user who is **new 
 
 ## 3. Checklist Before Sending an Execution-Mode Answer
 
-1. Confirm exact file path(s) and function/block names.  
-2. Write **before → after** code diff inside the Cursor Prompt.  
-3. Include PowerShell-tested verification commands.  
-4. State expected success output.  
+1. Confirm exact file path(s) and function/block names.
+2. Write **before → after** code diff inside the Cursor Prompt.
+3. Include PowerShell-tested verification commands.
+4. State expected success output.
 5. Provide quick rollback note.
 
 ---
 
 ## 4. Notes
 
-- This framework applies only to the **note2json** project context.  
-- If the project is paused, no commands or edits will be provided until you explicitly say “resume.”  
+- This framework applies only to the **note2json** project context.
+- If the project is paused, no commands or edits will be provided until you explicitly say “resume.”
 - All technical edits will assume they will be executed via **Cursor** or **Continue.dev**, so prompts must be copy-paste ready.
 
 ---
@@ -54,11 +54,9 @@ It applies **only** within this project and is designed for a user who is **new 
 
 Cursor / Continue should only rely on the following files for project context:
 
-- **`project.map.json`** → Full repo map; paths + structure used for quick lookups.  
-- **`images.candidates.json`** → Image ingestion candidates (future extension).  
-- **`README.md`** → External overview for users, recruiters, or anyone cloning the repo.  
-- **`instructions.md`** → Internal step-by-step framework (this file).  
+- **`project.map.json`** → Full repo map; paths + structure used for quick lookups.
+- **`images.candidates.json`** → Image ingestion candidates (future extension).
+- **`README.md`** → External overview for users, recruiters, or anyone cloning the repo.
+- **`instructions.md`** → Internal step-by-step framework (this file).
 
 > Rule: Do **not** infer context from other docs or stale notes. These files are the single sources of truth.
-
-

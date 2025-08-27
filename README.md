@@ -8,13 +8,13 @@ Local-first "throw anything at it" memory pipeline: **drop files → extract tex
 **Solution:** Drop files → extract → chunk → embed → Qdrant → search/ask. CPU-friendly defaults; heavy bits optional.
 
 ### Why jsonify2ai (30s)
-- **Local-first:** no cloud calls; works offline.  
-- **CPU-friendly:** dev stubs + tiny models.  
-- **Simple ingest:** a drop-zone and one command.  
-- **Small surface area:** no chains/agents to learn.  
-- **Extensible:** add parsers; keep the pipeline.  
+- **Local-first:** no cloud calls; works offline.
+- **CPU-friendly:** dev stubs + tiny models.
+- **Simple ingest:** a drop-zone and one command.
+- **Small surface area:** no chains/agents to learn.
+- **Extensible:** add parsers; keep the pipeline.
 
-> Need orchestration frameworks? Use LangChain/LlamaIndex.  
+> Need orchestration frameworks? Use LangChain/LlamaIndex.
 > Want files → JSON + vectors today? Use **jsonify2ai**.
 
 ## Quick Start (5-minute local demo)
@@ -159,7 +159,7 @@ python examples/control_panel.py reset --rename
 | PDF      | `.pdf`                                      | `pip install -r worker/requirements.pdf.txt`               | skipped with message  |
 | Audio    | `.wav`, `.mp3`, `.m4a`, `.flac`, `.ogg`     | `pip install -r worker/requirements.audio.txt` + ffmpeg    | dev‑mode stub or CPU STT |
 
-**Images (optional)**: `.jpg/.jpeg/.png/.webp` via BLIP → caption → embed → Qdrant.  
+**Images (optional)**: `.jpg/.jpeg/.png/.webp` via BLIP → caption → embed → Qdrant.
 Enable:
 ```bash
 pip install -r worker/requirements.images.txt
@@ -173,7 +173,7 @@ All optional parsers are **lazy‑imported**. If an optional dependency isn't in
 
 ## Dev‑mode toggles (no heavy installs required)
 
-- `EMBED_DEV_MODE=1` → deterministic stub vectors (no Ollama/embeddings).  
+- `EMBED_DEV_MODE=1` → deterministic stub vectors (no Ollama/embeddings).
 - `AUDIO_DEV_MODE=1` → quick "\[DEV] transcript of file.ext" (no faster‑whisper/ffmpeg).
 
 These make the pipeline fully offline and fast for demos/tests.
@@ -290,7 +290,7 @@ pip install -r worker/requirements.audio.txt
 pip install -r worker/requirements.all.txt
 ```
 
-> For real audio transcription, also install **ffmpeg**:  
+> For real audio transcription, also install **ffmpeg**:
 > Windows (Chocolatey): `choco install ffmpeg` • macOS (Homebrew): `brew install ffmpeg` • Debian/Ubuntu: `sudo apt-get install -y ffmpeg`
 
 ---
@@ -327,7 +327,7 @@ python scripts/ingest_dropzone.py --dir data/dropzone --export data/exports/csv.
 python examples/ask_local.py --q "Which departments and salaries are present?" --k 6 --show-sources
 ```
 
-**Linux/macOS:** `chmod +x examples/demo_*.sh && ./examples/demo_resume.sh`  
+**Linux/macOS:** `chmod +x examples/demo_*.sh && ./examples/demo_resume.sh`
 **Windows:** `.\examples\demo_resume.ps1`
 
 ---

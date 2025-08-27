@@ -1,5 +1,6 @@
 import csv
 
+
 def extract_text_from_csv(path: str, max_rows: int = 5000) -> str:
     """
     Read CSV/TSV and return a simple line-based text:

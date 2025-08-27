@@ -14,25 +14,27 @@ ROOT = sys.argv[1] if len(sys.argv) > 1 else "."
 
 # --- Ignore rules
 # Skip common heavy/noisy directories and system detritus
-IGNORE = re.compile(r'(\.git|node_modules|__pycache__|dist|build|\.venv|env|.DS_Store)')
+IGNORE = re.compile(r"(\.git|node_modules|__pycache__|dist|build|\.venv|env|.DS_Store)")
 
 # --- ADDED: image extension set
 # Minimal, broad coverage for common image types; easy to extend later.
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+
 
 # --- File signature helper
 # Reads up to 128 KiB from the file head and returns a SHA1.
 # This is stable and cheap, and lets us detect identical heads quickly.
 def file_sig(p: str) -> str:
     try:
-        with open(p, 'rb') as f:
+        with open(p, "rb") as f:
             data = f.read(1024 * 128)  # 128 KiB
         return hashlib.sha1(data).hexdigest()
     except Exception:
         return "ERR"
 
-records = []          # all files (for project.map.json)
-image_records = []    # --- ADDED: image-only view (for images.candidates.json)
+
+records = []  # all files (for project.map.json)
+image_records = []  # --- ADDED: image-only view (for images.candidates.json)
 
 # --- Walk the tree
 for dp, dn, fn in os.walk(ROOT):
@@ -65,7 +67,7 @@ for dp, dn, fn in os.walk(ROOT):
             head = ""
         else:
             try:
-                with open(p, 'r', encoding='utf-8', errors='ignore') as fh:
+                with open(p, "r", encoding="utf-8", errors="ignore") as fh:
                     # Keep the same compact preview window (8k chars)
                     head = fh.read(8000)
                 kind = "text"
@@ -92,13 +94,15 @@ for dp, dn, fn in os.walk(ROOT):
 
             # Store a minimal, ingestion-ready view for the image pipeline.
             # This file is intentionally small and fast to parse later.
-            image_records.append({
-                "path": rel,
-                "ext": ext,
-                "size": size,
-                "sig": rec["sig"],   # re-use the head hash for dedupe checks
-                "kind": "image"
-            })
+            image_records.append(
+                {
+                    "path": rel,
+                    "ext": ext,
+                    "size": size,
+                    "sig": rec["sig"],  # re-use the head hash for dedupe checks
+                    "kind": "image",
+                }
+            )
 
         records.append(rec)
 

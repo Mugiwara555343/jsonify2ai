@@ -1,6 +1,6 @@
 # worker/tests/test_parse_audio_unit.py
-import os
 from app.services.parse_audio import transcribe_audio
+
 
 def test_transcribe_audio_dev(tmp_path, monkeypatch):
     # Force dev mode so no model/download/ffmpeg is needed

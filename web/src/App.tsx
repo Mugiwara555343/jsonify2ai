@@ -78,11 +78,11 @@ function App() {
       <div style={{ marginTop: 24 }}>
         <h2 style={{ fontSize: 18, marginBottom: 8 }}>Ask</h2>
         <div style={{ display: 'flex', gap: 8 }}>
-          <input 
-            value={askQ} 
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAskQ(e.target.value)} 
-            placeholder="ask your data…" 
-            style={{ flex: 1, padding: 12, borderRadius: 8, border: '1px solid #ddd' }} 
+          <input
+            value={askQ}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAskQ(e.target.value)}
+            placeholder="ask your data…"
+            style={{ flex: 1, padding: 12, borderRadius: 8, border: '1px solid #ddd' }}
           />
           <button onClick={async () => {
             const r = await fetch(`${WORKER}/ask`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: askQ, k: 6 }) })
@@ -103,22 +103,22 @@ function App() {
         )}
       </div>
       <div style={{ marginTop: 24, display: 'flex', gap: 8 }}>
-        <input 
-          value={q} 
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQ(e.target.value)} 
-          placeholder="search…" 
-          style={{ flex: 1, padding: 12, borderRadius: 8, border: '1px solid #ddd' }} 
+        <input
+          value={q}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQ(e.target.value)}
+          placeholder="search…"
+          style={{ flex: 1, padding: 12, borderRadius: 8, border: '1px solid #ddd' }}
         />
-        <select 
-          value={kind} 
-          onChange={e => setKind(e.target.value as any)} 
+        <select
+          value={kind}
+          onChange={e => setKind(e.target.value as any)}
           style={{ padding: 12, borderRadius: 8, border: '1px solid #ddd' }}
         >
           <option value="text">text</option>
           <option value="images">images</option>
         </select>
-        <button 
-          onClick={doSearch} 
+        <button
+          onClick={doSearch}
           style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid #ddd' }}
         >
           Search
