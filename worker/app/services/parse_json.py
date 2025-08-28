@@ -1,6 +1,7 @@
 import json
 from typing import Any, List
 
+
 def _flatten(obj: Any, prefix: str = "", out: List[str] | None = None) -> List[str]:
     if out is None:
         out = []
@@ -14,10 +15,12 @@ def _flatten(obj: Any, prefix: str = "", out: List[str] | None = None) -> List[s
         out.append(f"{prefix}: {obj}")
     return out
 
+
 def extract_text_from_json(path: str) -> str:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
     return "\n".join(_flatten(data))
+
 
 def extract_text_from_jsonl(path: str, max_lines: int = 10000) -> str:
     out: List[str] = []

@@ -1,6 +1,7 @@
 import json
 from app.services.parse_json import extract_text_from_json, extract_text_from_jsonl
 
+
 def test_extract_text_from_json(tmp_path):
     p = tmp_path / "s.json"
     with open(p, "w", encoding="utf-8") as f:
@@ -9,6 +10,7 @@ def test_extract_text_from_json(tmp_path):
     assert "user.name: bob" in txt
     assert "user.age: 25" in txt
     assert "tags[0]: x" in txt
+
 
 def test_extract_text_from_jsonl(tmp_path):
     p = tmp_path / "s.jsonl"

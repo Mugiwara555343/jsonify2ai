@@ -18,21 +18,13 @@ services:
     build: ./worker
     image: jsonify2ai-worker:latest
     ports: ["8090:8090"]
-
     volumes:
       - ./data:/app/data
     environment:
-      QDRANT_URL: ${QDRANT_URL}
-      OLLAMA_URL: ${OLLAMA_URL}
+      QDRANT_URL: "http://host.docker.internal:6333"
+      OLLAMA_URL: "http://host.docker.internal:11434"
       EMBED_DEV_MODE: ${EMBED_DEV_MODE:-0}
       IMAGES_CAPTION: ${IMAGES_CAPTION:-0}
-
-    environment:
-      QDRANT_URL: ${QDRANT_URL}
-      OLLAMA_URL: ${OLLAMA_URL}
-      EMBED_DEV_MODE: ${EMBED_DEV_MODE}
-      IMAGES_CAPTION: ${IMAGES_CAPTION}
-
       ASK_MODE: ${ASK_MODE}
       ASK_MODEL: ${ASK_MODEL}
     healthcheck:

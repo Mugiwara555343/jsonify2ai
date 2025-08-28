@@ -1,22 +1,28 @@
 package routes
 
 import (
+	"bytes"
+	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
 type UploadHandler struct {
-	DB      *sql.DB
-	DocsDir string
+	DB         *sql.DB
+	DocsDir    string
+	WorkerBase string
 }
 
 // DetectKindAndMIME detects the kind and MIME type of a file
@@ -139,6 +145,39 @@ func (h *UploadHandler) Post(c *gin.Context) {
 		// Log warning but continue without database
 		c.Writer.Header().Set("X-Database-Status", "disconnected")
 	}
+
+	// Non-blocking worker dispatch
+	go func() {
+		if h.WorkerBase == "" {
+			log.Printf("[upload] worker dispatch skipped: WORKER_BASE empty")
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		payload := struct {
+			DocumentID string `json:"document_id"`
+			Path       string `json:"path"`
+			MIME       string `json:"mime"`
+			Kind       string `json:"kind"`
+		}{docID.String(), destPath, mime, kind}
+		b, _ := json.Marshal(payload)
+
+		req, err := http.NewRequestWithContext(ctx, "POST", h.WorkerBase+"/process/text", bytes.NewReader(b))
+		if err != nil {
+			log.Printf("[upload] worker req err: %v", err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			log.Printf("[upload] worker call failed: %v", err)
+			return
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		log.Printf("[upload] worker dispatched: %s status=%d", payload.DocumentID, resp.StatusCode)
+	}()
 
 	c.JSON(http.StatusOK, gin.H{
 		"ok":          true,

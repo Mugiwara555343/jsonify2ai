@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from app.config import settings
+from worker.app.config import settings
 
 
 def transcribe_audio(
@@ -24,7 +24,10 @@ def transcribe_audio(
     Returns: plain text transcript.
     """
     # Dev-mode short-circuit for tests/CI/local
-    if str(getattr(settings, "AUDIO_DEV_MODE", 0)) == "1" or os.getenv("AUDIO_DEV_MODE") == "1":
+    if (
+        str(getattr(settings, "AUDIO_DEV_MODE", 0)) == "1"
+        or os.getenv("AUDIO_DEV_MODE") == "1"
+    ):
         name = Path(path).name
         return f"[DEV] transcript of {name}"
 
@@ -49,7 +52,7 @@ def transcribe_audio(
         path,
         vad_filter=vad_filter,
         beam_size=beam_size,
-        language=None,   # let it auto-detect
+        language=None,  # let it auto-detect
     )
     # Join text pieces
     parts = []

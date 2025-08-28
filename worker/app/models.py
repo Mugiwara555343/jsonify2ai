@@ -2,9 +2,11 @@
 from pydantic import BaseModel
 from uuid import UUID
 
+
 class ImageProcessIn(BaseModel):
     document_id: UUID
     path: str  # repo-relative or absolute
+
 
 class ImageProcessOut(BaseModel):
     ok: bool = True

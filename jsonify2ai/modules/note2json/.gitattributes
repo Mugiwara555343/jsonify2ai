@@ -1,4 +1,3 @@
-HEAD
 # Normalize text files to LF on checkout/commit (cross-platform friendly)
 * text=auto eol=lf
 
@@ -23,24 +22,3 @@ HEAD
 *.zip   binary
 *.gz    binary
 *.whl   binary
-=======
-* text=auto eol=lf
-*.py   text eol=lf
-*.md   text eol=lf
-*.txt  text eol=lf
-*.json text eol=lf
-*.toml text eol=lf
-*.yml  text eol=lf
-*.yaml text eol=lf
-*.sh   text eol=lf
-*.ps1  text eol=lf
-*.png  binary
-*.jpg  binary
-*.jpeg binary
-*.gif  binary
-*.ico  binary
-*.pdf  binary
-*.zip  binary
-*.gz   binary
-*.whl  binary
-41d448f (feat(cli): add --version; chore: pre-commit & .gitattributes for LF and hygiene)

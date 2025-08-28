@@ -1,5 +1,8 @@
 #!/usr/bin/env python
-import os, time, subprocess, sys
+import os
+import time
+import subprocess
+import sys
 from pathlib import Path
 
 DEBOUNCE_SEC = float(os.getenv("WATCH_DEBOUNCE_SEC", "1.0"))
@@ -13,6 +16,7 @@ IGNORE_NAMES = {".DS_Store", "Thumbs.db"}
 IGNORE_PREFIXES = ("~$",)  # Office temp files
 _running = False
 
+
 def _should_ignore(path: str) -> bool:
     name = os.path.basename(path)
     if name.startswith(".") or name in IGNORE_NAMES:
@@ -23,27 +27,40 @@ def _should_ignore(path: str) -> bool:
         return True
     return False
 
+
 def _ensure_dirs():
     DROPZONE.mkdir(parents=True, exist_ok=True)
     EXPORT.parent.mkdir(parents=True, exist_ok=True)
 
+
 def _run_ingest():
     env = os.environ.copy()
     env["PYTHONPATH"] = PYTHONPATH
-    cmd = [sys.executable, "scripts/ingest_dropzone.py", "--dir", str(DROPZONE), "--export", str(EXPORT)]
+    cmd = [
+        sys.executable,
+        "scripts/ingest_dropzone.py",
+        "--dir",
+        str(DROPZONE),
+        "--export",
+        str(EXPORT),
+    ]
     return subprocess.call(cmd, env=env)
+
 
 def main():
     try:
         from watchdog.observers import Observer
         from watchdog.events import FileSystemEventHandler
     except Exception:
-        print("watchdrop: missing dependency 'watchdog'. Install with: pip install watchdog")
+        print(
+            "watchdrop: missing dependency 'watchdog'. Install with: pip install watchdog"
+        )
         sys.exit(1)
 
     class Handler(FileSystemEventHandler):
         def __init__(self):
             self._last = 0.0
+
         def _maybe_ingest(self, p: str, kind: str):
             global _running
             if _should_ignore(p):
@@ -61,15 +78,19 @@ def main():
                 print(f"[watch] ingest done rc={rc}")
             finally:
                 _running = False
+
         def on_created(self, event):
             if not event.is_directory:
                 self._maybe_ingest(event.src_path, "created")
+
         def on_modified(self, event):
             if not event.is_directory:
                 self._maybe_ingest(event.src_path, "modified")
+
         def on_moved(self, event):
             if not event.is_directory:
                 self._maybe_ingest(event.dest_path, "moved")
+
         # NOTE: intentionally ignore on_deleted
 
     _ensure_dirs()
@@ -83,7 +104,9 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        obs.stop(); obs.join()
+        obs.stop()
+        obs.join()
+
 
 if __name__ == "__main__":
     main()

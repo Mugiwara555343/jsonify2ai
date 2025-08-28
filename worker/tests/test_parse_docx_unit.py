@@ -3,6 +3,7 @@ import pytest
 
 try:
     from docx import Document  # type: ignore
+
     DOCX_AVAILABLE = True
 except Exception:
     DOCX_AVAILABLE = False
@@ -13,6 +14,7 @@ pytestmark = pytest.mark.skipif(
     not DOCX_AVAILABLE,
     reason="python-docx not installed; install with 'pip install python-docx' to run this test",
 )
+
 
 def test_extract_text_from_docx(tmp_path):
     p = tmp_path / "s.docx"

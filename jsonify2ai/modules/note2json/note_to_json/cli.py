@@ -4,6 +4,7 @@ note_to_json.cli
 
 Command-line interface for the note-to-json parser.
 """
+
 from . import __version__
 import argparse
 import glob
@@ -11,7 +12,6 @@ import json
 import sys
 from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
-from . import __version__
 from .parser import read_input, ParsingError
 from .utils import read_text_safely, read_stdin_safely
 import time

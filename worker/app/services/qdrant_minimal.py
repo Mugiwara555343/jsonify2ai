@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Optional, Tuple
 import requests
 
-from app.config import settings
+from worker.app.config import settings
 
 
 def _qdrant_base() -> str:
@@ -29,10 +29,7 @@ def ensure_collection_minimal(name: str, dim: int) -> Tuple[bool, Optional[str]]
         if r.status_code == 200:
             data = r.json()
             size = (
-                data.get("config", {})
-                .get("params", {})
-                .get("vectors", {})
-                .get("size")
+                data.get("config", {}).get("params", {}).get("vectors", {}).get("size")
             )
             if size == dim:
                 return True, None  # existed + OK  :contentReference[oaicite:0]{index=0}
