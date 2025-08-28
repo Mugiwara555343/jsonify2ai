@@ -1,7 +1,7 @@
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
 from typing import List, Dict, Any
-from ..config import settings
+from worker.app.config import settings
 
 
 def get_qdrant_client() -> QdrantClient:
@@ -69,3 +69,30 @@ def upsert_points(
         points=points,
         parallel=1,  # MVP: sequential processing
     )
+
+
+def upsert_points_min(
+    collection_name: str,
+    items: List[tuple],
+) -> int:
+    """
+    Minimal upsert function that takes (id, vector, payload) tuples.
+
+    Args:
+        collection_name: Collection name
+        items: List of (id, vector, payload) tuples
+
+    Returns:
+        Number of points upserted
+    """
+    client = get_qdrant_client()
+    points = []
+    for point_id, vector, payload in items:
+        points.append({"id": point_id, "vector": vector, "payload": payload})
+
+    client.upsert(
+        collection_name=collection_name,
+        points=points,
+        parallel=1,
+    )
+    return len(points)

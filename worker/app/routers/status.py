@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from qdrant_client import QdrantClient
-from ..config import settings
-from ..qdrant_init import collections_status
+from worker.app.config import settings
+from worker.app.qdrant_init import collections_status
 
 router = APIRouter()
 

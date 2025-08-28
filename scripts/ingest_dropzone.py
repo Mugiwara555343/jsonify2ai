@@ -16,7 +16,6 @@ import argparse
 import importlib.util
 import json
 import os
-import sys
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -24,26 +23,12 @@ from typing import Iterable, List, Dict, Any, Tuple, Callable, Optional
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct
 
-# --- allow "from app..." imports when running from repo root
-REPO_ROOT = Path(__file__).resolve().parents[1]
-WORKER_DIR = REPO_ROOT / "worker"
-if str(WORKER_DIR) not in sys.path:
-    sys.path.insert(0, str(WORKER_DIR))
-
-# --- worker imports (after path manipulation)
-try:
-    from app.config import settings
-    from app.services.chunker import chunk_text
-    from app.services.image_caption import caption_image
-    from app.services.embed_ollama import embed_texts
-    from app.routers.qdrant_utils import ensure_collection
-except ImportError:
-    # Fallback if imports fail
-    settings = None
-    chunk_text = None
-    caption_image = None
-    embed_texts = None
-    ensure_collection = None
+# --- worker imports
+from worker.app.config import settings
+from worker.app.services.chunker import chunk_text
+from worker.app.services.image_caption import caption_image
+from worker.app.services.embed_ollama import embed_texts
+from worker.app.routers.qdrant_utils import ensure_collection
 
 
 # --- Qdrant helpers ---
@@ -123,19 +108,19 @@ def _module_available(name: str) -> bool:
 
 # Each factory returns a callable (path: str) -> str
 def _csv_factory():
-    from app.services.parse_csv import extract_text_from_csv
+    from worker.app.services.parse_csv import extract_text_from_csv
 
     return extract_text_from_csv
 
 
 def _json_factory():
-    from app.services.parse_json import extract_text_from_json
+    from worker.app.services.parse_json import extract_text_from_json
 
     return extract_text_from_json
 
 
 def _jsonl_factory():
-    from app.services.parse_json import extract_text_from_jsonl
+    from worker.app.services.parse_json import extract_text_from_jsonl
 
     return extract_text_from_jsonl
 
@@ -145,7 +130,7 @@ def _docx_factory():
         raise RuntimeError(
             "python-docx not installed; install with: pip install python-docx"
         )
-    from app.services.parse_docx import extract_text_from_docx
+    from worker.app.services.parse_docx import extract_text_from_docx
 
     return extract_text_from_docx
 
@@ -153,14 +138,14 @@ def _docx_factory():
 def _pdf_factory():
     if not _module_available("pypdf"):
         raise RuntimeError("pypdf not installed; install with: pip install pypdf")
-    from app.services.parse_pdf import extract_text_from_pdf
+    from worker.app.services.parse_pdf import extract_text_from_pdf
 
     return extract_text_from_pdf
 
 
 def _audio_factory():
     # dev-mode works without faster-whisper; real STT requires it (+ ffmpeg)
-    from app.services.parse_audio import transcribe_audio
+    from worker.app.services.parse_audio import transcribe_audio
 
     return transcribe_audio
 
@@ -280,14 +265,14 @@ def _deterministic_vec(s: str, dim: int) -> List[float]:
 
 
 def _embed_texts(texts: List[str]) -> List[List[float]]:
-    dim = int(settings.EMBEDDING_DIM)
+    dim = int(getattr(settings, "EMBEDDING_DIM", 768))
     if (
         str(getattr(settings, "EMBED_DEV_MODE", 0)) == "1"
         or os.getenv("EMBED_DEV_MODE") == "1"
     ):
         return [_deterministic_vec(t, dim) for t in texts]
     try:
-        from app.services.embed_ollama import embed_texts as embed_texts_real  # type: ignore
+        from worker.app.services.embed_ollama import embed_texts as embed_texts_real  # type: ignore
     except Exception:
         raise RuntimeError(
             "No embedder available. Either set EMBED_DEV_MODE=1 or install/run an embedding backend."
@@ -320,18 +305,18 @@ def ingest_dir(
     """Core ingest routine."""
     from qdrant_client import QdrantClient
 
-    client = QdrantClient(url=settings.QDRANT_URL)
+    client = QdrantClient(url=getattr(settings, "QDRANT_URL", "http://localhost:6333"))
 
     # Print one-liner summary before ingest starts
     print(
-        f"[ingest] target collection={settings.QDRANT_COLLECTION} expected_dim={settings.EMBEDDING_DIM}"
+        f"[ingest] target collection={getattr(settings, 'QDRANT_COLLECTION', 'jsonify2ai_chunks')} expected_dim={getattr(settings, 'EMBEDDING_DIM', 768)}"
     )
 
     # Use the new hardened collection handling
     _ensure_collection(
         client,
-        settings.QDRANT_COLLECTION,
-        dim=int(settings.EMBEDDING_DIM),
+        getattr(settings, "QDRANT_COLLECTION", "jsonify2ai_chunks"),
+        dim=int(getattr(settings, "EMBEDDING_DIM", 768)),
         distance="Cosine",
         recreate_bad=recreate_bad,
     )
@@ -357,7 +342,9 @@ def ingest_dir(
                 cap = caption_image(fp)
                 vec = embed_texts([cap])[0]
                 qdr.upsert(
-                    collection_name=settings.QDRANT_COLLECTION_IMAGES,
+                    collection_name=getattr(
+                        settings, "QDRANT_COLLECTION_IMAGES", "jsonify2ai_images_768"
+                    ),
                     points=[
                         PointStruct(
                             id=str(uuid.uuid4()),
@@ -388,7 +375,9 @@ def ingest_dir(
 
         chunks = list(
             chunk_text(
-                raw, size=int(settings.CHUNK_SIZE), overlap=int(settings.CHUNK_OVERLAP)
+                raw,
+                size=int(getattr(settings, "CHUNK_SIZE", 1000)),
+                overlap=int(getattr(settings, "CHUNK_OVERLAP", 200)),
             )
         )
         if not chunks:
@@ -423,7 +412,7 @@ def ingest_dir(
     return {
         "files_seen": total_files,
         "chunks_upserted": total_chunks,
-        "collection": settings.QDRANT_COLLECTION,
+        "collection": getattr(settings, "QDRANT_COLLECTION", "jsonify2ai_chunks"),
         "skipped": skipped,
     }
 
@@ -458,11 +447,13 @@ def main():
     )
 
     # Image handling setup
-    do_images = bool(settings.IMAGES_CAPTION)
-    qdr = QdrantClient(url=settings.QDRANT_URL)
+    do_images = bool(getattr(settings, "IMAGES_CAPTION", 0))
+    qdr = QdrantClient(url=getattr(settings, "QDRANT_URL", "http://localhost:6333"))
     if do_images:
         ensure_collection(
-            qdr, settings.QDRANT_COLLECTION_IMAGES, settings.EMBEDDING_DIM
+            qdr,
+            getattr(settings, "QDRANT_COLLECTION_IMAGES", "jsonify2ai_images_768"),
+            getattr(settings, "EMBEDDING_DIM", 768),
         )
 
     res = ingest_dir(

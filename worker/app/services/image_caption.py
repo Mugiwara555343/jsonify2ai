@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-from app.config import settings
+from worker.app.config import settings
 
 _BLIP = None
 

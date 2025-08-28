@@ -21,8 +21,8 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      QDRANT_URL: ${QDRANT_URL}
-      OLLAMA_URL: ${OLLAMA_URL}
+      QDRANT_URL: "http://host.docker.internal:6333"
+      OLLAMA_URL: "http://host.docker.internal:11434"
       EMBED_DEV_MODE: ${EMBED_DEV_MODE:-0}
       IMAGES_CAPTION: ${IMAGES_CAPTION:-0}
       ASK_MODE: ${ASK_MODE}

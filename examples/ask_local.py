@@ -23,8 +23,8 @@ import time
 from typing import List, Tuple
 
 # bring in worker settings + embeddings (dev mode or real)
-from app.config import settings
-from app.services.embed_ollama import (
+from worker.app.config import settings
+from worker.app.services.embed_ollama import (
     embed_texts,
 )  # uses Settings: OLLAMA_URL, EMBED_DEV_MODE, etc.
 

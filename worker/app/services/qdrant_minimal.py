@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Optional, Tuple
 import requests
 
-from app.config import settings
+from worker.app.config import settings
 
 
 def _qdrant_base() -> str:

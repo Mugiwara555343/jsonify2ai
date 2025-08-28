@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from app.config import settings
+from worker.app.config import settings
 
 
 def transcribe_audio(

@@ -2,12 +2,7 @@ import requests
 import hashlib
 import os
 from typing import List
-import sys
-from pathlib import Path
-
-# Add the app directory to the path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import settings
+from worker.app.config import settings
 
 
 def _parse_embeddings(json_obj) -> List[List[float]]:

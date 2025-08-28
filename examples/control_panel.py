@@ -32,7 +32,7 @@ if str(REPO_ROOT / "worker") not in sys.path:
 
 # Import after path manipulation
 try:
-    from app.config import settings  # type: ignore
+    from worker.app.config import settings  # type: ignore
     from qdrant_client import QdrantClient, models  # type: ignore
 except ImportError:
     # Fallback if imports fail

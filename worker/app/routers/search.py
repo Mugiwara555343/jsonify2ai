@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Query
 from typing import Literal
 from qdrant_client import QdrantClient
-from ..config import settings
-from ..services.embed_ollama import embed_texts
+from worker.app.config import settings
+from worker.app.services.embed_ollama import embed_texts
 
 router = APIRouter()
 
