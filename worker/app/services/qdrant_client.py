@@ -89,7 +89,9 @@ def ensure_collection(
     qc = client or get_qdrant_client()
     name = name or settings.QDRANT_COLLECTION
     dim = dim or settings.EMBEDDING_DIM
-    recreate_bad = (settings.QDRANT_RECREATE_BAD == 1) if recreate_bad is None else recreate_bad
+    recreate_bad = (
+        (settings.QDRANT_RECREATE_BAD == 1) if recreate_bad is None else recreate_bad
+    )
 
     if not _collection_exists(qc, name):
         qc.recreate_collection(
@@ -176,7 +178,9 @@ def upsert_points(
             expected_dim = getattr(settings, "EMBEDDING_DIM", 768)
             if not isinstance(vec, list) or len(vec) != expected_dim:
                 points_skipped_embed_error += 1
-                print(f"[warn] Skipping upsert id={pid} due to embedding shape: got {type(vec)} len={len(vec) if isinstance(vec, list) else 'N/A'}")
+                print(
+                    f"[warn] Skipping upsert id={pid} due to embedding shape: got {type(vec)} len={len(vec) if isinstance(vec, list) else 'N/A'}"
+                )
                 continue
             valid_points.append(models.PointStruct(id=pid, vector=vec, payload=payload))
             print({"upserted": pid, "vector_len": len(vec)})
@@ -189,12 +193,27 @@ def upsert_points(
             # If it's a Qdrant HTTP error, print raw status/body and request payload
             try:
                 from qdrant_client.http.exceptions import UnexpectedResponse
+
                 if isinstance(e, UnexpectedResponse):
                     import json
-                    print("[error] upsert request payload (truncated):", json.dumps([p.dict() for p in valid_points])[:2000], file=sys.stderr)
+
+                    print(
+                        "[error] upsert request payload (truncated):",
+                        json.dumps([p.dict() for p in valid_points])[:2000],
+                        file=sys.stderr,
+                    )
                     if valid_points:
-                        print("[error] upsert summary: points_count=", len(valid_points), "first_point_keys=", list(valid_points[0].dict().keys()), file=sys.stderr)
-                    print(f"[qdrant error] status={e.status_code} body={e.body}", file=sys.stderr)
+                        print(
+                            "[error] upsert summary: points_count=",
+                            len(valid_points),
+                            "first_point_keys=",
+                            list(valid_points[0].dict().keys()),
+                            file=sys.stderr,
+                        )
+                    print(
+                        f"[qdrant error] status={e.status_code} body={e.body}",
+                        file=sys.stderr,
+                    )
             except Exception:
                 pass
             print(f"[error] upsert failed: {e}", file=sys.stderr)
@@ -210,9 +229,17 @@ def delete_by_document_id(
     """Delete all points with payload.document_id == given value. Returns deleted count (best-effort)."""
     qc = client or get_qdrant_client()
     col = collection_name or settings.QDRANT_COLLECTION
-    flt = models.Filter(must=[models.FieldCondition(key="document_id", match=models.MatchValue(value=document_id))])
+    flt = models.Filter(
+        must=[
+            models.FieldCondition(
+                key="document_id", match=models.MatchValue(value=document_id)
+            )
+        ]
+    )
     try:
-        res = qc.delete(collection_name=col, points_selector=models.FilterSelector(filter=flt))
+        res = qc.delete(
+            collection_name=col, points_selector=models.FilterSelector(filter=flt)
+        )
         # qdrant doesn't always return a count; try to read it, else -1 (unknown)
         return int(getattr(res, "status", 0) == "acknowledged") or -1
     except Exception:
@@ -232,11 +259,19 @@ def build_filter(
     """Convenience helper to compose common filters."""
     must: List[models.Condition] = []
     if document_id:
-        must.append(models.FieldCondition(key="document_id", match=models.MatchValue(value=document_id)))
+        must.append(
+            models.FieldCondition(
+                key="document_id", match=models.MatchValue(value=document_id)
+            )
+        )
     if kind:
-        must.append(models.FieldCondition(key="kind", match=models.MatchValue(value=kind)))
+        must.append(
+            models.FieldCondition(key="kind", match=models.MatchValue(value=kind))
+        )
     if path:
-        must.append(models.FieldCondition(key="path", match=models.MatchValue(value=path)))
+        must.append(
+            models.FieldCondition(key="path", match=models.MatchValue(value=path))
+        )
 
     if extra_must:
         must.extend(extra_must)
@@ -257,7 +292,9 @@ def search(
     """Search similar vectors in the explicit collection. Checks schema and prints debug diagnostics if requested."""
     qc = client or get_qdrant_client()
     if not collection_name:
-        raise RuntimeError("No Qdrant collection specified. Use --collection or set QDRANT_COLLECTION.")
+        raise RuntimeError(
+            "No Qdrant collection specified. Use --collection or set QDRANT_COLLECTION."
+        )
     # Check collection exists and schema matches
     try:
         info = qc.get_collection(collection_name)
@@ -277,13 +314,19 @@ def search(
             dist = None
         expected_dim = getattr(settings, "EMBEDDING_DIM", 768)
         if dim != expected_dim or (dist and str(dist).lower() != "cosine"):
-            raise RuntimeError(f"collection {collection_name} schema mismatch: expected dim={expected_dim} distance=Cosine — see README sanity checks")
+            raise RuntimeError(
+                f"collection {collection_name} schema mismatch: expected dim={expected_dim} distance=Cosine — see README sanity checks"
+            )
     except Exception as e:
-        raise RuntimeError(f"Failed to fetch collection info for '{collection_name}': {e}")
+        raise RuntimeError(
+            f"Failed to fetch collection info for '{collection_name}': {e}"
+        )
 
     # Debug diagnostics: raw collection JSON and parsed fields
     if debug:
-        import requests, json
+        import requests
+        import json
+
         url = getattr(settings, "QDRANT_URL", None)
         if url:
             endpoint = url.rstrip("/") + f"/collections/{collection_name}"
@@ -297,10 +340,16 @@ def search(
                     indexed_vectors_count = result.get("indexed_vectors_count")
                     # Some Qdrant versions nest indexed_vectors_count
                     if indexed_vectors_count is None and "result" in result:
-                        indexed_vectors_count = result["result"].get("indexed_vectors_count")
-                    print(f"debug: collection={collection_name} raw_points_count={points_count} indexed_vectors_count={indexed_vectors_count}")
+                        indexed_vectors_count = result["result"].get(
+                            "indexed_vectors_count"
+                        )
+                    print(
+                        f"debug: collection={collection_name} raw_points_count={points_count} indexed_vectors_count={indexed_vectors_count}"
+                    )
                 else:
-                    print(f"debug: GET {endpoint} status={resp.status_code} body={resp.text}")
+                    print(
+                        f"debug: GET {endpoint} status={resp.status_code} body={resp.text}"
+                    )
             except Exception as e:
                 print(f"debug: collection={collection_name} diagnostics error: {e}")
 
