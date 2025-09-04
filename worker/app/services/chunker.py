@@ -62,12 +62,11 @@ def chunk_text(
     """
     Chunk text using a stable sliding window with optional whitespace-aware cuts.
 
-    Args:
-        text: Input text to chunk.
-        size: Max chunk size in characters (defaults to settings.CHUNK_SIZE).
-        overlap: Overlap in characters (defaults to settings.CHUNK_OVERLAP).
-        normalize_whitespace: Collapse whitespace before chunking
-                              (defaults to bool(settings.NORMALIZE_WHITESPACE)).
+    Implementation notes:
+    - Step advances by (size - overlap). The last chunk may be shorter.
+    - Overlap is clamped to [0, size-1] to guarantee forward progress.
+    - Uses _next_cut to prefer whitespace cuts; falls back to fixed-size cuts.
+    - Matches unit tests which expect overlapping windows (e.g. for len=200, size=100, overlap=20 -> 3 chunks).
 
     Returns:
         List of text chunks (str), in order, covering the entire text.
@@ -89,22 +88,26 @@ def chunk_text(
     # Guard rails
     if size <= 0:
         return []
-    # Ensure we always make progress even if overlap >= size (bad config or override)
-    effective_step = max(1, size - max(0, overlap))
 
-    if len(text) <= size:
-        return [text]
+    # Clamp overlap so we always make progress
+    overlap = max(0, int(overlap))
+    if overlap >= size:
+        overlap = max(0, size - 1)
 
-    chunks: List[str] = []
-    start = 0
+    step = max(1, size - overlap)
     N = len(text)
+    chunks: List[str] = []
+
+    start = 0
+    prev_start = -1
 
     while start < N:
-        # Choose a whitespace-friendly cut where possible
+        # choose a cut inside the window (whitespace preferred)
         end = _next_cut(text, start, size)
-        # Safety: ensure forward progress even if _next_cut returns start
+        # safety fallback
         if end <= start:
-            end = min(N, start + size)
+            end = min(start + size, N)
+
         chunk = text[start:end].strip()
         if chunk:
             chunks.append(chunk)
@@ -112,23 +115,20 @@ def chunk_text(
         if end >= N:
             break
 
-        # New start accounts for desired overlap; ensure monotonic advance
-        start = max(0, end - overlap)
-        if start <= 0:
-            # if we somehow wrap, jump forward by effective_step
-            start = min(N, start + effective_step)
-        # Last resort: monotonic advance guarantee
-        if start <= end - size + 1:
-            start = end - size + 1
-        if start <= end - effective_step:
-            start = end - overlap
-        if start <= end - 1:
-            start = end - overlap
-        if start <= end - overlap:
-            # final clamp to guarantee progress
-            start = end - overlap
-        if start <= end - overlap:
-            # if overlap is too large, step by effective_step
-            start = end - overlap if (end - overlap) > start else start + effective_step
+        # desired next start to achieve overlap
+        next_start = end - overlap
+        if next_start <= start:
+            # if overlap too large or no progress, advance by step
+            next_start = start + step
+
+        # enforce monotonic growth and not to exceed bounds
+        if next_start <= prev_start:
+            next_start = prev_start + step if prev_start >= 0 else start + step
+
+        prev_start = start
+        start = min(next_start, N)
 
     return chunks
+
+
+__all__ = ["chunk_text"]
