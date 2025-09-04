@@ -1,19 +1,32 @@
 #!/usr/bin/env python3
+# --- repo-root import bootstrap (works even if PYTHONPATH is unset) ----------
+from __future__ import annotations
+import sys
+import pathlib
+
+REPO_ROOT = (
+    pathlib.Path(__file__).resolve().parents[1]
+)  # parent of 'scripts/' or 'examples/'
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+# -----------------------------------------------------------------------------
 """
 ask_local.py — query -> retrieve -> (optional) answer
 
 Usage:
-  # simple
-  PYTHONPATH=worker python examples/ask_local.py --q "what's in the pdf?" --k 6
+  # retrieval-only (default)
+  PYTHONPATH=worker python examples/ask_local.py --q "what's in the pdf?" -k 6
 
-  # ask a local LLM via Ollama (if available)
-  PYTHONPATH=worker python examples/ask_local.py --q "summarize the resume" --llm --model llama3.1
+  # with optional filters
+  PYTHONPATH=worker python examples/ask_local.py --q "install steps" --kind text --path README.md
+
+  # ask a local LLM via Ollama (uses settings by default)
+  PYTHONPATH=worker python examples/ask_local.py --q "summarize the repo" --llm
 
   # interactive mode
   PYTHONPATH=worker python examples/ask_local.py --llm
 """
 
-from __future__ import annotations
 import argparse
 import json
 import os
@@ -22,63 +35,48 @@ import textwrap
 import time
 from typing import List, Tuple
 
-# bring in worker settings + embeddings (dev mode or real)
+
+# Environment config (align with worker services)
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "jsonify2ai_chunks")
+EMBEDDINGS_MODEL = os.getenv("EMBEDDINGS_MODEL", "nomic-embed-text")
+EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "768"))
+
 from worker.app.config import settings
-from worker.app.services.embed_ollama import (
-    embed_texts,
-)  # uses Settings: OLLAMA_URL, EMBED_DEV_MODE, etc.
+from worker.app.services.embed_ollama import embed_texts
+from worker.app.services.qdrant_client import (
+    get_qdrant_client,
+    search as q_search,
+    build_filter,
+)
 
-from qdrant_client import QdrantClient, models
-import requests
-
-
-def _connect_qdrant() -> QdrantClient:
-    url = settings.QDRANT_URL
-    try:
-        c = QdrantClient(url=url, timeout=10.0)
-        # light ping
-        _ = c.get_collections()
-        return c
-    except Exception as e:
-        print(f"[error] Could not reach Qdrant at {url}: {e}", file=sys.stderr)
-        sys.exit(2)
+try:
+    import requests
+except Exception:  # pragma: no cover
+    requests = None  # type: ignore
 
 
 def _embed_query(query: str) -> List[float]:
-    try:
-        vecs = embed_texts([query])  # returns List[List[float]]
-        return vecs[0]
-    except Exception as e:
-        print(f"[error] embedding failed: {e}", file=sys.stderr)
-        sys.exit(3)
-
-
-def _search(
-    c: QdrantClient, query_vec: List[float], k: int
-) -> List[models.ScoredPoint]:
-    col = settings.QDRANT_COLLECTION
-    try:
-        res = c.search(
-            collection_name=col,
-            query_vector=query_vec,
-            limit=k,
-            with_payload=True,
+    vecs = embed_texts([query])  # returns List[List[float]]
+    if not vecs or not vecs[0]:
+        raise RuntimeError("embedding returned no vectors")
+    # Optionally check embedding dim
+    if len(vecs[0]) != EMBEDDING_DIM:
+        raise RuntimeError(
+            f"Embedding dimension mismatch: expected {EMBEDDING_DIM}, got {len(vecs[0])}"
         )
-        return res
-    except Exception as e:
-        print(f"[error] search failed in collection '{col}': {e}", file=sys.stderr)
-        sys.exit(4)
+    return vecs[0]
 
 
 def _build_context(
-    points: List[models.ScoredPoint], max_chars: int = 1800
+    points,
+    max_chars: int = 1800,
 ) -> Tuple[str, List[dict]]:
-    """Concatenate top chunks into a context window and return simple source list."""
-    parts = []
-    sources = []
+    """Concatenate top chunks into a context window; collect compact sources."""
+    parts: List[str] = []
+    sources: List[dict] = []
     used = 0
     for p in points:
-        payload = p.payload or {}
+        payload = getattr(p, "payload", None) or {}
         text = (payload.get("text") or "").strip()
         path = payload.get("path") or ""
         idx = payload.get("idx")
@@ -94,7 +92,7 @@ def _build_context(
             {
                 "path": path,
                 "idx": idx,
-                "score": float(p.score) if hasattr(p, "score") else None,
+                "score": float(getattr(p, "score", 0.0)),
             }
         )
     ctx = "\n".join(parts).strip()
@@ -102,8 +100,9 @@ def _build_context(
 
 
 def _ask_llm(prompt: str, model: str, max_tokens: int, temperature: float) -> str:
-    """Call Ollama /api/generate; fall back with helpful message if unreachable."""
     url = os.getenv("OLLAMA_URL", settings.OLLAMA_URL or "http://localhost:11434")
+    if not requests:
+        return f"[requests not installed]\n---\nPrompt preview:\n{prompt[:600]}"
     try:
         r = requests.post(
             f"{url}/api/generate",
@@ -125,26 +124,38 @@ def _ask_llm(prompt: str, model: str, max_tokens: int, temperature: float) -> st
 
 def main():
     ap = argparse.ArgumentParser(description="Local Ask over Qdrant (optional Ollama)")
-    ap.add_argument("--q", "--query", dest="query", type=str, help="Your question")
     ap.add_argument(
-        "--k", type=int, default=6, help="Top-k chunks to retrieve (default: 6)"
+        "--collection",
+        type=str,
+        default=None,
+        help="Override Qdrant collection for ad-hoc tests",
     )
+    ap.add_argument(
+        "--debug", action="store_true", help="Print preflight and diagnostics"
+    )
+    ap.add_argument("--q", "--query", dest="query", type=str, help="Your question")
+    ap.add_argument("-k", "--topk", dest="k", type=int, default=6, help="Top-k chunks")
+    # optional scope filters
+    ap.add_argument(
+        "--document-id", type=str, default=None, help="Filter by document_id"
+    )
+    ap.add_argument("--kind", type=str, default=None, help="Filter by payload.kind")
+    ap.add_argument("--path", type=str, default=None, help="Filter by payload.path")
+    # LLM options
     ap.add_argument("--llm", action="store_true", help="Ask local LLM via Ollama")
     ap.add_argument(
         "--model",
         type=str,
-        default=os.getenv("ASK_MODEL", "llama3.1"),
-        help="Ollama model to use when --llm (default: llama3.1)",
+        default=os.getenv("ASK_MODEL", settings.ASK_MODEL),
+        help=f"Ollama model when --llm (default: {settings.ASK_MODEL})",
     )
-    ap.add_argument("--max-tokens", type=int, default=400)
-    ap.add_argument("--temperature", type=float, default=0.2)
-    ap.add_argument(
-        "--show-sources", action="store_true", help="Print source list after answer"
-    )
+    ap.add_argument("--max-tokens", type=int, default=settings.ASK_MAX_TOKENS)
+    ap.add_argument("--temperature", type=float, default=settings.ASK_TEMP)
+    # Output toggles
+    ap.add_argument("--show-sources", action="store_true", help="Print source list")
     ap.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     args = ap.parse_args()
 
-    # interactive prompt (nice for “control panel” feel)
     query = args.query
     if not query:
         try:
@@ -156,34 +167,75 @@ def main():
         print("[hint] empty question. try again with --q 'your question'.")
         return
 
-    c = _connect_qdrant()
+    # Resolve collection name precedence: CLI > env > settings > hardcoded
+    collection = (
+        args.collection
+        or getattr(settings, "QDRANT_COLLECTION", None)
+        or os.getenv("QDRANT_COLLECTION")
+    )
+    if not collection:
+        print(
+            "[error] No Qdrant collection specified. Use --collection or set QDRANT_COLLECTION in env/settings."
+        )
+        sys.exit(1)
+
+    if args.debug:
+        print(
+            f"searching collection={collection} embed_model={getattr(settings, 'EMBEDDINGS_MODEL', EMBEDDINGS_MODEL)} dim={getattr(settings, 'EMBEDDING_DIM', EMBEDDING_DIM)}"
+        )
+
+    # Connect + embed
+    client = get_qdrant_client()
     qv = _embed_query(query)
-    pts = _search(c, qv, args.k)
-    if not pts:
-        msg = "[no results] Your index might be empty, or embeddings mismatch this collection."
-        print(msg)
+
+    # Build optional filter
+    qfilter = build_filter(document_id=args.document_id, kind=args.kind, path=args.path)
+
+    # Search (explicit collection)
+    try:
+        points = q_search(
+            qv,
+            k=args.k,
+            client=client,
+            query_filter=qfilter,
+            with_payload=True,
+            collection_name=collection,
+            debug=args.debug,
+        )
+    except Exception as e:
+        print(f"[error] {e}")
+        sys.exit(1)
+    if not points:
+        msg = "[no results] index empty or query not matched."
         if args.json:
             print(json.dumps({"ok": False, "message": msg}, ensure_ascii=False))
+        else:
+            print(msg)
         return
 
-    context, sources = _build_context(pts)
+    # Build context + sources
+    context, sources = _build_context(points)
 
-    system = "You are a concise assistant. Use ONLY the provided context. If unsure, say you don't know."
-    user = f"Question:\n{query}\n\nContext:\n{context}"
-    prompt = f"{system}\n\n{user}\n\nAnswer:"
+    # Retrieval-only or LLM mode (default respects settings)
+    use_llm = args.llm or (getattr(settings, "ASK_MODE", "search") == "llm")
 
-    answer = None
-    if args.llm:
+    if use_llm:
+        system = (
+            "You are a concise assistant. Use ONLY the provided context. "
+            "If the answer is not in context, say you don't know."
+        )
+        user = f"Question:\n{query}\n\nContext:\n{context}"
+        prompt = f"{system}\n\n{user}\n\nAnswer:"
         answer = _ask_llm(
-            prompt,
+            prompt=prompt,
             model=args.model,
             max_tokens=args.max_tokens,
             temperature=args.temperature,
         )
     else:
-        # retrieval-only mode
         answer = "Top snippets (retrieval-only mode):\n" + "\n---\n".join(
-            s.get("path") or "(unknown)" for s in sources[:3]
+            f"{(s.get('path') or '(unknown)')}  (chunk #{s.get('idx')})  score={s.get('score'):.4f}"
+            for s in sources[:3]
         )
 
     if args.json:
@@ -194,6 +246,11 @@ def main():
                     "query": query,
                     "answer": answer,
                     "sources": sources if args.show_sources else None,
+                    "filters": {
+                        "document_id": args.document_id,
+                        "kind": args.kind,
+                        "path": args.path,
+                    },
                 },
                 ensure_ascii=False,
             )

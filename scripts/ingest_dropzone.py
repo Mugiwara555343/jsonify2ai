@@ -1,103 +1,101 @@
 #!/usr/bin/env python3
+# --- repo-root import bootstrap (works even if PYTHONPATH is unset) ----------
+from __future__ import annotations
+import sys
+import pathlib
+
+REPO_ROOT = (
+    pathlib.Path(__file__).resolve().parents[1]
+)  # parent of 'scripts/' or 'examples/'
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+# -----------------------------------------------------------------------------
 """
-Batch-ingest a 'drop zone' folder into JSON+Qdrant.
+Batch-ingest a 'drop zone' folder into JSON+Qdrant, using the same contract as /process,
+plus read-only inspection utilities (--stats, --list).
 
 Usage:
-  PYTHONPATH=worker python scripts/ingest_dropzone.py \
-    --dir data/dropzone --export data/exports/ingest.jsonl
-  # optional hard-fail on missing optional deps:
-  PYTHONPATH=worker python scripts/ingest_dropzone.py --strict
-  # optional fix when an old collection has wrong vector size:
-  PYTHONPATH=worker python scripts/ingest_dropzone.py --recreate-bad-collection
+    # Ingest directory (default mode)
+    PYTHONPATH=worker python scripts/ingest_dropzone.py --dir data/dropzone --export data/exports/ingest.jsonl
+
+    # Run one pass only (no watch loop)
+    PYTHONPATH=worker python scripts/ingest_dropzone.py --once
+
+    # Restrict to specific kinds (comma/space separated)
+    PYTHONPATH=worker python scripts/ingest_dropzone.py --kinds pdf,txt,md
+
+    # Read-only stats (optionally filtered)
+    PYTHONPATH=worker python scripts/ingest_dropzone.py --stats
+    PYTHONPATH=worker python scripts/ingest_dropzone.py --stats --kind pdf
+    PYTHONPATH=worker python scripts/ingest_dropzone.py --stats --filter-by path=README.md
+
+    # List matching payloads (no vectors, filter-only)
+    PYTHONPATH=worker python scripts/ingest_dropzone.py --list --limit 5 --document-id <uuid>
+
+    # Extras
+    PYTHONPATH=worker python scripts/ingest_dropzone.py --strict
+    PYTHONPATH=worker python scripts/ingest_dropzone.py --recreate-bad-collection
+    PYTHONPATH=worker python scripts/ingest_dropzone.py --replace-existing
+    PYTHONPATH=worker python scripts/ingest_dropzone.py --images
 """
 
-from __future__ import annotations
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
+import textwrap
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable, List, Dict, Any, Tuple, Callable, Optional
-from qdrant_client import QdrantClient
-from qdrant_client.models import PointStruct
 
-# --- worker imports
+
+# worker config + services
 from worker.app.config import settings
 from worker.app.services.chunker import chunk_text
-from worker.app.services.image_caption import caption_image
-from worker.app.services.embed_ollama import embed_texts
-from worker.app.routers.qdrant_utils import ensure_collection
+from worker.app.services.embed_ollama import embed_texts as embed_texts_real
+from worker.app.services.image_caption import caption_image  # optional, behind flag
+
+try:
+    from worker.app.services.qdrant_client import (
+        get_qdrant_client,
+        upsert_points,
+        delete_by_document_id,
+        count as q_count,
+        build_filter,
+    )
+    from worker.app.services.qdrant_minimal import ensure_collection_minimal
+except ImportError:
+    from worker.app.services.qdrant_client import (
+        get_qdrant_client,
+        upsert_points,
+        delete_by_document_id,
+        count as q_count,
+        build_filter,
+    )
+
+    def ensure_collection_minimal(*a, **kw):
+        raise RuntimeError("ensure_collection_minimal not available")
 
 
-# --- Qdrant helpers ---
-def _extract_existing_dim(coll_info):
-    """
-    Return int dim if available, else None. Supports VectorParams or named vectors {name: VectorParams}.
-    """
-    try:
-        v = getattr(coll_info.config.params, "vectors", None)
-        # qdrant-client may expose as object with .size or a dict
-        if v is None:
-            return None
-        # Direct VectorParams
-        size = getattr(v, "size", None)
-        if isinstance(size, int):
-            return size
-        # NamedVectors (dict-like)
-        if isinstance(v, dict) and v:
-            first = next(iter(v.values()))
-            return int(getattr(first, "size", None)) if hasattr(first, "size") else None
-    except Exception:
-        pass
-    return None
+# Canonical collection and schema
+CANONICAL_COLLECTION = getattr(
+    settings,
+    "QDRANT_COLLECTION",
+    os.getenv("QDRANT_COLLECTION", "jsonify2ai_chunks_768"),
+)
+CANONICAL_DIM = int(getattr(settings, "EMBEDDING_DIM", 768))
+CANONICAL_MODEL = getattr(
+    settings, "EMBEDDINGS_MODEL", os.getenv("EMBEDDINGS_MODEL", "nomic-embed-text")
+)
+CANONICAL_DISTANCE = "Cosine"
 
-
-def _ensure_collection(
-    client, name: str, dim: int, distance="Cosine", recreate_bad: bool = False
-):
-    from qdrant_client.http import models as qm
-
-    try:
-        info = client.get_collection(name)
-        existing_dim = _extract_existing_dim(info)
-        print(
-            f"[qdrant] collection={name} existing_dim={existing_dim} expected_dim={dim}"
-        )
-        if existing_dim in (None, 0) or int(existing_dim) != int(dim):
-            if recreate_bad:
-                print(f"[qdrant] recreating collection {name} with dim={dim}")
-                try:
-                    client.delete_collection(name=name)
-                except Exception:
-                    pass
-                client.recreate_collection(
-                    collection_name=name,
-                    vectors_config=qm.VectorParams(
-                        size=int(dim), distance=getattr(qm.Distance, distance.upper())
-                    ),
-                )
-                return
-            raise RuntimeError(
-                f"Collection '{name}' exists with dimension {existing_dim}, expected {dim}. "
-                f"Re-run with --recreate-bad-collection or set QDRANT_RECREATE_BAD=1 to auto-fix."
-            )
-        # ok
-        return
-    except Exception as e:
-        # If not found → create
-        msg = str(e)
-        if "Not found" in msg or "doesn't exist" in msg or "404" in msg:
-            client.recreate_collection(
-                collection_name=name,
-                vectors_config=qm.VectorParams(
-                    size=int(dim), distance=getattr(qm.Distance, distance.upper())
-                ),
-            )
-            print(f"[qdrant] created collection {name} dim={dim}")
-            return
-
+try:
+    # used only in --list path
+    from qdrant_client import models as qmodels  # type: ignore
+except Exception:  # pragma: no cover
+    qmodels = None  # type: ignore
 
 # ===================== Parser registry (lazy + optional) =====================
 
@@ -127,9 +125,7 @@ def _jsonl_factory():
 
 def _docx_factory():
     if not _module_available("docx"):
-        raise RuntimeError(
-            "python-docx not installed; install with: pip install python-docx"
-        )
+        raise RuntimeError("python-docx not installed; pip install python-docx")
     from worker.app.services.parse_docx import extract_text_from_docx
 
     return extract_text_from_docx
@@ -137,7 +133,7 @@ def _docx_factory():
 
 def _pdf_factory():
     if not _module_available("pypdf"):
-        raise RuntimeError("pypdf not installed; install with: pip install pypdf")
+        raise RuntimeError("pypdf not installed; pip install pypdf")
     from worker.app.services.parse_pdf import extract_text_from_pdf
 
     return extract_text_from_pdf
@@ -161,7 +157,6 @@ REGISTRY: List[Tuple[set[str], Callable[[], Callable[[str], str]], Optional[str]
     (AUDIO_EXTS, _audio_factory, "faster-whisper (only for real STT; dev-mode works)"),
 ]
 
-# Ignore images for now (we’ll add captioning later)
 IGNORED_EXTS = {
     ".jsonl",
     ".zip",
@@ -177,7 +172,7 @@ IGNORED_EXTS = {
     ".png",
     ".jpg",
     ".jpeg",
-    ".webp",
+    ".webp",  # handled separately when --images is on
 }
 
 
@@ -192,7 +187,7 @@ def extract_text_auto(path: str, strict: bool = False) -> str:
     if ext in IGNORED_EXTS:
         raise SkipFile(f"ignored extension: {ext}")
 
-    for exts, factory, need in REGISTRY:
+    for exts, factory, _need in REGISTRY:
         if ext in exts:
             try:
                 handler = factory()
@@ -215,69 +210,47 @@ def extract_text_auto(path: str, strict: bool = False) -> str:
         raise SkipFile(f"could not read as text: {e}")
 
 
-# ============================== Qdrant helpers ==============================
+# ============================== Qdrant payload ===============================
 
 
 @dataclass
 class ChunkRecord:
-    id: str  # MUST be unsigned int or UUID **string** for Qdrant
-    document_id: str  # we keep doc grouping in payload
+    id: str  # point id (uuid4 for Qdrant)
+    document_id: str
     path: str
+    kind: str  # "text" | "pdf" | "audio" | "image"
     idx: int
     text: str
     meta: Dict[str, Any]
 
     def payload(self) -> Dict[str, Any]:
+        # match /process schema: flat fields + nested meta
         return {
             "document_id": self.document_id,
             "path": self.path,
+            "kind": self.kind,
             "idx": self.idx,
             "text": self.text,
-            **self.meta,
+            "meta": self.meta,
         }
-
-
-def upsert_points_min(
-    client, name: str, items: Iterable[Tuple[str, List[float], Dict[str, Any]]]
-) -> int:
-    """
-    Minimal inline upsert to avoid importing helper variants.
-    items = [(point_id: str|int, vector: list[float], payload: dict), ...]
-    """
-    from qdrant_client.conversions.common_types import PointStruct
-
-    points = [PointStruct(id=i, vector=v, payload=p) for (i, v, p) in items]
-    client.upsert(collection_name=name, points=points)
-    return len(points)
 
 
 # ============================== Embeddings ==================================
 
 
 def _deterministic_vec(s: str, dim: int) -> List[float]:
-    import hashlib
-
     h = hashlib.sha256(s.encode("utf-8")).digest()
-    out: List[float] = []
-    for i in range(dim):
-        out.append(((h[i % len(h)]) / 255.0) * 2 - 1)  # [-1, 1]
-    return out
+    return [((h[i % len(h)]) / 255.0) * 2 - 1 for i in range(dim)]  # [-1, 1]
 
 
-def _embed_texts(texts: List[str]) -> List[List[float]]:
-    dim = int(getattr(settings, "EMBEDDING_DIM", 768))
+def embed_texts(texts: List[str]) -> List[List[float]]:
+    dim = CANONICAL_DIM
     if (
         str(getattr(settings, "EMBED_DEV_MODE", 0)) == "1"
         or os.getenv("EMBED_DEV_MODE") == "1"
     ):
         return [_deterministic_vec(t, dim) for t in texts]
-    try:
-        from worker.app.services.embed_ollama import embed_texts as embed_texts_real  # type: ignore
-    except Exception:
-        raise RuntimeError(
-            "No embedder available. Either set EMBED_DEV_MODE=1 or install/run an embedding backend."
-        )
-    vecs = embed_texts_real(texts)
+    vecs = embed_texts_real(texts, model=CANONICAL_MODEL)
     if not vecs or len(vecs[0]) != dim:
         raise RuntimeError(
             f"Embedding dimension mismatch: expected {dim}, got {len(vecs[0]) if vecs else 'none'}"
@@ -294,35 +267,59 @@ def _iter_files(root: Path) -> Iterable[Path]:
             yield p
 
 
+def _kind_for_ext(ext: str) -> str:
+    if ext in {".pdf"}:
+        return "pdf"
+    if ext in AUDIO_EXTS:
+        return "audio"
+    return "text"
+
+
+def _document_id_for_file(fp: Path) -> str:
+    # deterministic, rename-proof doc id from file bytes
+    data = fp.read_bytes()
+    doc_hash = hashlib.sha256(data).hexdigest()
+    return str(uuid.uuid5(settings.NAMESPACE_UUID, doc_hash))
+
+
 def ingest_dir(
     drop_dir: Path,
     export_jsonl: Path | None,
     strict: bool,
     recreate_bad: bool,
+    replace_existing: bool,
     do_images: bool = False,
-    qdr: QdrantClient = None,
 ) -> Dict[str, Any]:
     """Core ingest routine."""
-    from qdrant_client import QdrantClient
 
-    client = QdrantClient(url=getattr(settings, "QDRANT_URL", "http://localhost:6333"))
+    client = get_qdrant_client()
 
-    # Print one-liner summary before ingest starts
-    print(
-        f"[ingest] target collection={getattr(settings, 'QDRANT_COLLECTION', 'jsonify2ai_chunks')} expected_dim={getattr(settings, 'EMBEDDING_DIM', 768)}"
-    )
+    # Ensure canonical collection exists and matches schema
+    try:
+        ensure_collection_minimal(
+            client=client,
+            name=CANONICAL_COLLECTION,
+            dim=CANONICAL_DIM,
+            distance=CANONICAL_DISTANCE,
+            recreate_bad=recreate_bad,
+        )
+    except Exception as e:
+        print(f"[error] Collection schema mismatch: {e}")
+        if not recreate_bad:
+            print(
+                f"Set --recreate-bad-collection to drop and recreate the collection. Expected dim={CANONICAL_DIM}, distance={CANONICAL_DISTANCE}."
+            )
+            sys.exit(2)
 
-    # Use the new hardened collection handling
-    _ensure_collection(
-        client,
-        getattr(settings, "QDRANT_COLLECTION", "jsonify2ai_chunks"),
-        dim=int(getattr(settings, "EMBEDDING_DIM", 768)),
-        distance="Cosine",
-        recreate_bad=recreate_bad,
-    )
-
-    # Image handling setup
     IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+    if do_images:
+        ensure_collection_minimal(
+            client=client,
+            name=getattr(settings, "QDRANT_COLLECTION_IMAGES", "jsonify2ai_images_768"),
+            dim=CANONICAL_DIM,
+            distance=CANONICAL_DISTANCE,
+            recreate_bad=recreate_bad,
+        )
 
     export_f = None
     if export_jsonl:
@@ -333,36 +330,59 @@ def ingest_dir(
     total_chunks = 0
     skipped: List[str] = []
 
+    batch_size = int(getattr(settings, "QDRANT_UPSERT_BATCH_SIZE", 128))
+    seen_points = set()
+    points_skipped_dedupe = 0
     for fp in _iter_files(drop_dir):
+        ext = fp.suffix.lower()
+        rel_path = str(fp).replace("\\", "/")
+        # Kind normalization
+        if ext == ".pdf":
+            kind = "pdf"
+        elif ext == ".md":
+            kind = "md"
+        elif ext == ".txt":
+            kind = "text"
+        elif ext in IMAGE_EXTS:
+            kind = "image"
+        elif ext in AUDIO_EXTS:
+            kind = "audio"
+        else:
+            kind = "text"
         total_files += 1
 
         # Handle images if enabled
-        if do_images and fp.suffix.lower() in IMAGE_EXTS:
+        if do_images and ext in IMAGE_EXTS:
             try:
                 cap = caption_image(fp)
                 vec = embed_texts([cap])[0]
-                qdr.upsert(
+                item = (
+                    str(uuid.uuid4()),
+                    vec,
+                    {
+                        "document_id": _document_id_for_file(fp),
+                        "path": rel_path,
+                        "kind": "image",
+                        "idx": 0,
+                        "text": cap,
+                        "meta": {"source_ext": ext, "caption_model": "blip"},
+                    },
+                )
+                upsert_points(
+                    [item],
                     collection_name=getattr(
                         settings, "QDRANT_COLLECTION_IMAGES", "jsonify2ai_images_768"
                     ),
-                    points=[
-                        PointStruct(
-                            id=str(uuid.uuid4()),
-                            vector=vec,
-                            payload={
-                                "path": str(fp),
-                                "caption": cap,
-                                "tags": [],
-                                "source_ext": fp.suffix.lower(),
-                            },
-                        )
-                    ],
+                    client=client,
+                    batch_size=1,
+                    ensure=False,
                 )
                 print(f"[images] {fp.name} → '{cap[:64]}…'")
             except Exception as e:
-                print(f"[images][skip] {fp.name}: {e}")
+                skipped.append(f"{fp.name}: {e}")
             continue
 
+        # Parse text-like files
         try:
             raw = extract_text_auto(str(fp), strict=strict)
         except SkipFile as e:
@@ -373,57 +393,182 @@ def ingest_dir(
             skipped.append(f"{fp.name}: empty content")
             continue
 
-        chunks = list(
-            chunk_text(
-                raw,
-                size=int(getattr(settings, "CHUNK_SIZE", 1000)),
-                overlap=int(getattr(settings, "CHUNK_OVERLAP", 200)),
-            )
+        # Determine document id (deterministic) and optional cleanup
+        document_id = _document_id_for_file(fp)
+        if replace_existing:
+            try:
+                delete_by_document_id(document_id, client=client)
+            except Exception as e:
+                skipped.append(f"{fp.name}: delete failed ({e})")
+                # continue anyway
+
+        # Chunk using config defaults (normalization inside chunker)
+        chunks = chunk_text(
+            raw,
+            size=int(getattr(settings, "CHUNK_SIZE", 800)),
+            overlap=int(getattr(settings, "CHUNK_OVERLAP", 100)),
         )
         if not chunks:
             skipped.append(f"{fp.name}: no chunks")
             continue
 
-        vecs = _embed_texts(chunks)
+        vecs = embed_texts(chunks)
 
-        # One UUID per DOCUMENT for grouping + one UUID per POINT for Qdrant id
-        doc_id = str(uuid.uuid4())
+        # Build items with unified payload
         items: List[Tuple[str, List[float], Dict[str, Any]]] = []
-
         for idx, (text, vec) in enumerate(zip(chunks, vecs)):
-            point_id = str(uuid.uuid4())  # <-- valid Qdrant id
+            point_key = (document_id, idx)
+            if point_key in seen_points:
+                points_skipped_dedupe += 1
+                continue
+            seen_points.add(point_key)
+            point_id = str(uuid.uuid4())
             rec = ChunkRecord(
                 id=point_id,
-                document_id=doc_id,
-                path=str(fp),
+                document_id=document_id,
+                path=rel_path,
+                kind=kind,
                 idx=idx,
                 text=text,
-                meta={"source_ext": fp.suffix.lower()},
+                meta={"source_ext": ext},
             )
             items.append((rec.id, vec, rec.payload()))
             if export_f:
                 export_f.write(json.dumps(asdict(rec), ensure_ascii=False) + "\n")
 
-        total_chunks += upsert_points_min(client, settings.QDRANT_COLLECTION, items)
+        # Batched upsert through our wrapper
+        total_chunks += upsert_points(
+            items,
+            collection_name=CANONICAL_COLLECTION,
+            client=client,
+            batch_size=batch_size,
+            ensure=False,  # already ensured at the start
+        )
 
     if export_f:
         export_f.close()
 
     return {
-        "files_seen": total_files,
-        "chunks_upserted": total_chunks,
-        "collection": getattr(settings, "QDRANT_COLLECTION", "jsonify2ai_chunks"),
+        "files_scanned": total_files,
+        "chunks_parsed": total_chunks,
+        "points_upserted": total_chunks,
+        "points_skipped_dedupe": points_skipped_dedupe,
+        "collection": CANONICAL_COLLECTION,
         "skipped": skipped,
     }
 
 
+# ================================ Inspect ===================================
+
+
+def _parse_filter_sugar(filter_pairs: List[str] | None) -> Dict[str, str]:
+    """Parse --filter-by key=value (repeatable). Only allow supported keys."""
+    out: Dict[str, str] = {}
+    if not filter_pairs:
+        return out
+    allowed = {"document_id", "kind", "path"}
+    for pair in filter_pairs:
+        if "=" not in pair:
+            continue
+        k, v = pair.split("=", 1)
+        k = k.strip()
+        v = v.strip()
+        if k in allowed and v:
+            out[k] = v
+    return out
+
+
+def do_stats(
+    document_id: str | None, kind: str | None, path: str | None
+) -> Dict[str, Any]:
+    """Return total counts, per-kind counts, and optional filtered count."""
+    client = get_qdrant_client()
+    total = q_count(collection_name=settings.QDRANT_COLLECTION, client=client)
+
+    # Per-kind counts, optionally scoped by doc/path if provided
+    per_kind: Dict[str, int] = {}
+    for k in ("text", "pdf", "audio", "image"):
+        per_kind[k] = q_count(
+            collection_name=settings.QDRANT_COLLECTION,
+            client=client,
+            query_filter=build_filter(document_id=document_id, path=path, kind=k),
+        )
+
+    filtered = None
+    if document_id or kind or path:
+        filtered = q_count(
+            collection_name=settings.QDRANT_COLLECTION,
+            client=client,
+            query_filter=build_filter(document_id=document_id, kind=kind, path=path),
+        )
+
+    return {
+        "ok": True,
+        "collection": settings.QDRANT_COLLECTION,
+        "total": total,
+        "per_kind": per_kind,
+        "filtered": filtered,
+        "filters": {"document_id": document_id, "kind": kind, "path": path},
+    }
+
+
+def do_list(
+    document_id: str | None, kind: str | None, path: str | None, limit: int = 10
+) -> Dict[str, Any]:
+    """List up to N payloads matching filters (no vectors, no scores)."""
+    client = get_qdrant_client()
+
+    if qmodels is None:
+        return {"ok": False, "error": "qdrant-client not available for scroll"}
+
+    flt = build_filter(document_id=document_id, kind=kind, path=path)
+    points, _next = client.scroll(
+        collection_name=settings.QDRANT_COLLECTION,
+        scroll_filter=flt,  # type: ignore[arg-type]
+        limit=limit,
+        with_payload=True,
+        with_vectors=False,
+    )
+
+    rows: List[Dict[str, Any]] = []
+    for p in points:
+        payload = getattr(p, "payload", {}) or {}
+        rows.append(
+            {
+                "id": str(getattr(p, "id", "")),
+                "document_id": payload.get("document_id"),
+                "path": payload.get("path"),
+                "kind": payload.get("kind"),
+                "idx": payload.get("idx"),
+                "text": textwrap.shorten(
+                    (payload.get("text") or "").strip(), width=160, placeholder="…"
+                ),
+            }
+        )
+
+    return {
+        "ok": True,
+        "collection": settings.QDRANT_COLLECTION,
+        "limit": limit,
+        "filters": {"document_id": document_id, "kind": kind, "path": path},
+        "rows": rows,
+    }
+
+
+# ================================== CLI =====================================
+
+
 def main():
     p = argparse.ArgumentParser(
-        description="Ingest a drop-zone folder into Qdrant + JSONL export"
+        description="Ingest a drop-zone folder into Qdrant + JSONL export, with stats/list utilities"
     )
-    p.add_argument("--dir", default=os.getenv("DROPZONE_DIR", "data/dropzone"))
+    p.add_argument("--dir", default="data/dropzone")
     p.add_argument(
-        "--export", default=os.getenv("EXPORT_JSONL", "data/exports/ingest.jsonl")
+        "--export",
+        default=os.getenv(
+            "EXPORT_JSONL",
+            getattr(settings, "EXPORT_JSONL", "data/exports/ingest.jsonl"),
+        ),
     )
     p.add_argument(
         "--strict",
@@ -433,46 +578,292 @@ def main():
     p.add_argument(
         "--recreate-bad-collection",
         action="store_true",
-        help="If existing collection has no/incorrect vector dim, drop and recreate it.",
+        help="If existing collection has incorrect vector dim, drop and recreate it.",
     )
+    p.add_argument(
+        "--replace-existing",
+        action="store_true",
+        help="Delete old points for a document_id before upserting (idempotent re-ingest).",
+    )
+    p.add_argument(
+        "--images",
+        action="store_true",
+        help="Also caption + index images in the images collection.",
+    )
+    p.add_argument(
+        "--once",
+        action="store_true",
+        help="Run one pass over the dropzone then exit (no watch loop).",
+    )
+    p.add_argument(
+        "--kinds",
+        type=str,
+        default=None,
+        help="Comma/space list of kinds to include (e.g., pdf,txt,md).",
+    )
+
+    # Read-only inspection modes (mutually exclusive)
+    mx = p.add_mutually_exclusive_group()
+    mx.add_argument(
+        "--stats",
+        action="store_true",
+        help="Print total/per-kind counts (optionally filtered)",
+    )
+    mx.add_argument(
+        "--list-files",
+        action="store_true",
+        help="List filesystem candidates to ingest (respects --dir, --kinds, --limit)",
+    )
+    mx.add_argument(
+        "--list-collection",
+        action="store_true",
+        help="List Qdrant rows already stored (respects --limit)",
+    )
+    mx.add_argument("--list", action="store_true", help="Alias for --list-files")
+    p.add_argument(
+        "--limit", type=int, default=10, help="Max rows for --list (default 10)"
+    )
+
+    # Filters (work with --stats/--list; ignored during ingest)
+    p.add_argument("--document-id", type=str, default=None)
+    p.add_argument("--kind", type=str, default=None)
+    p.add_argument("--path", type=str, default=None)
+    p.add_argument(
+        "--filter-by",
+        action="append",
+        help="Sugar for filters, repeatable (key=value). Allowed keys: document_id, kind, path",
+    )
+
     args = p.parse_args()
 
-    drop = Path(args.dir)
-    if not drop.exists():
-        raise SystemExit(f"Drop zone not found: {drop}")
+    # Merge sugar filters into explicit flags (explicit flags win)
+    sugar = _parse_filter_sugar(args.filter_by)
+    document_id = args.document_id or sugar.get("document_id")
+    kind = args.kind or sugar.get("kind")
+    path = args.path or sugar.get("path")
 
-    # Read env override
+    # Parse --kinds and combine with --kind
+    kinds_set = set()
+    if args.kinds:
+        for k in args.kinds.replace(",", " ").split():
+            if k:
+                kinds_set.add(k.strip())
+    if kind:
+        kinds_set.add(kind)
+    kinds_list = list(kinds_set) if kinds_set else None
+
+    # Candidate selection logic
+    drop = Path(args.dir)
+    candidate_files = []
+    # If --path is provided and exists, always include it
+    explicit_path = None
+    if args.path:
+        explicit_path = Path(args.path)
+        if explicit_path.exists():
+            rel_path = str(explicit_path).replace("\\", "/")
+            ext = explicit_path.suffix.lower()
+            if ext == ".pdf":
+                kind_norm = "pdf"
+            elif ext in {".md", ".txt"}:
+                kind_norm = "text"
+            elif ext in {".jpg", ".jpeg", ".png", ".webp"}:
+                kind_norm = "image"
+            elif ext in AUDIO_EXTS:
+                kind_norm = "audio"
+            else:
+                kind_norm = "text"
+            candidate_files.append((explicit_path, rel_path, kind_norm))
+    # Add other files from dropzone, respecting --kinds
+    for p in _iter_files(drop):
+        rel_path = str(p).replace("\\", "/")
+        ext = p.suffix.lower()
+        if ext == ".pdf":
+            kind_norm = "pdf"
+        elif ext in {".md", ".txt"}:
+            kind_norm = "text"
+        elif ext in {".jpg", ".jpeg", ".png", ".webp"}:
+            kind_norm = "image"
+        elif ext in AUDIO_EXTS:
+            kind_norm = "audio"
+        else:
+            kind_norm = "text"
+        # If --path was provided, skip duplicate
+        if explicit_path and p.resolve() == explicit_path.resolve():
+            continue
+        # Filter by kinds if set
+        if kinds_list and kind_norm not in kinds_list:
+            continue
+        candidate_files.append((p, rel_path, kind_norm))
+        if len(candidate_files) >= args.limit:
+            break
+
+    # --list-files and --list output
+    if args.list_files or args.list:
+        files_out = [
+            {"path": rel_path, "kind": kind_norm}
+            for _, rel_path, kind_norm in candidate_files
+        ]
+        print(json.dumps({"files": files_out, "count": len(files_out)}))
+        return
+
+    if args.list_collection:
+        # List Qdrant collection rows
+        client = get_qdrant_client()
+        points, _ = client.scroll(
+            collection_name=CANONICAL_COLLECTION,
+            scroll_filter=None,
+            limit=args.limit,
+            with_payload=True,
+            with_vectors=False,
+        )
+        rows = []
+        for p in points:
+            payload = getattr(p, "payload", {}) or {}
+            rel_path = (payload.get("path") or "").replace("\\", "/")
+            kind = payload.get("kind") or "text"
+            rows.append(
+                {
+                    "id": str(getattr(p, "id", "")),
+                    "document_id": payload.get("document_id"),
+                    "path": rel_path,
+                    "kind": kind,
+                    "idx": payload.get("idx"),
+                }
+            )
+        print(json.dumps({"rows": rows, "count": len(rows)}))
+        return
+
+    # Ingest execution path
     recreate_bad = (
         args.recreate_bad_collection or os.getenv("QDRANT_RECREATE_BAD", "0") == "1"
     )
+    import time
 
-    # Image handling setup
-    do_images = bool(getattr(settings, "IMAGES_CAPTION", 0))
-    qdr = QdrantClient(url=getattr(settings, "QDRANT_URL", "http://localhost:6333"))
-    if do_images:
-        ensure_collection(
-            qdr,
-            getattr(settings, "QDRANT_COLLECTION_IMAGES", "jsonify2ai_images_768"),
-            getattr(settings, "EMBEDDING_DIM", 768),
+    t0 = time.time()
+    total_files = 0
+    total_chunks = 0
+    points_upserted = 0
+    points_skipped_dedupe = 0
+    per_kind = {"text": 0, "pdf": 0, "image": 0, "audio": 0}
+    seen_points = set()
+    client = get_qdrant_client()
+    batch_size = int(getattr(settings, "QDRANT_UPSERT_BATCH_SIZE", 128))
+    for p, rel_path, kind_norm in candidate_files:
+        total_files += 1
+        parser_name = None
+        if kind_norm == "pdf":
+            parser_name = "pdf"
+        elif kind_norm == "image":
+            parser_name = "image"
+        elif kind_norm == "audio":
+            parser_name = "audio"
+        else:
+            parser_name = "text"
+        if args.stats:
+            print(
+                json.dumps(
+                    {
+                        "trace": "candidate",
+                        "path": rel_path,
+                        "kind": kind_norm,
+                        "parser": parser_name,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        # Handle images
+        if kind_norm == "image" and args.images:
+            try:
+                cap = caption_image(p)
+                vec = embed_texts([cap])[0]
+                item = (
+                    str(uuid.uuid4()),
+                    vec,
+                    {
+                        "document_id": _document_id_for_file(p),
+                        "path": rel_path,
+                        "kind": "image",
+                        "idx": 0,
+                        "text": cap,
+                        "meta": {
+                            "source_ext": p.suffix.lower(),
+                            "caption_model": "blip",
+                        },
+                    },
+                )
+                upsert_points(
+                    [item],
+                    collection_name=getattr(
+                        settings, "QDRANT_COLLECTION_IMAGES", "jsonify2ai_images_768"
+                    ),
+                    client=client,
+                    batch_size=1,
+                    ensure=False,
+                )
+                points_upserted += 1
+                per_kind["image"] += 1
+            except Exception:
+                continue
+            continue
+        # Parse text-like files
+        try:
+            raw = extract_text_auto(str(p), strict=args.strict)
+        except SkipFile:
+            continue
+        if not raw.strip():
+            continue
+        document_id = _document_id_for_file(p)
+        # Chunk using config defaults
+        chunks = chunk_text(
+            raw,
+            size=int(getattr(settings, "CHUNK_SIZE", 800)),
+            overlap=int(getattr(settings, "CHUNK_OVERLAP", 100)),
         )
-
-    res = ingest_dir(
-        drop_dir=drop,
-        export_jsonl=Path(args.export) if args.export else None,
-        strict=args.strict,
-        recreate_bad=recreate_bad,
-        do_images=do_images,
-        qdr=qdr,
-    )
-
-    res = ingest_dir(
-        drop_dir=drop,
-        export_jsonl=Path(args.export) if args.export else None,
-        strict=args.strict,
-        recreate_bad=recreate_bad,
-    )
-
-    print(json.dumps(res, indent=2))
+        if not chunks:
+            continue
+        vecs = embed_texts(chunks)
+        items: List[Tuple[str, List[float], Dict[str, Any]]] = []
+        for idx, (text, vec) in enumerate(zip(chunks, vecs)):
+            point_key = (document_id, idx)
+            if point_key in seen_points:
+                points_skipped_dedupe += 1
+                if not args.replace_existing:
+                    continue
+            seen_points.add(point_key)
+            point_id = str(uuid.uuid4())
+            rec = ChunkRecord(
+                id=point_id,
+                document_id=document_id,
+                path=rel_path,
+                kind=kind_norm,
+                idx=idx,
+                text=text,
+                meta={"source_ext": p.suffix.lower()},
+            )
+            items.append((rec.id, vec, rec.payload()))
+            total_chunks += 1
+            per_kind[kind_norm] = per_kind.get(kind_norm, 0) + 1
+        if items:
+            upsert_points(
+                items,
+                collection_name=CANONICAL_COLLECTION,
+                client=client,
+                batch_size=batch_size,
+                ensure=False,
+            )
+            points_upserted += len(items)
+    elapsed = time.time() - t0
+    stats = {
+        "ok": True,
+        "collection": CANONICAL_COLLECTION,
+        "files_scanned": total_files,
+        "chunks_parsed": total_chunks,
+        "points_upserted": points_upserted,
+        "points_skipped_dedupe": points_skipped_dedupe,
+        "elapsed_seconds": elapsed,
+        "per_kind": per_kind,
+    }
+    print(json.dumps(stats, indent=2))
 
 
 if __name__ == "__main__":

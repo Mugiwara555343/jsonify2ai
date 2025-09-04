@@ -1,340 +1,110 @@
 # jsonify2ai
-![CI / test-worker](https://img.shields.io/badge/CI%20%2F%20test--worker-passing-brightgreen)
 
-Local-first "throw anything at it" memory pipeline: **drop files → extract text → chunk → embed → Qdrant → search/ask.**
+Local‑first pipeline: **drop files → extract → chunk → embed → Qdrant → search/ask**.
 
-**Problem:** Private, offline capture of messy files (txt/md/pdf/docx/csv/audio) into **structured JSON + searchable embeddings** without heavy frameworks.
+No cloud, no heavy frameworks — just a simple way to turn messy files into structured JSON + searchable vectors.
 
-**Solution:** Drop files → extract → chunk → embed → Qdrant → search/ask. CPU-friendly defaults; heavy bits optional.
+---
 
-### Why jsonify2ai (30s)
-- **Local-first:** no cloud calls; works offline.
-- **CPU-friendly:** dev stubs + tiny models.
-- **Simple ingest:** a drop-zone and one command.
-- **Small surface area:** no chains/agents to learn.
-- **Extensible:** add parsers; keep the pipeline.
+## Why jsonify2ai?
 
-> Need orchestration frameworks? Use LangChain/LlamaIndex.
-> Want files → JSON + vectors today? Use **jsonify2ai**.
+- **Local‑first:** works fully offline.
+- **CPU‑friendly:** dev stubs, tiny models — no GPU required.
+- **Drop‑zone ingest:** put files in a folder, run one command.
+- **Extensible:** add new parsers easily.
+- **Idempotent:** safe to re‑run; files are skipped, not duplicated.
 
-## Quick Start (5-minute local demo)
+---
 
-> Works on plain CPU. No Docker required for the demo.
-> Want concrete examples? See **Demo Recipes** near the bottom.
+## Quick Start (5 minutes)
 
-### 1) Setup
+> Works on plain CPU. No Docker needed for the demo.
+
 ```bash
-# 1) create/activate venv
-python -m venv .venv && source .venv/Scripts/activate || source .venv/bin/activate
+# 1. create a venv & activate
+python -m venv .venv && source .venv/bin/activate
 
-# 2) install jsonify2ai in editable mode + worker extras
-pip install -e . -r worker/requirements.all.txt
-```
+# 2. install worker requirements (minimal)
+pip install -r worker/requirements.txt
 
-### 2) Point to Qdrant
-**Use an existing Qdrant (fastest):**
-```bash
-export QDRANT_URL=http://localhost:6333  # or your external Qdrant
-```
-
-**Or run via Docker:**
-```bash
+# 3. start Qdrant (vector DB)
 docker compose up -d qdrant
+
+# 4. prepare folders
+mkdir -p data/dropzone data/exports
+
+# 5. dev‑modes (skip heavy deps)
+export EMBED_DEV_MODE=1
+export AUDIO_DEV_MODE=1
+
+# 6. drop files into data/dropzone (txt, md, csv, pdf, docx, wav/mp3…)
+
+# 7. ingest → JSONL + Qdrant
+PYTHONPATH=worker python scripts/ingest_dropzone.py   --dir data/dropzone --export data/exports/ingest.jsonl
 ```
 
-### 3) Dev modes (no Ollama required)
-```bash
-export EMBED_DEV_MODE=1    # deterministic dummy embeddings
-export AUDIO_DEV_MODE=1    # faster-whisper stub
-```
+Ask your data:
 
-### 4) Ingest a folder (drop-zone)
-```bash
-# Drop files into data/dropzone/ then:
-PYTHONPATH=worker python scripts/ingest_dropzone.py \
-  --dir data/dropzone --export data/exports/ingest.jsonl
-```
-
-### 5) Ask your data (two modes)
-
-**Retrieval-only (no LLM):**
 ```bash
 python examples/ask_local.py --q "what's in the pdf?" --k 6 --show-sources
 ```
 
-**LLM-mode (optional, needs Ollama):**
-```bash
-python examples/ask_local.py --q "summarize the resume" --llm --model llama3.1 --k 6 --show-sources
-```
+Optional LLM mode (requires Ollama):
 
-### 6) Guided "Control Panel"
-If you prefer an interactive guide that sets env, ingests, and queries:
 ```bash
-python examples/control_panel.py --help
+python examples/ask_local.py --q "summarize the resume" --llm --model qwen2.5:3b-instruct-q4_K_M
 ```
 
 ---
 
-## What's in this repo
+## What’s Supported?
 
-- **Drop‑Zone ingest**: batch a folder of mixed files into JSONL + Qdrant.
-- **Parsers** (all CPU; heavy ones are optional):
-  - Built-in: **Text/Markdown**, **CSV/TSV**, **JSON**, **JSONL**
-  - Optional: **DOCX** (`python-docx`), **PDF** (`pypdf`), **Audio** via faster‑whisper (CPU)
-- **Dev-mode toggles** to avoid heavy installs while developing.
-- **Worker tests** with lean CI; optional features auto‑skip if deps are missing.
+| Type   | Extensions           | Notes                              |
+|--------|----------------------|------------------------------------|
+| Text   | .txt, .md            | Always on                          |
+| CSV    | .csv, .tsv           | Always on                          |
+| JSON   | .json, .jsonl        | Always on                          |
+| DOCX   | .docx                | `pip install -r worker/requirements.docx.txt` |
+| PDF    | .pdf                 | `pip install -r worker/requirements.pdf.txt` |
+| Audio  | .wav, .mp3, .m4a ... | `pip install -r worker/requirements.audio.txt` + ffmpeg |
+| Images | .jpg, .png, .webp    | Optional, via BLIP captioning      |
 
-### Monorepo layout
-
-```
-api/          # Go (upload/search/ask) - WIP
-worker/       # FastAPI worker + services/parsers + tests
-web/          # React (upload/search/ask) - WIP
-scripts/      # Utilities (ingest_dropzone.py)
-data/         # Local data (dropzone, exports, documents)
-docs/         # Docs & runbooks (optional)
-```
+If an optional parser isn’t installed, files are **skipped gracefully**.
 
 ---
 
-## Quickstart (2 minutes)
+## Dev Modes
 
-```bash
-# 0) create & activate a venv (Windows Git Bash shown; use your favorite shell)
-python -m venv .venv && source .venv/Scripts/activate
+- `EMBED_DEV_MODE=1` → dummy vectors (no Ollama/embeddings).
+- `AUDIO_DEV_MODE=1` → quick stub transcripts (no whisper/ffmpeg).
 
-# 1) minimal deps (tiny install)
-pip install -r worker/requirements.txt
-
-# 2) start Qdrant locally
-docker compose up -d qdrant
-
-# 3) prep folders
-mkdir -p data/dropzone data/exports
-
-# 4) dev-modes so no heavy models are needed
-export EMBED_DEV_MODE=1
-export AUDIO_DEV_MODE=1
-
-# 5) drop files into data/dropzone (txt, md, csv, json, jsonl, docx, pdf, wav/mp3…)
-# 6) ingest → Qdrant + JSONL
-PYTHONPATH=worker python scripts/ingest_dropzone.py \
-  --dir data/dropzone --export data/exports/ingest.jsonl
-```
-
-**Windows PowerShell**
-
-```powershell
-python -m venv .venv; .\.\.venv\Scripts\Activate.ps1
-pip install -r worker\requirements.txt
-docker compose up -d qdrant
-mkdir data\dropzone, data\exports
-$env:EMBED_DEV_MODE="1"; $env:AUDIO_DEV_MODE="1"
-$env:PYTHONPATH="worker"; python scripts\ingest_dropzone.py --dir data\dropzone --export data\exports\ingest.jsonl
-```
-
-### One‑stop "Control Panel"
-
-Run common tasks without remembering flags:
-
-```bash
-python examples/control_panel.py ingest --dir data/dropzone --export data/exports/ingest.jsonl
-python examples/control_panel.py ask --q "what's in the pdf?" --k 6 --show-sources
-python examples/control_panel.py ask --q "summarize the resume" --llm --model llama3.1 --k 6 --show-sources
-python examples/control_panel.py peek
-python examples/control_panel.py reset --rename
-```
+Great for demos and testing.
 
 ---
 
-## What gets parsed?
+## Repo Layout
 
-| Type     | Extensions                                  | Extra install (optional)                                  | If missing…           |
-|----------|---------------------------------------------|------------------------------------------------------------|-----------------------|
-| Text     | `.txt`, `.md`                               | —                                                          | read as UTF‑8 text    |
-| CSV/TSV  | `.csv`, `.tsv`                              | —                                                          | parsed via `csv`      |
-| JSON     | `.json`                                     | —                                                          | flattened key paths   |
-| JSONL    | `.jsonl`                                    | —                                                          | per-line flattened    |
-| DOCX     | `.docx`                                     | `pip install -r worker/requirements.docx.txt`              | skipped with message  |
-| PDF      | `.pdf`                                      | `pip install -r worker/requirements.pdf.txt`               | skipped with message  |
-| Audio    | `.wav`, `.mp3`, `.m4a`, `.flac`, `.ogg`     | `pip install -r worker/requirements.audio.txt` + ffmpeg    | dev‑mode stub or CPU STT |
-
-**Images (optional)**: `.jpg/.jpeg/.png/.webp` via BLIP → caption → embed → Qdrant.
-Enable:
-```bash
-pip install -r worker/requirements.images.txt
-export IMAGES_CAPTION=1 PYTHONPATH=worker
-python scripts/ingest_dropzone.py --dir data/dropzone --export data/exports/ingest.jsonl
 ```
-
-All optional parsers are **lazy‑imported**. If an optional dependency isn't installed, ingest **won't crash**: the file is skipped with a clear note unless you pass `--strict`.
-
----
-
-## Dev‑mode toggles (no heavy installs required)
-
-- `EMBED_DEV_MODE=1` → deterministic stub vectors (no Ollama/embeddings).
-- `AUDIO_DEV_MODE=1` → quick "\[DEV] transcript of file.ext" (no faster‑whisper/ffmpeg).
-
-These make the pipeline fully offline and fast for demos/tests.
-
----
-
-## Configuration
-
-`worker/app/config.py` loads `.env` from repo root. Defaults are safe for local dev:
-
-```env
-# Qdrant and Embeddings
-OLLAMA_URL=http://host.docker.internal:11434
-QDRANT_URL=http://host.docker.internal:6333
-QDRANT_COLLECTION=jsonify2ai_chunks
-EMBEDDINGS_MODEL=nomic-embed-text
-EMBEDDING_DIM=768
-CHUNK_SIZE=800
-CHUNK_OVERLAP=100
-
-# Dev toggles
-EMBED_DEV_MODE=0
-AUDIO_DEV_MODE=0
-STT_MODEL=tiny
-
-# Drop-zone defaults
-DROPZONE_DIR=data/dropzone
-EXPORT_JSONL=data/exports/ingest.jsonl
+worker/   → parsers, services, tests
+scripts/  → ingest_dropzone, watch_dropzone
+examples/ → ask_local, control_panel
+api/      → Go (upload/search/ask) [WIP]
+web/      → React interface [WIP]
+data/     → dropzone, exports, docs
 ```
-
----
-
-## Drop‑Zone ingest usage
-
-```bash
-# Standard run
-PYTHONPATH=worker python scripts/ingest_dropzone.py \
-  --dir data/dropzone --export data/exports/ingest.jsonl
-
-# Fail on missing optional deps
-PYTHONPATH=worker python scripts/ingest_dropzone.py --strict
-```
-
-**Qdrant schema mismatch (dimension None / wrong size)**
-```bash
-# one-time repair during ingest
-python scripts/ingest_dropzone.py --dir data/dropzone --export data/exports/ingest.jsonl --recreate-bad-collection
-# or via env (useful in CI)
-export QDRANT_RECREATE_BAD=1
-
-Control Panel:
-python examples/control_panel.py ingest --dir data/dropzone --export data/exports/ingest.jsonl --recreate-bad-collection
-```
-
-### Watch mode (auto‑ingest)
-```bash
-pip install watchdog
-PYTHONPATH=worker python scripts/watch_dropzone.py
-# drop files into data/dropzone and they are ingested automatically
-```
-
-> The watcher ignores temp/hidden files (`~$*`, `.DS_Store`, `Thumbs.db`, `*.tmp`, `*.part`, `*.crdownload`) and prevents overlapping ingests.
-> Tune debounce via `WATCH_DEBOUNCE_SEC` (default `1.0`).
-
-### JSONL export format
-
-Each chunk is one line in the export file:
-
-```json
-{
-  "id": "document_uuid:idx",
-  "document_id": "document_uuid",
-  "path": "data/dropzone/file.ext",
-  "idx": 0,
-  "text": "chunk text …",
-  "meta": { "source_ext": ".pdf" }
-}
-```
-
----
-
-## Tests & CI
-
-```bash
-PYTHONPATH=worker python -m pytest --rootdir=./ -q worker/tests
-```
-
-CI runs the worker tests with a minimal dependency set, and optional parsers automatically skip if not installed. The build badge reflects the status of `main`.
-
----
-
-## (Legacy) Text processing endpoints
-
-The worker previously shipped an HTTP pipeline (`/process/text`) to chunk, embed, and upsert text; that still exists for integration with the API service. The drop‑zone CLI uses the same internal chunking/embedding logic under the hood.
-
----
-
-## Optional installs (one‑liners)
-
-```bash
-# base only (minimal)
-pip install -r worker/requirements.txt
-
-# enable PDF
-pip install -r worker/requirements.pdf.txt
-
-# enable DOCX
-pip install -r worker/requirements.docx.txt
-
-# enable Audio (CPU)
-pip install -r worker/requirements.audio.txt
-
-# everything (pdf + docx + audio)
-pip install -r worker/requirements.all.txt
-```
-
-> For real audio transcription, also install **ffmpeg**:
-> Windows (Chocolatey): `choco install ffmpeg` • macOS (Homebrew): `brew install ffmpeg` • Debian/Ubuntu: `sudo apt-get install -y ffmpeg`
-
----
-
-## One‑liner smoke test
-
-```bash
-mkdir -p data/dropzone data/exports
-printf "name,age\nalice,30\n" > data/dropzone/sample.csv
-echo "hello from jsonify2ai" > data/dropzone/sample.txt
-export EMBED_DEV_MODE=1 AUDIO_DEV_MODE=1 PYTHONPATH=worker
-python scripts/ingest_dropzone.py --dir data/dropzone --export data/exports/ingest.jsonl
-```
-
----
-
-## Demo Recipes (quick copy-paste)
-
-### Resume Q&A (txt/pdf/docx)
-```bash
-mkdir -p data/dropzone data/exports
-# drop resume.pdf into data/dropzone first
-export EMBED_DEV_MODE=1 AUDIO_DEV_MODE=1 PYTHONPATH=worker
-python scripts/ingest_dropzone.py --dir data/dropzone --export data/exports/resume.jsonl
-python examples/ask_local.py --q "What roles does this resume target?" --k 6 --show-sources
-```
-
-### CSV snapshot (structured)
-```bash
-mkdir -p data/dropzone data/exports
-printf "name,dept,salary\nalice,eng,140000\nbob,ops,90000\n" > data/dropzone/pay.csv
-export EMBED_DEV_MODE=1 PYTHONPATH=worker
-python scripts/ingest_dropzone.py --dir data/dropzone --export data/exports/csv.jsonl
-python examples/ask_local.py --q "Which departments and salaries are present?" --k 6 --show-sources
-```
-
-**Linux/macOS:** `chmod +x examples/demo_*.sh && ./examples/demo_resume.sh`
-**Windows:** `.\examples\demo_resume.ps1`
 
 ---
 
 ## Roadmap
 
-- Image captioning (BLIP/CLIP) → text → chunk/embed
-- Web UI for drop‑zone status & preview
-- Watch mode (auto‑ingest on file changes)
-- API/upload wiring to reuse the same `extract_text_auto` path
+- Image captioning → embed
+- Web UI for drop‑zone + previews
+- Auto‑watch mode (real‑time ingest)
+- Unified API service (Go + FastAPI)
+- More enrichers (tags, summaries, OCR)
+
+---
+
+## License
+
+MIT — use, hack, extend.

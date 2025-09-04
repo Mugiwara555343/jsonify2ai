@@ -7,73 +7,70 @@ from worker.app.config import settings
 
 def _parse_embeddings(json_obj) -> List[List[float]]:
     """
-    Parse embeddings from Ollama API response.
+    Parse embeddings from Ollama responses.
 
-    Handles both response shapes:
-    - Single input: {"embedding": [...]}
-    - Batch input: {"embeddings": [{"embedding": [...]}, ...]}
+    Supported shapes:
+      1) Modern /api/embed (single or batch):
+         {"embeddings": [[...], [...], ...]}
 
-    Args:
-        json_obj: Parsed JSON response from Ollama
+      2) Older /api/embeddings (single):
+         {"embedding": [...]}
+
+      3) Older /api/embeddings (batch):
+         {"embeddings": [{"embedding": [...]}, ...]}
 
     Returns:
-        List of embedding vectors
-
-    Raises:
-        ValueError: If response shape is unexpected
+        List[List[float]]  # one vector per input text
     """
-    if "embedding" in json_obj:
-        # Single input response
+    # Case 1: Modern shape -> embeddings is a list of vectors
+    if isinstance(json_obj, dict) and "embeddings" in json_obj:
+        embs = json_obj["embeddings"]
+        if isinstance(embs, list):
+            if len(embs) == 0:
+                return []
+            first = embs[0]
+            # Modern: list[list[float]]
+            if isinstance(first, list):
+                return embs
+            # Legacy-batch: list[{"embedding":[...]}]
+            if isinstance(first, dict) and "embedding" in first:
+                return [item["embedding"] for item in embs]
+    # Case 2: Legacy single: {"embedding":[...]}
+    if isinstance(json_obj, dict) and "embedding" in json_obj:
         return [json_obj["embedding"]]
-    elif "embeddings" in json_obj:
-        # Batch response
-        return [item["embedding"] for item in json_obj["embeddings"]]
-    else:
-        raise ValueError("Unexpected Ollama response format")
+
+    raise ValueError("Unexpected Ollama response format while parsing embeddings")
 
 
 def _generate_dummy_embedding(text: str, dim: int) -> List[float]:
     """
     Generate deterministic dummy embedding for dev mode.
-
-    Args:
-        text: Input text to hash
-        dim: Embedding dimension
-
-    Returns:
-        List of floats in [0, 1) based on text hash
     """
-    # Create stable hash
-    hash_obj = hashlib.sha256(text.encode("utf-8"))
-    hash_bytes = hash_obj.digest()
-
-    # Map hash bytes to floats in [0, 1)
-    embedding = []
-    for i in range(dim):
-        byte_idx = i % len(hash_bytes)
-        # Normalize byte value to [0, 1)
-        embedding.append(hash_bytes[byte_idx] / 256.0)
-
-    return embedding
+    h = hashlib.sha256(text.encode("utf-8")).digest()
+    # Map hash bytes to floats in [0,1)
+    return [h[i % len(h)] / 256.0 for i in range(dim)]
 
 
 def embed_texts(
-    texts: List[str], model: str = None, base_url: str = None, dim: int = None
+    texts: List[str],
+    model: str | None = None,
+    base_url: str | None = None,
+    dim: int | None = None,
 ) -> List[List[float]]:
     """
-    Embed texts using Ollama embeddings API or dev mode.
+    Embed texts using Ollama.
+
+    - Uses /api/embed (modern, stable).
+    - Backwards-compatible parser accepts older shapes.
 
     Args:
-        texts: List of texts to embed
-        model: Model name (defaults to config)
+        texts: List of texts to embed (len >= 1)
+        model: Embedding model name (defaults to config)
         base_url: Ollama base URL (defaults to config)
-        dim: Embedding dimension (defaults to config)
+        dim: Expected embedding dimension (defaults to config)
 
     Returns:
-        List of embedding vectors
-
-    Raises:
-        ValueError: On API errors or response format issues
+        List of embedding vectors (one per input text)
     """
     if not texts:
         return []
@@ -82,26 +79,28 @@ def embed_texts(
     base_url = base_url or settings.OLLAMA_URL
     dim = dim or settings.EMBEDDING_DIM
 
-    # Check for dev mode
+    # Dev mode short-circuit
     if os.getenv("EMBED_DEV_MODE") == "1":
-        return [_generate_dummy_embedding(text, dim) for text in texts]
+        return [_generate_dummy_embedding(t, dim) for t in texts]
 
-    # Call Ollama API
-    url = f"{base_url}/api/embeddings"
+    # Modern endpoint (plural): /api/embed
+    url = f"{base_url.rstrip('/')}/api/embed"
     payload = {"model": model, "input": texts}
 
     try:
-        response = requests.post(url, json=payload, timeout=30)
-        response.raise_for_status()
+        resp = requests.post(url, json=payload, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
 
-        result = response.json()
-        embeddings = _parse_embeddings(result)
+        embeddings = _parse_embeddings(data)
 
-        # Validate response length matches input
+        # Validate count and non-empty vectors
         if len(embeddings) != len(texts):
             raise ValueError(
                 f"Embedding count mismatch: expected {len(texts)}, got {len(embeddings)}"
             )
+        if not embeddings or not embeddings[0]:
+            raise ValueError("Empty embedding returned from Ollama")
 
         return embeddings
 
