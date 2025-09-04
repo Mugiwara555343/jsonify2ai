@@ -14,21 +14,25 @@ services:
       - GIN_MODE=${GIN_MODE:-release}
       - GIN_TRUSTED_PROXIES=${GIN_TRUSTED_PROXIES:-}
     restart: unless-stopped
+
   worker:
     build: ./worker
     image: jsonify2ai-worker:latest
     ports: ["8090:8090"]
     volumes:
       - ./data:/app/data
+      - ./scripts:/app/scripts
+      - ./worker:/app/worker           # ← NEW: mount ingest scripts
     environment:
       QDRANT_URL: "http://host.docker.internal:6333"
       OLLAMA_URL: "http://host.docker.internal:11434"
-      EMBED_DEV_MODE: ${EMBED_DEV_MODE:-0}
+      EMBED_DEV_MODE: "0"
       IMAGES_CAPTION: ${IMAGES_CAPTION:-0}
       ASK_MODE: ${ASK_MODE}
       ASK_MODEL: ${ASK_MODEL}
+      PYTHONPATH: /app            # ← NEW: allow imports like `from app...`
     healthcheck:
-      test: ["CMD","curl","-fsS","http://localhost:8090/health"]
+      test: ["CMD", "python", "-c", "import urllib.request,sys; d=urllib.request.urlopen('http://localhost:8090/health',timeout=2).read(); sys.exit(0 if b'{\\\"ok\\\":true' in d else 1)"]
       interval: 10s
       timeout: 3s
       retries: 10

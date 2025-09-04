@@ -5,11 +5,14 @@
 .venv/
 __pycache__/
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
 *.pyc
 
 # OS cruft
 .DS_Store
 Thumbs.db
+ehthumbs.db
 
 # Env / secrets
 .env
@@ -20,12 +23,27 @@ web/node_modules/
 web/.vite/
 web/dist/
 web/package-lock.json
+web/pnpm-lock.yaml
+web/yarn.lock
+web/.eslintcache
 
-# Build/coverage
-dist/
+# Python packaging/build
 build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+htmlcov/
 .coverage
+.coverage.*
 coverage.xml
+
+# Go builds (avoid committing compiled binaries)
+api/bin/
+api/build/
+api/*.exe
+api/*.out
+api/*.test
 
 # Docker volumes / model caches
 data/qdrant/
@@ -39,6 +57,25 @@ data/exports/*
 data/documents/*
 !data/documents/.gitkeep
 
+# Watcher state (ephemeral)
+data/.ingest_state.json
+
+# Local repo snapshots / diagnostics (for structure reviews)
+snapshots/
+diag/
+
+# Logs & temp files
+*.log
+*.tmp
+*.temp
+*.swp
+*.swo
+
 # Local scan outputs
 project.map.json
 images.candidates.json
+
+# Databases (local dev only)
+db/*.db
+db/*.sqlite
+db/*.sqlite3
