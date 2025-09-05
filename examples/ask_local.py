@@ -133,6 +133,11 @@ def main():
     ap.add_argument(
         "--debug", action="store_true", help="Print preflight and diagnostics"
     )
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run embedding logic but do not query. Print summary JSON and exit.",
+    )
     ap.add_argument("--q", "--query", dest="query", type=str, help="Your question")
     ap.add_argument("-k", "--topk", dest="k", type=int, default=6, help="Top-k chunks")
     # optional scope filters
@@ -179,16 +184,48 @@ def main():
         )
         sys.exit(1)
 
-    if args.debug:
-        print(
-            f"searching collection={collection} embed_model={getattr(settings, 'EMBEDDINGS_MODEL', EMBEDDINGS_MODEL)} dim={getattr(settings, 'EMBEDDING_DIM', EMBEDDING_DIM)}"
+    # --debug: print resolved env and collection info
+    if args.debug or args.dry_run:
+        qdrant_url = os.getenv(
+            "QDRANT_URL", getattr(settings, "QDRANT_URL", "http://localhost:6333")
         )
+        qdrant_collection = collection
+        embeddings_model = getattr(settings, "EMBEDDINGS_MODEL", EMBEDDINGS_MODEL)
+        embedding_dim = int(getattr(settings, "EMBEDDING_DIM", EMBEDDING_DIM))
+        print(
+            f"[debug] QDRANT_URL={qdrant_url} QDRANT_COLLECTION={qdrant_collection} EMBEDDINGS_MODEL={embeddings_model} EMBEDDING_DIM={embedding_dim}"
+        )
+        # Try to get Qdrant collection info
+        try:
+            client_dbg = get_qdrant_client()
+            info = client_dbg.get_collection(qdrant_collection)
+            points_count = info.get("points_count", "?")
+            indexed_vectors_count = info.get("indexed_vectors_count", "?")
+            print(
+                f"[debug] collection_info points_count={points_count} indexed_vectors_count={indexed_vectors_count}"
+            )
+        except Exception:
+            print("[debug] collection_info unavailable")
 
     # Connect + embed
-    client = get_qdrant_client()
     qv = _embed_query(query)
 
+    if args.debug or args.dry_run:
+        print(f"[debug] query_vector_len={len(qv)}")
+
+    # --dry-run: print summary and exit
+    if args.dry_run:
+        summary = {
+            "ok": True,
+            "collection": collection,
+            "embed_dim": int(getattr(settings, "EMBEDDING_DIM", EMBEDDING_DIM)),
+            "query_vector_len": len(qv),
+        }
+        print(json.dumps(summary, indent=2))
+        sys.exit(0)
+
     # Build optional filter
+    client = get_qdrant_client()
     qfilter = build_filter(document_id=args.document_id, kind=args.kind, path=args.path)
 
     # Search (explicit collection)

@@ -601,6 +601,16 @@ def main():
         default=None,
         help="Comma/space list of kinds to include (e.g., pdf,txt,md).",
     )
+    p.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print resolved env and collection info for debugging.",
+    )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run selection/embedding logic but do not upsert. Print summary JSON and exit.",
+    )
 
     # Read-only inspection modes (mutually exclusive)
     mx = p.add_mutually_exclusive_group()
@@ -696,6 +706,61 @@ def main():
         candidate_files.append((p, rel_path, kind_norm))
         if len(candidate_files) >= args.limit:
             break
+
+    # --debug: print resolved env and collection info
+    if args.debug or args.dry_run:
+        qdrant_url = os.getenv(
+            "QDRANT_URL", getattr(settings, "QDRANT_URL", "http://localhost:6333")
+        )
+        qdrant_collection = getattr(
+            settings,
+            "QDRANT_COLLECTION",
+            os.getenv("QDRANT_COLLECTION", "jsonify2ai_chunks_768"),
+        )
+        embeddings_model = getattr(
+            settings,
+            "EMBEDDINGS_MODEL",
+            os.getenv("EMBEDDINGS_MODEL", "nomic-embed-text"),
+        )
+        embedding_dim = int(getattr(settings, "EMBEDDING_DIM", 768))
+        print(
+            f"[debug] QDRANT_URL={qdrant_url} QDRANT_COLLECTION={qdrant_collection} EMBEDDINGS_MODEL={embeddings_model} EMBEDDING_DIM={embedding_dim}"
+        )
+        print(
+            f"[debug] candidate_files={len(candidate_files)} per_kind={{'text': {sum(1 for _,_,k in candidate_files if k=='text')}, 'pdf': {sum(1 for _,_,k in candidate_files if k=='pdf')}, 'image': {sum(1 for _,_,k in candidate_files if k=='image')}, 'audio': {sum(1 for _,_,k in candidate_files if k=='audio')}}}"
+        )
+        # Try to get Qdrant collection info
+        try:
+            client = get_qdrant_client()
+            info = client.get_collection(qdrant_collection)
+            points_count = info.get("points_count", "?")
+            indexed_vectors_count = info.get("indexed_vectors_count", "?")
+            print(
+                f"[debug] collection_info points_count={points_count} indexed_vectors_count={indexed_vectors_count}"
+            )
+        except Exception:
+            print("[debug] collection_info unavailable")
+
+    # --dry-run: print summary and exit
+    if args.dry_run:
+        per_kind = {"text": 0, "pdf": 0, "image": 0, "audio": 0}
+        for _, _, k in candidate_files:
+            if k in per_kind:
+                per_kind[k] += 1
+        summary = {
+            "ok": True,
+            "files_scanned": len(candidate_files),
+            "chunks_parsed": 0,  # Not chunked in dry-run
+            "per_kind": per_kind,
+            "collection": getattr(
+                settings,
+                "QDRANT_COLLECTION",
+                os.getenv("QDRANT_COLLECTION", "jsonify2ai_chunks_768"),
+            ),
+            "embed_dim": int(getattr(settings, "EMBEDDING_DIM", 768)),
+        }
+        print(json.dumps(summary, indent=2))
+        sys.exit(0)
 
     # --list-files and --list output
     if args.list_files or args.list:
