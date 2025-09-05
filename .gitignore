@@ -75,6 +75,7 @@ diag/
 project.map.json
 images.candidates.json
 
+
 # Databases (local dev only)
 db/*.db
 db/*.sqlite
@@ -83,3 +84,7 @@ db/*.sqlite3
 # Local datasets & snapshots
 data/
 _snapshots/
+REFERENCE_ONLY.md
+north_star.md
+/REFRENCE_ONLY.md
+/north_star.md
