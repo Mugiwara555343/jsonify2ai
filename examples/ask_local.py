@@ -133,11 +133,13 @@ def main():
     ap.add_argument(
         "--debug", action="store_true", help="Print preflight and diagnostics"
     )
+
     ap.add_argument(
         "--dry-run",
         action="store_true",
         help="Run embedding logic but do not query. Print summary JSON and exit.",
     )
+
     ap.add_argument("--q", "--query", dest="query", type=str, help="Your question")
     ap.add_argument("-k", "--topk", dest="k", type=int, default=6, help="Top-k chunks")
     # optional scope filters
@@ -184,6 +186,7 @@ def main():
         )
         sys.exit(1)
 
+
     # --debug: print resolved env and collection info
     if args.debug or args.dry_run:
         qdrant_url = os.getenv(
@@ -226,6 +229,18 @@ def main():
 
     # Build optional filter
     client = get_qdrant_client()
+
+    if args.debug:
+        print(
+            f"searching collection={collection} embed_model={getattr(settings, 'EMBEDDINGS_MODEL', EMBEDDINGS_MODEL)} dim={getattr(settings, 'EMBEDDING_DIM', EMBEDDING_DIM)}"
+        )
+
+    # Connect + embed
+    client = get_qdrant_client()
+    qv = _embed_query(query)
+
+    # Build optional filter
+
     qfilter = build_filter(document_id=args.document_id, kind=args.kind, path=args.path)
 
     # Search (explicit collection)

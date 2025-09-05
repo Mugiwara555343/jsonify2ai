@@ -601,6 +601,7 @@ def main():
         default=None,
         help="Comma/space list of kinds to include (e.g., pdf,txt,md).",
     )
+
     p.add_argument(
         "--debug",
         action="store_true",
@@ -642,7 +643,145 @@ def main():
         "--filter-by",
         action="append",
         help="Sugar for filters, repeatable (key=value). Allowed keys: document_id, kind, path",
+
+
+    # Read-only inspection modes (mutually exclusive)
+    mx = p.add_mutually_exclusive_group()
+    mx.add_argument(
+        "--stats",
+        action="store_true",
+        help="Print total/per-kind counts (optionally filtered)",
     )
+    mx.add_argument(
+        "--list-files",
+        action="store_true",
+        help="List filesystem candidates to ingest (respects --dir, --kinds, --limit)",
+    )
+    mx.add_argument(
+        "--list-collection",
+        action="store_true",
+        help="List Qdrant rows already stored (respects --limit)",
+    )
+    mx.add_argument("--list", action="store_true", help="Alias for --list-files")
+    p.add_argument(
+        "--limit", type=int, default=10, help="Max rows for --list (default 10)"
+    )
+
+    # Filters (work with --stats/--list; ignored during ingest)
+    p.add_argument("--document-id", type=str, default=None)
+    p.add_argument("--kind", type=str, default=None)
+    p.add_argument("--path", type=str, default=None)
+    p.add_argument(
+        "--filter-by",
+        action="append",
+        help="Sugar for filters, repeatable (key=value). Allowed keys: document_id, kind, path",
+    )
+
+    args = p.parse_args()
+
+    # Merge sugar filters into explicit flags (explicit flags win)
+    sugar = _parse_filter_sugar(args.filter_by)
+    document_id = args.document_id or sugar.get("document_id")
+    kind = args.kind or sugar.get("kind")
+    path = args.path or sugar.get("path")
+
+    # Parse --kinds and combine with --kind
+    kinds_set = set()
+    if args.kinds:
+        for k in args.kinds.replace(",", " ").split():
+            if k:
+                kinds_set.add(k.strip())
+    if kind:
+        kinds_set.add(kind)
+    kinds_list = list(kinds_set) if kinds_set else None
+
+    # Candidate selection logic
+    drop = Path(args.dir)
+    candidate_files = []
+    # If --path is provided and exists, always include it
+    explicit_path = None
+    if args.path:
+        explicit_path = Path(args.path)
+        if explicit_path.exists():
+            rel_path = str(explicit_path).replace("\\", "/")
+            ext = explicit_path.suffix.lower()
+            if ext == ".pdf":
+                kind_norm = "pdf"
+            elif ext in {".md", ".txt"}:
+                kind_norm = "text"
+            elif ext in {".jpg", ".jpeg", ".png", ".webp"}:
+                kind_norm = "image"
+            elif ext in AUDIO_EXTS:
+                kind_norm = "audio"
+            else:
+                kind_norm = "text"
+            candidate_files.append((explicit_path, rel_path, kind_norm))
+    # Add other files from dropzone, respecting --kinds
+    for p in _iter_files(drop):
+        rel_path = str(p).replace("\\", "/")
+        ext = p.suffix.lower()
+        if ext == ".pdf":
+            kind_norm = "pdf"
+        elif ext in {".md", ".txt"}:
+            kind_norm = "text"
+        elif ext in {".jpg", ".jpeg", ".png", ".webp"}:
+            kind_norm = "image"
+        elif ext in AUDIO_EXTS:
+            kind_norm = "audio"
+        else:
+            kind_norm = "text"
+        # If --path was provided, skip duplicate
+        if explicit_path and p.resolve() == explicit_path.resolve():
+            continue
+        # Filter by kinds if set
+        if kinds_list and kind_norm not in kinds_list:
+            continue
+        candidate_files.append((p, rel_path, kind_norm))
+        if len(candidate_files) >= args.limit:
+            break
+
+    # --list-files and --list output
+    if args.list_files or args.list:
+        files_out = [
+            {"path": rel_path, "kind": kind_norm}
+            for _, rel_path, kind_norm in candidate_files
+        ]
+        print(json.dumps({"files": files_out, "count": len(files_out)}))
+        return
+
+    if args.list_collection:
+        # List Qdrant collection rows
+        client = get_qdrant_client()
+        points, _ = client.scroll(
+            collection_name=CANONICAL_COLLECTION,
+            scroll_filter=None,
+            limit=args.limit,
+            with_payload=True,
+            with_vectors=False,
+        )
+        rows = []
+        for p in points:
+            payload = getattr(p, "payload", {}) or {}
+            rel_path = (payload.get("path") or "").replace("\\", "/")
+            kind = payload.get("kind") or "text"
+            rows.append(
+                {
+                    "id": str(getattr(p, "id", "")),
+                    "document_id": payload.get("document_id"),
+                    "path": rel_path,
+                    "kind": kind,
+                    "idx": payload.get("idx"),
+                }
+            )
+        print(json.dumps({"rows": rows, "count": len(rows)}))
+        return
+
+    # Ingest execution path
+    recreate_bad = (
+        args.recreate_bad_collection or os.getenv("QDRANT_RECREATE_BAD", "0") == "1"
+
+    )
+    import time
 
     args = p.parse_args()
 
@@ -884,6 +1023,88 @@ def main():
             size=int(getattr(settings, "CHUNK_SIZE", 800)),
             overlap=int(getattr(settings, "CHUNK_OVERLAP", 100)),
         )
+
+    t0 = time.time()
+    total_files = 0
+    total_chunks = 0
+    points_upserted = 0
+    points_skipped_dedupe = 0
+    per_kind = {"text": 0, "pdf": 0, "image": 0, "audio": 0}
+    seen_points = set()
+    client = get_qdrant_client()
+    batch_size = int(getattr(settings, "QDRANT_UPSERT_BATCH_SIZE", 128))
+    for p, rel_path, kind_norm in candidate_files:
+        total_files += 1
+        parser_name = None
+        if kind_norm == "pdf":
+            parser_name = "pdf"
+        elif kind_norm == "image":
+            parser_name = "image"
+        elif kind_norm == "audio":
+            parser_name = "audio"
+        else:
+            parser_name = "text"
+        if args.stats:
+            print(
+                json.dumps(
+                    {
+                        "trace": "candidate",
+                        "path": rel_path,
+                        "kind": kind_norm,
+                        "parser": parser_name,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        # Handle images
+        if kind_norm == "image" and args.images:
+            try:
+                cap = caption_image(p)
+                vec = embed_texts([cap])[0]
+                item = (
+                    str(uuid.uuid4()),
+                    vec,
+                    {
+                        "document_id": _document_id_for_file(p),
+                        "path": rel_path,
+                        "kind": "image",
+                        "idx": 0,
+                        "text": cap,
+                        "meta": {
+                            "source_ext": p.suffix.lower(),
+                            "caption_model": "blip",
+                        },
+                    },
+                )
+                upsert_points(
+                    [item],
+                    collection_name=getattr(
+                        settings, "QDRANT_COLLECTION_IMAGES", "jsonify2ai_images_768"
+                    ),
+                    client=client,
+                    batch_size=1,
+                    ensure=False,
+                )
+                points_upserted += 1
+                per_kind["image"] += 1
+            except Exception:
+                continue
+            continue
+        # Parse text-like files
+        try:
+            raw = extract_text_auto(str(p), strict=args.strict)
+        except SkipFile:
+            continue
+        if not raw.strip():
+            continue
+        document_id = _document_id_for_file(p)
+        # Chunk using config defaults
+        chunks = chunk_text(
+            raw,
+            size=int(getattr(settings, "CHUNK_SIZE", 800)),
+            overlap=int(getattr(settings, "CHUNK_OVERLAP", 100)),
+        )
+
         if not chunks:
             continue
         vecs = embed_texts(chunks)
