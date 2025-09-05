@@ -79,3 +79,7 @@ images.candidates.json
 db/*.db
 db/*.sqlite
 db/*.sqlite3
+
+# Local datasets & snapshots
+data/
+_snapshots/
