@@ -1,15 +1,39 @@
 #!/usr/bin/env python3
-# --- repo-root import bootstrap (works even if PYTHONPATH is unset) ----------
+# --- import ordering: __future__ -> stdlib -> bootstrap -> 3rd-party -> local ---
 from __future__ import annotations
+
+# stdlib
 import sys
 import pathlib
+import argparse
+import json
+import os
+import textwrap
+import time
+from typing import List, Tuple
 
+# repo-root import bootstrap (works even if PYTHONPATH is unset)
 REPO_ROOT = (
     pathlib.Path(__file__).resolve().parents[1]
 )  # parent of 'scripts/' or 'examples/'
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-# -----------------------------------------------------------------------------
+
+# third-party (optional)
+try:
+    import requests  # type: ignore
+except Exception:  # pragma: no cover
+    requests = None  # type: ignore
+
+# local imports (after bootstrap)
+from worker.app.config import settings  # noqa: E402
+from worker.app.services.embed_ollama import embed_texts  # noqa: E402
+from worker.app.services.qdrant_client import (  # noqa: E402
+    get_qdrant_client,
+    search as q_search,
+    build_filter,
+)
+
 """
 ask_local.py — query -> retrieve -> (optional) answer
 
@@ -27,32 +51,10 @@ Usage:
   PYTHONPATH=worker python examples/ask_local.py --llm
 """
 
-import argparse
-import json
-import os
-import sys
-import textwrap
-import time
-from typing import List, Tuple
-
-
 # Environment config (align with worker services)
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "jsonify2ai_chunks")
 EMBEDDINGS_MODEL = os.getenv("EMBEDDINGS_MODEL", "nomic-embed-text")
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "768"))
-
-from worker.app.config import settings
-from worker.app.services.embed_ollama import embed_texts
-from worker.app.services.qdrant_client import (
-    get_qdrant_client,
-    search as q_search,
-    build_filter,
-)
-
-try:
-    import requests
-except Exception:  # pragma: no cover
-    requests = None  # type: ignore
 
 
 def _embed_query(query: str) -> List[float]:
@@ -67,10 +69,7 @@ def _embed_query(query: str) -> List[float]:
     return vecs[0]
 
 
-def _build_context(
-    points,
-    max_chars: int = 1800,
-) -> Tuple[str, List[dict]]:
+def _build_context(points, max_chars: int = 1800) -> Tuple[str, List[dict]]:
     """Concatenate top chunks into a context window; collect compact sources."""
     parts: List[str] = []
     sources: List[dict] = []
@@ -89,11 +88,7 @@ def _build_context(
         parts.append(addition)
         used += len(addition)
         sources.append(
-            {
-                "path": path,
-                "idx": idx,
-                "score": float(getattr(p, "score", 0.0)),
-            }
+            {"path": path, "idx": idx, "score": float(getattr(p, "score", 0.0))}
         )
     ctx = "\n".join(parts).strip()
     return ctx, sources
@@ -133,13 +128,11 @@ def main():
     ap.add_argument(
         "--debug", action="store_true", help="Print preflight and diagnostics"
     )
-
     ap.add_argument(
         "--dry-run",
         action="store_true",
         help="Run embedding logic but do not query. Print summary JSON and exit.",
     )
-
     ap.add_argument("--q", "--query", dest="query", type=str, help="Your question")
     ap.add_argument("-k", "--topk", dest="k", type=int, default=6, help="Top-k chunks")
     # optional scope filters
@@ -179,6 +172,7 @@ def main():
         args.collection
         or getattr(settings, "QDRANT_COLLECTION", None)
         or os.getenv("QDRANT_COLLECTION")
+        or QDRANT_COLLECTION
     )
     if not collection:
         print(
@@ -186,22 +180,21 @@ def main():
         )
         sys.exit(1)
 
-
     # --debug: print resolved env and collection info
     if args.debug or args.dry_run:
         qdrant_url = os.getenv(
             "QDRANT_URL", getattr(settings, "QDRANT_URL", "http://localhost:6333")
         )
-        qdrant_collection = collection
         embeddings_model = getattr(settings, "EMBEDDINGS_MODEL", EMBEDDINGS_MODEL)
         embedding_dim = int(getattr(settings, "EMBEDDING_DIM", EMBEDDING_DIM))
         print(
-            f"[debug] QDRANT_URL={qdrant_url} QDRANT_COLLECTION={qdrant_collection} EMBEDDINGS_MODEL={embeddings_model} EMBEDDING_DIM={embedding_dim}"
+            f"[debug] QDRANT_URL={qdrant_url} QDRANT_COLLECTION={collection} "
+            f"EMBEDDINGS_MODEL={embeddings_model} EMBEDDING_DIM={embedding_dim}"
         )
         # Try to get Qdrant collection info
         try:
             client_dbg = get_qdrant_client()
-            info = client_dbg.get_collection(qdrant_collection)
+            info = client_dbg.get_collection(collection)
             points_count = info.get("points_count", "?")
             indexed_vectors_count = info.get("indexed_vectors_count", "?")
             print(
@@ -210,9 +203,8 @@ def main():
         except Exception:
             print("[debug] collection_info unavailable")
 
-    # Connect + embed
+    # Embed once
     qv = _embed_query(query)
-
     if args.debug or args.dry_run:
         print(f"[debug] query_vector_len={len(qv)}")
 
@@ -227,20 +219,8 @@ def main():
         print(json.dumps(summary, indent=2))
         sys.exit(0)
 
-    # Build optional filter
+    # Build client and optional filter
     client = get_qdrant_client()
-
-    if args.debug:
-        print(
-            f"searching collection={collection} embed_model={getattr(settings, 'EMBEDDINGS_MODEL', EMBEDDINGS_MODEL)} dim={getattr(settings, 'EMBEDDING_DIM', EMBEDDING_DIM)}"
-        )
-
-    # Connect + embed
-    client = get_qdrant_client()
-    qv = _embed_query(query)
-
-    # Build optional filter
-
     qfilter = build_filter(document_id=args.document_id, kind=args.kind, path=args.path)
 
     # Search (explicit collection)
@@ -257,6 +237,7 @@ def main():
     except Exception as e:
         print(f"[error] {e}")
         sys.exit(1)
+
     if not points:
         msg = "[no results] index empty or query not matched."
         if args.json:
@@ -270,7 +251,6 @@ def main():
 
     # Retrieval-only or LLM mode (default respects settings)
     use_llm = args.llm or (getattr(settings, "ASK_MODE", "search") == "llm")
-
     if use_llm:
         system = (
             "You are a concise assistant. Use ONLY the provided context. "

@@ -9,6 +9,14 @@ from note_to_json.parser import read_input, ParsingError, _fix_common_validation
 from note_to_json.utils import read_text_safely
 from ._helpers import message_startswith
 
+# Optional enhanced validator; skip its test if not present
+try:
+    from note_to_json.parser import validate_parsed  # type: ignore
+
+    HAS_VALIDATE_PARSED = True
+except Exception:
+    HAS_VALIDATE_PARSED = False
+
 
 class TestParserResilience:
     """Test parser resilience improvements."""
@@ -204,7 +212,7 @@ class TestErrorHandling:
         try:
             # This should fail validation with a clear error message
             with pytest.raises(ValueError) as exc_info:
-                text = read_text_safely(temp_path)
+                _ = read_text_safely(temp_path)  # F841 fixed by discarding return value
 
             # The error should include the expected message
             error_msg = str(exc_info.value)
@@ -267,25 +275,25 @@ class TestEnhancedResilience:
 
     def test_enhanced_validation_errors(self):
         """Test that validation errors now include actionable advice."""
-        try:
-            # Test with missing required field
-            problematic_data = {
-                "title": None,  # Missing required field
-                "timestamp": "2023-01-01T00:00:00Z",
-                "raw_text": "test",
-                "plain_text": "test",
-            }
+        if not HAS_VALIDATE_PARSED:
+            pytest.skip("Enhanced validation not available: validate_parsed missing")
 
-            with pytest.raises(ParsingError) as exc_info:
-                validate_parsed(problematic_data)
+        # Test with missing required field
+        problematic_data = {
+            "title": None,  # Missing required field
+            "timestamp": "2023-01-01T00:00:00Z",
+            "raw_text": "test",
+            "plain_text": "test",
+        }
 
-            error = exc_info.value
-            assert error.error_type == "missing_required_field"
-            assert "advice" in error.context
-            assert "Add the missing required field" in error.context["advice"]
+        with pytest.raises(ParsingError) as exc_info:
+            validate_parsed(problematic_data)  # type: ignore[name-defined]
 
-        except Exception as e:
-            pytest.skip(f"Enhanced validation not available: {e}")
+        error = exc_info.value
+        assert error.error_type == "missing_required_field"
+        assert hasattr(error, "context")
+        assert "advice" in error.context
+        assert "Add the missing required field" in error.context["advice"]
 
     def test_progress_reporting_enhancements(self):
         """Test that progress reporting includes percentage and progress bars."""

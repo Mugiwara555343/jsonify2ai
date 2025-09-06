@@ -1,20 +1,37 @@
 #!/usr/bin/env python3
 """
-memory_watcher.py (Demo Version)
+memory_watcher.py
 
-Watches current folder for changes to `.md` files
-→ Auto-triggers parser from memory_parser.py
-→ Creates `.parsed.json` in same folder
+Watches this package folder for changes to `.md` files
+→ Calls parse_md_file(...) from memory_parser.py
+→ Writes `<name>.parsed.json` adjacent to the source file
 """
 
+from __future__ import annotations
+
+# stdlib
 import json
 import time
 import logging
 import threading
 from hashlib import md5
 from pathlib import Path
+from typing import Optional
+
+# third-party
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+
+# local (prefer package-relative; fallback when executed as a script)
+_IMPORT_ERR: Optional[Exception] = None
+try:  # when imported as a package: jsonify2ai.modules.note2json.memory_watcher
+    from .memory_parser import parse_md_file  # type: ignore
+except Exception:
+    try:  # when run directly: python memory_watcher.py (same dir as memory_parser.py)
+        from memory_parser import parse_md_file  # type: ignore
+    except Exception as e:  # defer hard error until first use
+        parse_md_file = None  # type: ignore
+        _IMPORT_ERR = e
 
 # === LOCAL CONFIG ===
 PROJECT_ROOT = Path(__file__).parent
@@ -45,9 +62,6 @@ DEBOUNCE_DELAY = 0.8
 FILE_EXTS = {".md"}
 last_hash = {}  # path → hash
 
-# === IMPORT PARSER ===
-from memory_parser import parse_md_file
-
 
 class DebouncedHandler(FileSystemEventHandler):
     def __init__(self):
@@ -63,7 +77,7 @@ class DebouncedHandler(FileSystemEventHandler):
         if path.name.startswith((".", "~")) or ".parsed" in path.stem:
             return
 
-        # debounce multiple events
+        # debounce multiple events on the same path
         if path in self.timers:
             self.timers[path].cancel()
 
@@ -84,6 +98,12 @@ class DebouncedHandler(FileSystemEventHandler):
             return
         last_hash[path] = h
 
+        if parse_md_file is None:  # import failed at module import time
+            raise RuntimeError(
+                f"memory_watcher: parser unavailable ({type(_IMPORT_ERR).__name__}: {_IMPORT_ERR}). "
+                "Make sure memory_parser.py is importable (package-relative or same directory)."
+            )
+
         logger.info(f"🔄 Detected update: {path.name}")
         try:
             parsed = parse_md_file(path)
@@ -100,7 +120,11 @@ class DebouncedHandler(FileSystemEventHandler):
 def main():
     logger.info("👁️  Memory Watcher Starting")
     for p in WATCH_PATHS:
-        logger.info(f"  • Watching: {p.relative_to(PROJECT_ROOT)}")
+        try:
+            rel = p.relative_to(PROJECT_ROOT)
+        except Exception:
+            rel = p
+        logger.info(f"  • Watching: {rel}")
 
     observer = Observer()
     handler = DebouncedHandler()

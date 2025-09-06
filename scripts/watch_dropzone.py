@@ -1,14 +1,4 @@
-#!/usr/bin/env python3
-# --- repo-root import bootstrap (works even if PYTHONPATH is unset) ----------
-import sys
-import pathlib
-
-REPO_ROOT = (
-    pathlib.Path(__file__).resolve().parents[1]
-)  # parent of 'scripts/' or 'examples/'
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-# -----------------------------------------------------------------------------
+# scripts/watch_dropzone.py (top-of-file only)
 from __future__ import annotations
 
 import json
@@ -19,6 +9,12 @@ import hashlib
 import threading
 from pathlib import Path
 from subprocess import CalledProcessError, run
+
+# sys.path bootstrap must come AFTER __future__ and BEFORE local imports
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 
 # --- Tunables (env overrides) -----------------------------------------------
 DEBOUNCE_SEC = float(os.getenv("WATCH_DEBOUNCE_SEC", "0.6"))  # min gap between runs

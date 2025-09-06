@@ -45,9 +45,7 @@ try:
 except Exception:  # pragma: no cover
     requests = None  # we will handle gracefully
 
-
 # ---------- Paths / setup
-
 ROOT = pathlib.Path(__file__).resolve().parents[1]  # repo root (../ from scripts/)
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -197,16 +195,21 @@ def build_project_maps() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
                 size = -1
 
             ext = p.suffix.lower()
-            kind = "binary"
+            kind = "unknown"
             head = ""
 
+            # Probe small files as text
             if size >= 0 and size <= 2 * 1024 * 1024:  # <= 2 MiB → try read as text
                 try:
                     head = p.read_text(encoding="utf-8", errors="ignore")[:8000]
-                    kind = "text"
+                    kind = "text" if head else "binary"
                 except Exception:
                     kind = "binary"
                     head = ""
+
+            # Extension-based override for images
+            if ext in IMAGE_EXTS:
+                kind = "image"
 
             rec = {
                 "path": posix_rel(p.resolve(), ROOT),
@@ -214,11 +217,10 @@ def build_project_maps() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
                 "size": size,
                 "sig": sha1_head(p),
                 "head": head,
-                "kind": (
-                    "text" if head else ("image" if ext in IMAGE_EXTS else "binary")
-                ),
+                "kind": kind,  # ← use computed kind directly (fixes F841 and is more explicit)
             }
-            if ext in IMAGE_EXTS:
+
+            if kind == "image":
                 image_records.append(
                     {
                         "path": rec["path"],
@@ -228,6 +230,7 @@ def build_project_maps() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
                         "kind": "image",
                     }
                 )
+
             records.append(rec)
 
     return records, image_records
@@ -458,7 +461,6 @@ def generate_state_md(eff: Dict[str, str]) -> str:
         lines.append(f"- Per kind: {pretty_kinds}")
     lines.append("")
     lines.append("## One-step smoke (host shell)")
-    # keep it aligned with env; do not hardcode model names beyond what's in eff
     smoke_q = "Summarize Mauricio A Ventura's resume focus and strengths."
     smoke_cmd = (
         f'python examples\\ask_local.py --q "{smoke_q}" --k 6 --show-sources'
