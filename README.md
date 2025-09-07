@@ -9,15 +9,14 @@
 
 ---
 
-> **Demo:**
-> _A screenshot or GIF showing dropzone ingestion and asking a question will go here._
+<!-- Demo: A screenshot or GIF showing dropzone ingestion and asking a question will go here. -->
 
 ---
 
 ## Table of Contents
 
 - [Features](#features)
-- [Quick Start](#quick-start-5-minutes)
+- [Quick Start](#quick-start)
 - [Use Cases](#use-cases)
 - [Supported File Types](#whats-supported)
 - [Dev Modes](#dev-modes)
@@ -39,10 +38,9 @@
 
 ---
 
-## Quick Start (5 minutes)
+## Quick Start
 
 > Works on plain CPU. Docker is used only for Qdrant.
-
 
 ```bash
 # 1) Create & activate a virtualenv
@@ -85,8 +83,12 @@ EMBEDDING_DIM=768
 ASK_MODEL=qwen2.5:7b-instruct-q4_K_M   # or your preferred tag
 EMBED_DEV_MODE=1
 AUDIO_DEV_MODE=1
+
+# Copy the example to your .env (Linux/macOS)
+# cp .env.example .env
+# Or for Windows:
+# copy .env.example .env
 ```
-cp .env.example .env   # or copy .env.example .env (Windows)
 
 ## Sanity Check
 
@@ -109,7 +111,6 @@ python examples/ask_local.py --q "summarize the resume" --llm --model qwen2.5:3b
 ```
 
 ## Operations (Baseline vs Day-to-day)
-
 
 **First run (bootstrap):**
 
@@ -154,7 +155,6 @@ For key settings, precedence is:
 
 Tip: keep your preferred LLM tag in `ASK_MODEL` so you don’t edit code. Use `--model` for ad-hoc overrides.
 
-
 ---
 
 ## Use Cases
@@ -194,7 +194,7 @@ Great for demos and testing.
 
 ## Repository Layout
 
-```
+```text
 worker/   → parsers, services, tests
 scripts/  → ingest_dropzone, watch_dropzone (WIP)
 examples/ → ask_local, control_panel
@@ -206,7 +206,6 @@ data/     → dropzone, exports, docs
 ---
 
 ## Installation and Requirements
-
 
 - **Python:** 3.10+ (tested on Linux, macOS, Windows)
 - **Docker:** For Qdrant vector DB (see `docker-compose.yml`)
@@ -245,25 +244,24 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines, or just open an issue/PR.
 
 ## Troubleshooting
 
-
 - **Qdrant unreachable**: Ensure `docker compose up -d qdrant` and `QDRANT_URL=http://localhost:6333`.
-	```bash
-	docker compose logs -f qdrant
-	```
+    ```bash
+    docker compose logs -f qdrant
+    ```
 - **Schema mismatch / “Not existing vector name”**: Your collection likely has named or empty vectors. Use:
-	```bash
-	python scripts/ingest_dropzone.py --recreate-bad-collection --once
-	```
+    ```bash
+    python scripts/ingest_dropzone.py --recreate-bad-collection --once
+    ```
 - **No results**: Run a dry-run to confirm files are discovered and embedded:
-	```bash
-	python scripts/ingest_dropzone.py --debug --dry-run
-	```
+    ```bash
+    python scripts/ingest_dropzone.py --debug --dry-run
+    ```
 - **LLM weak/empty answers**: Verify the model tag is installed in Ollama and pass --model explicitly.
-	```bash
-	ollama list   # verify your ASK_MODEL tag is actually installed
-	# If running Ollama in Docker, use: docker exec -it ollama ollama list
-	```
-	You can also run retrieval-only (omit --llm) and inspect --show-sources.
+    ```bash
+    ollama list   # verify your ASK_MODEL tag is actually installed
+    # If running Ollama in Docker, use: docker exec -it ollama ollama list
+    ```
+    You can also run retrieval-only (omit --llm) and inspect --show-sources.
 
 ## License
 
