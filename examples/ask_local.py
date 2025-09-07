@@ -144,6 +144,11 @@ def main():
     # LLM options
     ap.add_argument("--llm", action="store_true", help="Ask local LLM via Ollama")
     ap.add_argument(
+        "--no-llm",
+        action="store_true",
+        help="Force retrieval-only even if ASK_MODE=llm or --llm is set",
+    )
+    ap.add_argument(
         "--model",
         type=str,
         default=os.getenv("ASK_MODEL", settings.ASK_MODEL),
@@ -151,6 +156,12 @@ def main():
     )
     ap.add_argument("--max-tokens", type=int, default=settings.ASK_MAX_TOKENS)
     ap.add_argument("--temperature", type=float, default=settings.ASK_TEMP)
+    ap.add_argument(
+        "--context-chars",
+        type=int,
+        default=3000,
+        help="Max characters of retrieved context to include in the LLM prompt (default: 3000)",
+    )
     # Output toggles
     ap.add_argument("--show-sources", action="store_true", help="Print source list")
     ap.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
@@ -273,10 +284,12 @@ def main():
         return
 
     # Build context + sources
-    context, sources = _build_context(points)
+    context, sources = _build_context(points, max_chars=args.context_chars)
 
     # Retrieval-only or LLM mode (default respects settings)
-    use_llm = args.llm or (getattr(settings, "ASK_MODE", "search") == "llm")
+    use_llm = not args.no_llm and (
+        args.llm or (getattr(settings, "ASK_MODE", "search") == "llm")
+    )
     if use_llm:
         system = (
             "You are a concise assistant. Use ONLY the provided context. "

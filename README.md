@@ -41,42 +41,119 @@
 
 ## Quick Start (5 minutes)
 
-> Works on plain CPU. No Docker needed for the demo.
+> Works on plain CPU. Docker is used only for Qdrant.
+
 
 ```bash
-# 1. Create and activate a virtual environment
-python -m venv .venv && source .venv/bin/activate
+# 1) Create & activate a virtualenv
+python -m venv .venv
+# macOS/Linux:
+source .venv/bin/activate
+# Windows (PowerShell):
+.\.venv\Scripts\Activate.ps1
 
-# 2. Install minimal requirements for the worker
+# 2) Install minimal requirements for the worker
 pip install -r worker/requirements.txt
 
-# 3. Start Qdrant (vector DB)
+# 3) Start Qdrant (vector DB)
 docker compose up -d qdrant
 
-# 4. Prepare folders
+# 4) Prepare folders
 mkdir -p data/dropzone data/exports
+# Windows (PowerShell)
+mkdir data\dropzone -Force; mkdir data\exports -Force
 
-# 5. Enable dev-modes (skip heavy deps)
-export EMBED_DEV_MODE=1
-export AUDIO_DEV_MODE=1
+# 5) (Optional) Enable dev-modes to skip heavy deps
+# macOS/Linux:
+export EMBED_DEV_MODE=1; export AUDIO_DEV_MODE=1
+# Windows (PowerShell):
+$env:EMBED_DEV_MODE=1; $env:AUDIO_DEV_MODE=1
 
-# 6. Drop files into data/dropzone (txt, md, csv, pdf, docx, wav/mp3…)
+# 6) Drop files into data/dropzone (txt, md, csv, pdf, docx, wav/mp3…)
 
-# 7. Ingest → JSONL + Qdrant
-PYTHONPATH=worker python scripts/ingest_dropzone.py   --dir data/dropzone --export data/exports/ingest.jsonl
+# 7) Ingest → JSONL + Qdrant (single pass)
+# --once = single pass (no watch loop), not 'one file'.
+python scripts/ingest_dropzone.py --dir data/dropzone --export data/exports/ingest.jsonl --once
+```
+
+## .env example
+
+```bash
+QDRANT_URL=http://localhost:6333
+QDRANT_COLLECTION=jsonify2ai_chunks_768
+EMBEDDING_DIM=768
+ASK_MODEL=qwen2.5:7b-instruct-q4_K_M   # or your preferred tag
+EMBED_DEV_MODE=1
+AUDIO_DEV_MODE=1
+```
+cp .env.example .env   # or copy .env.example .env (Windows)
+
+## Sanity Check
+
+```bash
+# Ingest dry-run (no writes, prints plan)
+python scripts/ingest_dropzone.py --debug --dry-run
+# Retrieval dry-run (shows embedding dim, no search)
+python examples/ask_local.py --q "smoke test" --debug --dry-run
 ```
 
 Ask your data:
 
 ```bash
-python examples/ask_local.py --q "what's in the pdf?" --k 6 --show-sources
+# Retrieval-first
+python examples/ask_local.py --q "what's in README.md?" --topk 6 --show-sources
+# Optional LLM mode (Ollama must be running)
+# Prefer setting your default in `ASK_MODEL`; `--model` is an override.
+python examples/ask_local.py --q "summarize the resume" --llm --model qwen2.5:3b-instruct-q4_K_M
+# If running Ollama in Docker on a different host/port, set OLLAMA_URL=http://localhost:11434 (or your endpoint).
 ```
 
-Optional LLM mode (requires Ollama):
+## Operations (Baseline vs Day-to-day)
+
+
+**First run (bootstrap):**
 
 ```bash
-python examples/ask_local.py --q "summarize the resume" --llm --model qwen2.5:3b-instruct-q4_K_M
+# One command to populate the DB:
+python scripts/ingest_dropzone.py --dir data/dropzone --export data/exports/first.jsonl --once
 ```
+
+Day-to-day (when files change):
+
+```bash
+# Add/update files → re-ingest:
+python scripts/ingest_dropzone.py --dir data/dropzone --replace-existing
+```
+
+<!-- Prune orphans: coming soon -->
+# Deleted files → prune orphans: (coming soon)
+# python scripts/ingest_dropzone.py --prune-missing
+
+```bash
+# Safety check (no writes):
+python scripts/ingest_dropzone.py --debug --dry-run
+```
+
+## Qdrant Schema Contract
+
+- Single **unnamed** vector per point
+- Dimension: **768**
+- Distance: **Cosine**
+
+If your Qdrant collection was created differently (e.g., named vectors or wrong dim), ingestion fails fast. To reset:
+```bash
+python scripts/ingest_dropzone.py --dir data/dropzone --recreate-bad-collection --once
+```
+
+## Environment precedence
+
+For key settings, precedence is:
+1) CLI flags (e.g., `--collection`, `--model`)
+2) Environment variables (e.g., `QDRANT_COLLECTION`, `ASK_MODEL`)
+3) Script defaults
+
+Tip: keep your preferred LLM tag in `ASK_MODEL` so you don’t edit code. Use `--model` for ad-hoc overrides.
+
 
 ---
 
@@ -102,6 +179,7 @@ python examples/ask_local.py --q "summarize the resume" --llm --model qwen2.5:3b
 | Images | .jpg, .png, .webp    | Optional, via BLIP captioning      |
 
 If an optional parser isn’t installed, files are **skipped gracefully**.
+Install optional parsers via the corresponding worker/requirements.*.txt file (e.g., pip install -r worker/requirements.pdf.txt).
 
 ---
 
@@ -118,7 +196,7 @@ Great for demos and testing.
 
 ```
 worker/   → parsers, services, tests
-scripts/  → ingest_dropzone, watch_dropzone
+scripts/  → ingest_dropzone, watch_dropzone (WIP)
 examples/ → ask_local, control_panel
 api/      → Go (upload/search/ask) [WIP]
 web/      → React interface [WIP]
@@ -129,10 +207,17 @@ data/     → dropzone, exports, docs
 
 ## Installation and Requirements
 
+
 - **Python:** 3.10+ (tested on Linux, macOS, Windows)
 - **Docker:** For Qdrant vector DB (see `docker-compose.yml`)
 - **Minimal RAM/CPU:** Designed to run on modest laptops/desktops
 - **Optional:** ffmpeg, Ollama for advanced audio/LLM features
+
+| Component        | Version(s) tested                |
+|------------------|----------------------------------|
+| Python           | 3.10–3.12                        |
+| qdrant           | 1.x (Docker image: qdrant/qdrant:<tag>) |
+| qdrant-client    | v1.9.1                           |
 
 *See [worker/requirements.txt](worker/requirements.txt) and [worker/requirements.\*.txt](worker/) for optional parsers.*
 
@@ -157,6 +242,28 @@ Contributions, issues, and feature requests are welcome!
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines, or just open an issue/PR.
 
 ---
+
+## Troubleshooting
+
+
+- **Qdrant unreachable**: Ensure `docker compose up -d qdrant` and `QDRANT_URL=http://localhost:6333`.
+	```bash
+	docker compose logs -f qdrant
+	```
+- **Schema mismatch / “Not existing vector name”**: Your collection likely has named or empty vectors. Use:
+	```bash
+	python scripts/ingest_dropzone.py --recreate-bad-collection --once
+	```
+- **No results**: Run a dry-run to confirm files are discovered and embedded:
+	```bash
+	python scripts/ingest_dropzone.py --debug --dry-run
+	```
+- **LLM weak/empty answers**: Verify the model tag is installed in Ollama and pass --model explicitly.
+	```bash
+	ollama list   # verify your ASK_MODEL tag is actually installed
+	# If running Ollama in Docker, use: docker exec -it ollama ollama list
+	```
+	You can also run retrieval-only (omit --llm) and inspect --show-sources.
 
 ## License
 
