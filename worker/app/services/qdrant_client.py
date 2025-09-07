@@ -20,7 +20,7 @@ import sys
 from typing import Iterable, List, Dict, Any, Tuple, Optional
 
 from qdrant_client import QdrantClient, models
-from qdrant_client.models import Distance, VectorParams
+from qdrant_client.models import VectorParams
 from worker.app.config import settings
 
 
@@ -74,10 +74,10 @@ def ensure_collection(
     name: Optional[str] = None,
     dim: Optional[int] = None,
     *,
-    distance: Distance = Distance.COSINE,
+    distance: str = "Cosine",
     recreate_bad: Optional[bool] = None,
     create_payload_indexes: bool = True,
-) -> None:
+) -> Dict[str, Any]:
     """Create the collection if missing; optionally repair dim mismatch.
 
     - `name`: defaults to `settings.QDRANT_COLLECTION`
@@ -85,6 +85,9 @@ def ensure_collection(
     - `recreate_bad`: if True (or env QDRANT_RECREATE_BAD=1), will recreate the
       collection when a dimension mismatch is detected.
     - Adds payload indexes for {document_id, kind, path} to speed filters.
+
+    Returns:
+        Dict with the final collection configuration.
     """
     qc = client or get_qdrant_client()
     name = name or settings.QDRANT_COLLECTION
@@ -93,27 +96,108 @@ def ensure_collection(
         (settings.QDRANT_RECREATE_BAD == 1) if recreate_bad is None else recreate_bad
     )
 
-    if not _collection_exists(qc, name):
-        qc.recreate_collection(
-            collection_name=name,
-            vectors_config=VectorParams(size=dim, distance=distance),
-        )
-    else:
-        size = _current_vector_size(qc, name)
-        if size is not None and size != dim:
-            if recreate_bad:
-                qc.recreate_collection(
-                    collection_name=name,
-                    vectors_config=VectorParams(size=dim, distance=distance),
-                )
-            else:
-                raise RuntimeError(
-                    f"Qdrant collection '{name}' has dim={size}, expected {dim}. "
-                    "Set QDRANT_RECREATE_BAD=1 to auto-fix."
-                )
+    # Use the stable minimal implementation with signature adaptation
+    config = _ensure_collection_with_signature_adapt(
+        qc, name=name, dim=dim, distance=distance, recreate_bad=recreate_bad
+    )
 
+    # Create payload indexes after ensuring the collection
     if create_payload_indexes:
         _ensure_payload_indexes(qc, name)
+
+    return config
+
+
+def _ensure_collection_with_signature_adapt(
+    client: QdrantClient,
+    *,
+    name: str,
+    dim: int,
+    distance: str = "Cosine",
+    recreate_bad: bool = False,
+) -> Dict[str, Any]:
+    """
+    Call ensure_collection_minimal with signature adaptation.
+
+    Handles different signatures and returns the final collection config.
+
+    Args:
+        client: Qdrant client
+        name: Collection name
+        dim: Vector dimension
+        distance: Distance metric (default: Cosine)
+        recreate_bad: Whether to recreate collections with wrong schema
+
+    Returns:
+        Dict containing the collection config
+    """
+
+    # Try to get the collection config first to check if it exists
+    try:
+        info = client.get_collection(name)
+        cfg = getattr(info, "config", {}) or {}
+        params = getattr(cfg, "params", {}) or {}
+        vectors = getattr(params, "vectors", {}) or {}
+
+        # Extract the vector dimension and distance
+        vector_size = None
+        vector_distance = None
+
+        # Handle both object and dict forms
+        if hasattr(vectors, "size"):
+            vector_size = int(vectors.size)
+            vector_distance = getattr(vectors, "distance", "Cosine")
+        elif isinstance(vectors, dict):
+            # Check if this is an unnamed vector (has 'size' directly)
+            if "size" in vectors:
+                vector_size = int(vectors["size"])
+                vector_distance = vectors.get("distance", "Cosine")
+            else:
+                # Could be named vectors, which we don't want
+                if vectors:
+                    first_key = next(iter(vectors.keys()), None)
+                    if first_key:
+                        raise RuntimeError(
+                            f"Collection '{name}' uses named vectors ('{first_key}'), but the project requires unnamed vectors"
+                        )
+
+        # If we have valid info and it matches our requirements, return it
+        if vector_size == dim and vector_distance == distance:
+            return {"params": {"vectors": {"size": dim, "distance": distance}}}
+
+        # Schema mismatch detected
+        mismatch_msg = (
+            f"Collection '{name}' schema mismatch: found size={vector_size}, "
+            f"distance={vector_distance}, expected size={dim}, distance={distance}"
+        )
+
+        if recreate_bad:
+            # Will be recreated below
+            client.delete_collection(collection_name=name)
+        else:
+            raise RuntimeError(mismatch_msg)
+
+    except Exception as e:
+        # If the collection doesn't exist or we're recreating, we'll create it below
+        if "does not exist" not in str(e) and "schema mismatch" not in str(e):
+            # Unexpected error
+            raise RuntimeError(f"Error accessing collection '{name}': {e}")
+
+    # Create or recreate collection with unnamed vectors
+    client.recreate_collection(
+        collection_name=name,
+        vectors_config=VectorParams(size=dim, distance=distance),
+    )
+
+    # Return the final configuration
+    try:
+        info = client.get_collection(name)
+        return getattr(info, "config", {}) or {
+            "params": {"vectors": {"size": dim, "distance": distance}}
+        }
+    except Exception:
+        # If we can't get the config, return a synthetic one
+        return {"params": {"vectors": {"size": dim, "distance": distance}}}
 
 
 def _ensure_payload_indexes(client: QdrantClient, name: str) -> None:
@@ -159,6 +243,7 @@ def upsert_points(
 
     - Returns the number of points successfully submitted to Qdrant.
     - If `ensure`, the collection will be created/repaired before the first upsert.
+    - Validates vector dimension against settings.EMBEDDING_DIM and skips invalid vectors.
     - Never raises for empty input.
     """
     if not items:
@@ -166,57 +251,86 @@ def upsert_points(
 
     qc = client or get_qdrant_client()
     col = collection_name or settings.QDRANT_COLLECTION
+    expected_dim = getattr(settings, "EMBEDDING_DIM", 768)
 
     if ensure:
-        ensure_collection(qc, col, settings.EMBEDDING_DIM)
+        # Ensure collection exists with correct schema before upserting
+        try:
+            ensure_collection(qc, col, expected_dim)
+        except Exception as e:
+            print(f"[error] Collection ensure failed: {e}", file=sys.stderr)
+            return 0
 
     total = 0
     points_skipped_embed_error = 0
     for batch in _batched(items, batch_size):
         valid_points = []
         for pid, vec, payload in batch:
-            expected_dim = getattr(settings, "EMBEDDING_DIM", 768)
-            if not isinstance(vec, list) or len(vec) != expected_dim:
+            # Validate vector format and dimension
+            if not isinstance(vec, list):
                 points_skipped_embed_error += 1
                 print(
-                    f"[warn] Skipping upsert id={pid} due to embedding shape: got {type(vec)} len={len(vec) if isinstance(vec, list) else 'N/A'}"
+                    f"[warn] Skipping upsert id={pid} due to embedding type: got {type(vec).__name__}, expected list"
                 )
                 continue
+
+            if len(vec) != expected_dim:
+                points_skipped_embed_error += 1
+                print(
+                    f"[warn] Skipping upsert id={pid} due to wrong embedding dimension: got {len(vec)}, expected {expected_dim}"
+                )
+                continue
+
+            # Create point with unnamed vector format
             valid_points.append(models.PointStruct(id=pid, vector=vec, payload=payload))
-            print({"upserted": pid, "vector_len": len(vec)})
+
         if not valid_points:
             continue
+
         try:
             qc.upsert(collection_name=col, wait=True, points=valid_points)
             total += len(valid_points)
         except Exception as e:
-            # If it's a Qdrant HTTP error, print raw status/body and request payload
+            # Provide concise error information for debugging
             try:
                 from qdrant_client.http.exceptions import UnexpectedResponse
 
                 if isinstance(e, UnexpectedResponse):
-                    import json
+                    # Concise error summary focusing on what's needed to diagnose common issues
+                    point_count = len(valid_points)
+                    first_point_info = {}
+
+                    if valid_points:
+                        first_point = valid_points[0]
+                        vector_len = (
+                            len(first_point.vector)
+                            if hasattr(first_point, "vector")
+                            else "unknown"
+                        )
+                        first_point_info = {
+                            "id_type": type(first_point.id).__name__,
+                            "vector_len": vector_len,
+                            "payload_keys": (
+                                list(first_point.payload.keys())
+                                if hasattr(first_point, "payload")
+                                else []
+                            ),
+                        }
 
                     print(
-                        "[error] upsert request payload (truncated):",
-                        json.dumps([p.dict() for p in valid_points])[:2000],
+                        f"[qdrant error] status={e.status_code} body={e.body} points={point_count} first_point={first_point_info}",
                         file=sys.stderr,
                     )
-                    if valid_points:
-                        print(
-                            "[error] upsert summary: points_count=",
-                            len(valid_points),
-                            "first_point_keys=",
-                            list(valid_points[0].dict().keys()),
-                            file=sys.stderr,
-                        )
-                    print(
-                        f"[qdrant error] status={e.status_code} body={e.body}",
-                        file=sys.stderr,
-                    )
+                else:
+                    print(f"[error] upsert failed: {e}", file=sys.stderr)
             except Exception:
-                pass
-            print(f"[error] upsert failed: {e}", file=sys.stderr)
+                print(f"[error] upsert failed: {e}", file=sys.stderr)
+
+    if points_skipped_embed_error > 0:
+        print(
+            f"[warn] Total points skipped due to embedding errors: {points_skipped_embed_error}"
+        )
+
     return total
 
 
@@ -295,32 +409,59 @@ def search(
         raise RuntimeError(
             "No Qdrant collection specified. Use --collection or set QDRANT_COLLECTION."
         )
+
+    expected_dim = getattr(settings, "EMBEDDING_DIM", 768)
+
+    # Validate query vector dimension
+    if not isinstance(query_vector, list) or len(query_vector) != expected_dim:
+        raise RuntimeError(
+            f"Query vector dimension mismatch: got {len(query_vector) if isinstance(query_vector, list) else type(query_vector).__name__}, expected {expected_dim}"
+        )
+
     # Check collection exists and schema matches
     try:
         info = qc.get_collection(collection_name)
         cfg = getattr(info, "config", None)
         params = getattr(cfg, "params", None)
         vectors = getattr(params, "vectors", None)
-        # Support both dict and object
+
+        # Extract vector dimension and distance from config
+        dim = None
+        dist = None
+
+        # Support both unnamed vector format (direct size/distance) and named vectors
         if hasattr(vectors, "size"):
+            # Object-based unnamed vector
             dim = int(vectors.size)
             dist = getattr(vectors, "distance", None)
         elif isinstance(vectors, dict):
-            first = next(iter(vectors.values()))
-            dim = int(getattr(first, "size"))
-            dist = getattr(first, "distance", None)
-        else:
-            dim = None
-            dist = None
-        expected_dim = getattr(settings, "EMBEDDING_DIM", 768)
-        if dim != expected_dim or (dist and str(dist).lower() != "cosine"):
+            # Either unnamed vector as dict or named vectors
+            if "size" in vectors:
+                # Unnamed vector as dict
+                dim = int(vectors["size"])
+                dist = vectors.get("distance", "Cosine")
+            else:
+                # Named vectors - get first one (though this isn't our preferred format)
+                try:
+                    first_key = next(iter(vectors.keys()))
+                    first = vectors[first_key]
+                    dim = int(getattr(first, "size", 0))
+                    dist = getattr(first, "distance", None)
+                except Exception:
+                    pass
+
+        # Validate dimension and distance
+        if dim != expected_dim:
             raise RuntimeError(
-                f"collection {collection_name} schema mismatch: expected dim={expected_dim} distance=Cosine — see README sanity checks"
+                f"Collection '{collection_name}' dimension mismatch: has {dim}, expected {expected_dim}"
+            )
+
+        if dist and str(dist).lower() != "cosine":
+            raise RuntimeError(
+                f"Collection '{collection_name}' distance mismatch: has {dist}, expected Cosine"
             )
     except Exception as e:
-        raise RuntimeError(
-            f"Failed to fetch collection info for '{collection_name}': {e}"
-        )
+        raise RuntimeError(f"Failed to validate collection '{collection_name}': {e}")
 
     # Debug diagnostics: raw collection JSON and parsed fields
     if debug:

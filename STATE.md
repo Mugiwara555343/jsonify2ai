@@ -1,4 +1,4 @@
-# STATE.md — 2025-09-05T00:25:03-04:00
+# STATE.md — 2025-09-05T22:49:44-04:00
 
 ## Scope today
 - Audio: dev-mode (skip or stub)

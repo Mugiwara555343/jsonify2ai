@@ -195,13 +195,39 @@ def main():
         try:
             client_dbg = get_qdrant_client()
             info = client_dbg.get_collection(collection)
-            points_count = info.get("points_count", "?")
-            indexed_vectors_count = info.get("indexed_vectors_count", "?")
+
+            # Handle different qdrant-client versions - might return object model or nested structure
+            points_count = getattr(info, "points_count", None)
+            indexed_vectors_count = getattr(info, "indexed_vectors_count", None)
+
+            # If attributes not directly on info, check for nested result structure
+            if points_count is None:
+                result = getattr(info, "result", {})
+                if result:
+                    points_count = getattr(result, "points_count", None)
+                    if points_count is None:
+                        points_count = getattr(result, "points", None)
+
+                    indexed_vectors_count = getattr(
+                        result, "indexed_vectors_count", None
+                    )
+
+            # Handle both object and dict access patterns for completeness
+            if points_count is None and hasattr(info, "get"):
+                points_count = info.get("points_count") or info.get("points")
+                indexed_vectors_count = info.get("indexed_vectors_count")
+
+            # Final fallback
+            points_count = points_count if points_count is not None else "?"
+            indexed_vectors_count = (
+                indexed_vectors_count if indexed_vectors_count is not None else "?"
+            )
+
             print(
                 f"[debug] collection_info points_count={points_count} indexed_vectors_count={indexed_vectors_count}"
             )
-        except Exception:
-            print("[debug] collection_info unavailable")
+        except Exception as e:
+            print(f"[debug] collection_info unavailable: {e}")
 
     # Embed once
     qv = _embed_query(query)

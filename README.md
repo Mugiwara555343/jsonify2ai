@@ -1,18 +1,41 @@
 # jsonify2ai
 
-Local‑first pipeline: **drop files → extract → chunk → embed → Qdrant → search/ask**.
+**Effortlessly turn your local files into structured JSON and searchable AI-ready vectors—entirely offline, on your own hardware.**
 
-No cloud, no heavy frameworks — just a simple way to turn messy files into structured JSON + searchable vectors.
+[![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Local-first](https://img.shields.io/badge/local--first-%E2%9C%94%EF%B8%8F-brightgreen)
+<!-- Add more badges as needed -->
 
 ---
 
-## Why jsonify2ai?
+> **Demo:**
+> _A screenshot or GIF showing dropzone ingestion and asking a question will go here._
 
-- **Local‑first:** works fully offline.
-- **CPU‑friendly:** dev stubs, tiny models — no GPU required.
-- **Drop‑zone ingest:** put files in a folder, run one command.
-- **Extensible:** add new parsers easily.
-- **Idempotent:** safe to re‑run; files are skipped, not duplicated.
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Quick Start](#quick-start-5-minutes)
+- [Use Cases](#use-cases)
+- [Supported File Types](#whats-supported)
+- [Dev Modes](#dev-modes)
+- [Repository Layout](#repo-layout)
+- [Installation and Requirements](#installation-and-requirements)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+## Features
+
+- **Local-first:** No cloud required; your data stays with you.
+- **CPU-friendly:** Runs on any machine, no GPU needed.
+- **Plug-and-play:** Drop your files in a folder, run one command.
+- **Extensible:** Easily add new file parsers and enrichers.
+- **Idempotent:** Safe to re-run—no duplicate processing.
 
 ---
 
@@ -21,25 +44,25 @@ No cloud, no heavy frameworks — just a simple way to turn messy files into str
 > Works on plain CPU. No Docker needed for the demo.
 
 ```bash
-# 1. create a venv & activate
+# 1. Create and activate a virtual environment
 python -m venv .venv && source .venv/bin/activate
 
-# 2. install worker requirements (minimal)
+# 2. Install minimal requirements for the worker
 pip install -r worker/requirements.txt
 
-# 3. start Qdrant (vector DB)
+# 3. Start Qdrant (vector DB)
 docker compose up -d qdrant
 
-# 4. prepare folders
+# 4. Prepare folders
 mkdir -p data/dropzone data/exports
 
-# 5. dev‑modes (skip heavy deps)
+# 5. Enable dev-modes (skip heavy deps)
 export EMBED_DEV_MODE=1
 export AUDIO_DEV_MODE=1
 
-# 6. drop files into data/dropzone (txt, md, csv, pdf, docx, wav/mp3…)
+# 6. Drop files into data/dropzone (txt, md, csv, pdf, docx, wav/mp3…)
 
-# 7. ingest → JSONL + Qdrant
+# 7. Ingest → JSONL + Qdrant
 PYTHONPATH=worker python scripts/ingest_dropzone.py   --dir data/dropzone --export data/exports/ingest.jsonl
 ```
 
@@ -54,6 +77,15 @@ Optional LLM mode (requires Ollama):
 ```bash
 python examples/ask_local.py --q "summarize the resume" --llm --model qwen2.5:3b-instruct-q4_K_M
 ```
+
+---
+
+## Use Cases
+
+- **Index and search research papers, meeting notes, or documentation locally**
+- **Build a private document Q&A bot for your team or yourself**
+- **Batch process and structure messy files for downstream AI/ML tasks**
+- **Rapid prototyping for local AI data pipelines**
 
 ---
 
@@ -82,7 +114,7 @@ Great for demos and testing.
 
 ---
 
-## Repo Layout
+## Repository Layout
 
 ```
 worker/   → parsers, services, tests
@@ -95,13 +127,34 @@ data/     → dropzone, exports, docs
 
 ---
 
+## Installation and Requirements
+
+- **Python:** 3.10+ (tested on Linux, macOS, Windows)
+- **Docker:** For Qdrant vector DB (see `docker-compose.yml`)
+- **Minimal RAM/CPU:** Designed to run on modest laptops/desktops
+- **Optional:** ffmpeg, Ollama for advanced audio/LLM features
+
+*See [worker/requirements.txt](worker/requirements.txt) and [worker/requirements.\*.txt](worker/) for optional parsers.*
+
+---
+
 ## Roadmap
 
-- Image captioning → embed
-- Web UI for drop‑zone + previews
-- Auto‑watch mode (real‑time ingest)
-- Unified API service (Go + FastAPI)
-- More enrichers (tags, summaries, OCR)
+- [ ] Image captioning → embed
+- [ ] Web UI for drop‑zone + previews
+- [ ] Auto‑watch mode (real‑time ingest)
+- [ ] Unified API service (Go + FastAPI)
+- [ ] More enrichers (tags, summaries, OCR)
+- [ ] Benchmarks and sample results
+
+*Check the [issues](https://github.com/Mugiwara555343/jsonify2ai/issues) and project board for progress.*
+
+---
+
+## Contributing
+
+Contributions, issues, and feature requests are welcome!
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines, or just open an issue/PR.
 
 ---
 
