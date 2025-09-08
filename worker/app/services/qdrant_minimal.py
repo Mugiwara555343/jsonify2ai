@@ -12,6 +12,39 @@ def _qdrant_base() -> str:
     return settings.QDRANT_URL.rstrip("/")
 
 
+def _as_dict(obj: Any) -> Dict[str, Any]:
+    """Convert various object types to a dictionary.
+
+    Handles Pydantic models, objects with model_dump/dict methods, and regular objects.
+    """
+    if obj is None:
+        return {}
+
+    # Handle Pydantic v2 model_dump()
+    if hasattr(obj, "model_dump"):
+        try:
+            return obj.model_dump()
+        except Exception:
+            pass
+
+    # Handle Pydantic v1 dict() or other similar methods
+    if hasattr(obj, "dict") and callable(obj.dict):
+        try:
+            return obj.dict()
+        except Exception:
+            pass
+
+    # Handle standard dict
+    if isinstance(obj, dict):
+        return obj
+
+    # Last resort: try to convert object attributes to dict
+    try:
+        return {k: v for k, v in obj.__dict__.items() if not k.startswith("_")}
+    except Exception:
+        return {}
+
+
 def ensure_collection_minimal(
     client, *, name: str, dim: int, distance: str = "Cosine", recreate_bad: bool = False
 ) -> Dict[str, Any]:
@@ -40,63 +73,93 @@ def ensure_collection_minimal(
             data = r.json()
 
             # Extract vectors config - handle both newer and older API response formats
-            vectors_config = None
-            config = data.get("config", {})
-            params = config.get("params", {})
+            config = _as_dict(data.get("config", {}))
+            params = _as_dict(config.get("params", {}))
+            vectors = _as_dict(params.get("vectors", {}))
 
-            # Try the standard path first
-            vectors = params.get("vectors", {})
+            # First try to get the result field if present (newer Qdrant versions)
+            if not config and "result" in data:
+                result_config = _as_dict(data.get("result", {}).get("config", {}))
+                if result_config:
+                    config = result_config
+                    params = _as_dict(config.get("params", {}))
+                    vectors = _as_dict(params.get("vectors", {}))
 
-            # Check if we have unnamed vectors (single vector form)
-            if "size" in vectors and "distance" in vectors:
-                vectors_config = vectors
-            else:
-                # We might have named vectors or a different format
-                if isinstance(vectors, dict) and not any(
-                    k in ("size", "distance") for k in vectors
-                ):
-                    # This appears to be a named vectors structure
+            # Classify vector configuration
+            is_valid = False
+            is_named_vectors = False
+            vector_size = None
+            vector_distance = None
+
+            # Case 1: Valid unnamed vectors {'size': 768, 'distance': 'Cosine', ...}
+            if isinstance(vectors, dict) and "size" in vectors:
+                vector_size = vectors.get("size")
+                vector_distance = vectors.get("distance", "")
+                # Case-insensitive distance comparison
+                is_valid = (
+                    vector_size == dim
+                    and str(vector_distance).lower() == distance.lower()
+                )
+
+            # Case 2: Empty vectors config
+            elif not vectors:
+                is_valid = False
+
+            # Case 3: Named vectors {'text': {'size': 768, ...}}
+            elif isinstance(vectors, dict):
+                is_named_vectors = any(
+                    isinstance(v, dict) and "size" in v for v in vectors.values()
+                )
+
+            # If valid, return the config
+            if is_valid:
+                return config
+
+            # Schema mismatch - prepare descriptive message
+            vector_desc = f"type={type(vectors).__name__}"
+            if isinstance(vectors, dict):
+                vector_desc += f", keys={list(vectors.keys())}"
+
+            mismatch_msg = (
+                f"qdrant collection schema mismatch for {name}: "
+                f"expected unnamed(size={dim}, distance={distance}), got {vector_desc}"
+            )
+
+            # Add specific details if we could extract size/distance
+            if vector_size is not None or vector_distance:
+                mismatch_msg += f" with size={vector_size}, distance={vector_distance}"
+
+            # Add named vectors info if detected
+            if is_named_vectors:
+                mismatch_msg += " (appears to be using named vectors)"
+
+            if recreate_bad:
+                # Drop and recreate
+                delete_url = url
+                delete_r = requests.delete(delete_url, timeout=10)
+                if delete_r.status_code not in (200, 204):
                     raise RuntimeError(
-                        f"Collection '{name}' uses named vectors, but the project requires unnamed vectors"
+                        f"Failed to drop collection '{name}': status {delete_r.status_code}"
                     )
 
-            # Normalize to a standard format for comparison
-            if vectors_config:
-                size = vectors_config.get("size")
-                actual_distance = vectors_config.get("distance")
+                # Now recreate with correct schema
+                payload = {"vectors": {"size": dim, "distance": distance}}
+                create_r = requests.put(url, json=payload, timeout=10)
+                if create_r.status_code != 200:
+                    raise RuntimeError(
+                        f"Failed to recreate collection '{name}': status {create_r.status_code}"
+                    )
 
-                if size == dim and actual_distance == distance:
-                    # Collection exists with correct config
-                    return config
-
-                # Schema mismatch
-                mismatch_msg = f"Collection '{name}' schema mismatch: found size={size}, distance={actual_distance}, expected size={dim}, distance={distance}"
-
-                if recreate_bad:
-                    # Drop and recreate
-                    delete_url = url
-                    delete_r = requests.delete(delete_url, timeout=10)
-                    if delete_r.status_code not in (200, 204):
-                        raise RuntimeError(
-                            f"Failed to drop collection '{name}': status {delete_r.status_code}"
-                        )
-
-                    # Now recreate with correct schema
-                    payload = {"vectors": {"size": dim, "distance": distance}}
-                    create_r = requests.put(url, json=payload, timeout=10)
-                    if create_r.status_code != 200:
-                        raise RuntimeError(
-                            f"Failed to recreate collection '{name}': status {create_r.status_code}"
-                        )
-
-                    # Get the final config
-                    get_r = requests.get(url, timeout=5)
-                    if get_r.status_code == 200:
-                        return get_r.json().get("config", {})
-                    return {"params": {"vectors": payload["vectors"]}}
-                else:
-                    # Raise error on mismatch when not recreating
-                    raise RuntimeError(mismatch_msg)
+                # Get the final config
+                get_r = requests.get(url, timeout=5)
+                if get_r.status_code == 200:
+                    return get_r.json().get("config", {}) or {
+                        "params": {"vectors": payload["vectors"]}
+                    }
+                return {"params": {"vectors": payload["vectors"]}}
+            else:
+                # Raise error on mismatch when not recreating
+                raise RuntimeError(mismatch_msg)
 
         # Not found → create it
         if r.status_code == 404:
@@ -106,7 +169,9 @@ def ensure_collection_minimal(
                 # Get the final config
                 get_r = requests.get(url, timeout=5)
                 if get_r.status_code == 200:
-                    return get_r.json().get("config", {})
+                    return get_r.json().get("config", {}) or {
+                        "params": {"vectors": payload["vectors"]}
+                    }
                 return {"params": {"vectors": payload["vectors"]}}
 
             raise RuntimeError(
