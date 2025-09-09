@@ -1,4 +1,8 @@
-# jsonify2ai
+<p align="center">
+  <img src="docs/jsonify2ai_logo.png" alt="Jsonify2AI logo" width="165"/>
+</p>
+
+<h1 align="center"></h1>
 
 **Effortlessly turn your local files into structured JSON and searchable AI-ready vectors, entirely offline, on your own hardware.**
 
@@ -26,7 +30,6 @@
 - [Use Cases](#use-cases)
 - [Supported File Types](#whats-supported)
 - [Dev Modes](#dev-modes)
-- [Repository Layout](#repo-layout)
 - [Installation and Requirements](#installation-and-requirements)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
