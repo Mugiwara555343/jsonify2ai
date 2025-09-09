@@ -136,8 +136,8 @@ python scripts/ingest_dropzone.py --dir data/dropzone --replace-existing
 ```
 
 <!-- Prune orphans: coming soon -->
-# Deleted files → prune orphans: (coming soon)
-# python scripts/ingest_dropzone.py --prune-missing
+## Deleted files → prune orphans: (coming soon)
+## python scripts/ingest_dropzone.py --prune-missing
 
 ```bash
 # Safety check (no writes):
