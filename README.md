@@ -5,6 +5,11 @@
 [![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Local-first](https://img.shields.io/badge/local--first-%E2%9C%94%EF%B8%8F-brightgreen)
+![Qdrant](https://img.shields.io/badge/Qdrant-1.x-blueviolet?logo=qdrant)
+![OS](https://img.shields.io/badge/tested-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
+![Dev Modes](https://img.shields.io/badge/dev--modes-embed%20%7C%20audio-yellow)
+![Status](https://img.shields.io/badge/status-prototype-orange)
+![Last Commit](https://img.shields.io/github/last-commit/Mugiwara555343/jsonify2ai)
 <!-- Add more badges as needed -->
 
 ---
