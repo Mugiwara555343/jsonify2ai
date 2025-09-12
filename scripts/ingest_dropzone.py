@@ -29,6 +29,91 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 import pathlib
 
+# === BEGIN discovery helpers ===
+
+KIND_MAP = {
+    ".txt": "text",
+    ".md": "text",
+    ".rst": "text",
+    ".json": "text",
+    ".csv": "text",
+    ".pdf": "pdf",
+    ".png": "image",
+    ".jpg": "image",
+    ".jpeg": "image",
+    ".webp": "image",
+    ".wav": "audio",
+    ".mp3": "audio",
+    ".m4a": "audio",
+}
+
+
+def _infer_kind(fp: Path) -> str:
+    return KIND_MAP.get(fp.suffix.lower(), "text")
+
+
+def _posix_rel(fp: Path, root: Path) -> str:
+    return fp.relative_to(root).as_posix()
+
+
+def discover_candidates(
+    root: Path, kinds_set: set[str], explicit_path: Optional[Path], limit: int
+) -> List[Tuple[Path, str, str]]:
+    """
+    Return [(abs_path, posix_rel_path, kind)] sorted by rel path.
+    Applies kinds filter, explicit file path, then limit (0 = no limit).
+    """
+    out: List[Tuple[Path, str, str]] = []
+    root = root.resolve()
+    if explicit_path:
+        fp = Path(explicit_path).resolve()
+        if fp.is_file() and str(fp).startswith(str(root)):
+            kind = _infer_kind(fp)
+            if not kinds_set or kind in kinds_set:
+                out.append((fp, _posix_rel(fp, root), kind))
+    else:
+        for fp in root.rglob("*"):
+            if not fp.is_file():
+                continue
+            kind = _infer_kind(fp)
+            if kinds_set and kind not in kinds_set:
+                continue
+            out.append((fp, _posix_rel(fp, root), kind))
+    out.sort(key=lambda t: t[1])
+    return out[:limit] if limit and limit > 0 else out
+
+
+# === END discovery helpers ===
+
+# === BEGIN id helpers ===
+
+# Use the top-level 'uuid' module (no mid-file imports).
+DEFAULT_NAMESPACE = uuid.UUID("00000000-0000-5000-8000-000000000000")
+
+
+def _ns() -> uuid.UUID:
+    try:
+        from worker.app import settings  # optional
+
+        return getattr(settings, "NAMESPACE_UUID", DEFAULT_NAMESPACE)
+    except Exception:
+        return DEFAULT_NAMESPACE
+
+
+def document_id_for_relpath(relpath: str) -> str:
+    return str(uuid.uuid5(_ns(), relpath))
+
+
+def chunk_id_for(document_id: str, idx: int) -> str:
+    return str(uuid.uuid5(uuid.UUID(document_id), f"chunk:{idx}"))
+
+
+def content_sig_bytes(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()
+
+
+# === END id helpers ===
+
 # ─── repo-root bootstrap (must precede local imports) ─────────────────────────
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -56,9 +141,9 @@ try:
         count as q_count,
         build_filter,
     )
-    from worker.app.services.qdrant_minimal import (
+    from worker.app.services.qdrant_minimal import (  # noqa: E402
         ensure_collection_minimal,
-    )  # noqa: E402
+    )
 except ImportError:
     from worker.app.services.qdrant_client import (  # noqa: E402
         get_qdrant_client,
@@ -344,6 +429,7 @@ def ingest_dir(
     replace_existing: bool,
     do_images: bool = False,
     limit_files: int = 0,
+    candidates: Optional[List[Tuple[Path, str, str]]] = None,
 ) -> Dict[str, Any]:
     """
     Ingest all supported files:
@@ -382,26 +468,21 @@ def ingest_dir(
     seen_points: set[Tuple[str, int]] = set()
     points_skipped_dedupe = 0
     batch_size = int(getattr(settings, "QDRANT_UPSERT_BATCH_SIZE", 128))
+    per_kind = {"text": 0, "pdf": 0, "image": 0, "audio": 0}
 
-    for fp in _iter_files(drop_dir):
-        if limit_files > 0 and total_files >= limit_files:
-            break
+    # Use candidates if provided, otherwise scan drop_dir
+    file_iter = candidates or discover_candidates(drop_dir, set(), None, limit_files)
+
+    for fp, rel_path, kind in file_iter:
         ext = fp.suffix.lower()
-        rel_path = str(fp).replace("\\", "/")
+        bytes_ = fp.read_bytes()
+        content_sig = content_sig_bytes(bytes_)
 
-        # kind normalization
-        if ext == ".pdf":
-            kind = "pdf"
-        elif ext == ".md":
-            kind = "md"
-        elif ext in IMAGE_EXTS:
-            kind = "image"
-        elif ext in AUDIO_EXTS:
-            kind = "audio"
-        else:
-            kind = "text"
+        # Always use stable document ID based on path
+        document_id = document_id_for_relpath(rel_path)
 
         total_files += 1
+        per_kind[kind] += 1
 
         # images path (optional)
         if do_images and kind == "image":
@@ -409,15 +490,21 @@ def ingest_dir(
                 cap = caption_image(fp)
                 vec = embed_texts([cap])[0]
                 item = (
-                    str(uuid.uuid4()),
+                    chunk_id_for(document_id, 0),
                     vec,
                     {
-                        "document_id": _document_id_for_file(fp),
+                        "document_id": document_id,
                         "path": rel_path,
                         "kind": "image",
                         "idx": 0,
                         "text": cap,
-                        "meta": {"source_ext": ext, "caption_model": "blip"},
+                        "meta": {
+                            "source_ext": ext,
+                            "caption_model": "blip",
+                            "content_sig": content_sig,
+                            "bytes": len(bytes_),
+                            "mtime": fp.stat().st_mtime,
+                        },
                     },
                 )
                 upsert_points(
@@ -444,8 +531,7 @@ def ingest_dir(
             skipped.append(f"{fp.name}: empty content")
             continue
 
-        # write policy
-        document_id = _document_id_for_file(fp)
+        # write policy (now with path-stable document_id)
         if replace_existing:
             try:
                 delete_by_document_id(document_id, client=client)
@@ -473,13 +559,18 @@ def ingest_dir(
                 continue
             seen_points.add(key)
             rec = ChunkRecord(
-                id=str(uuid.uuid4()),
+                id=chunk_id_for(document_id, idx),
                 document_id=document_id,
                 path=rel_path,
                 kind=kind,
                 idx=idx,
                 text=text,
-                meta={"source_ext": ext},
+                meta={
+                    "source_ext": ext,
+                    "content_sig": content_sig,
+                    "bytes": len(bytes_),
+                    "mtime": fp.stat().st_mtime,
+                },
             )
             items.append((rec.id, vec, rec.payload()))
             if export_f:
@@ -498,11 +589,14 @@ def ingest_dir(
         export_f.close()
 
     return {
+        "ok": True,
         "files_scanned": total_files,
         "chunks_parsed": total_chunks,
         "points_upserted": total_chunks,
         "points_skipped_dedupe": points_skipped_dedupe,
+        "per_kind": per_kind,
         "collection": CANONICAL_COLLECTION,
+        "embed_dim": CANONICAL_DIM,
         "skipped": skipped,
     }
 
@@ -643,46 +737,15 @@ def main() -> None:
                 kinds_set.add(k.strip().lower())
 
     drop = Path(args.dir)
-    candidates: List[Tuple[Path, str, str]] = []
+    explicit_path = Path(path) if path else None
 
-    explicit_path: Optional[Path] = None
-    if path:
-        explicit_path = Path(path)
-        if explicit_path.exists():
-            ext = explicit_path.suffix.lower()
-            if ext == ".pdf":
-                kind_norm = "pdf"
-            elif ext in {".md", ".txt"}:
-                kind_norm = "text"
-            elif ext in IMAGE_EXTS:
-                kind_norm = "image"
-            elif ext in AUDIO_EXTS:
-                kind_norm = "audio"
-            else:
-                kind_norm = "text"
-            candidates.append(
-                (explicit_path, str(explicit_path).replace("\\", "/"), kind_norm)
-            )
-
-    for fp in _iter_files(drop):
-        if explicit_path and fp.resolve() == explicit_path.resolve():
-            continue
-        ext = fp.suffix.lower()
-        if ext == ".pdf":
-            kind_norm = "pdf"
-        elif ext in {".md", ".txt"}:
-            kind_norm = "text"
-        elif ext in IMAGE_EXTS:
-            kind_norm = "image"
-        elif ext in AUDIO_EXTS:
-            kind_norm = "audio"
-        else:
-            kind_norm = "text"
-        if kinds_set and kind_norm not in kinds_set:
-            continue
-        candidates.append((fp, str(fp).replace("\\", "/"), kind_norm))
-        if len(candidates) >= args.limit:
-            break
+    # Single source of truth for file discovery
+    candidates = discover_candidates(
+        root=drop,
+        kinds_set=kinds_set,
+        explicit_path=explicit_path,
+        limit=args.limit if args.limit > 0 else 0,
+    )
 
     if args.debug:
         qdrant_url = os.getenv(
@@ -708,9 +771,13 @@ def main() -> None:
             "ok": True,
             "files_scanned": len(candidates),
             "chunks_parsed": 0,
+            "points_upserted": 0,
+            "points_skipped_dedupe": 0,
             "per_kind": per_kind,
             "collection": CANONICAL_COLLECTION,
             "embed_dim": CANONICAL_DIM,
+            "elapsed_seconds": 0,
+            "skipped": [],
         }
         print(json.dumps(summary, indent=2))
         return
@@ -766,6 +833,7 @@ def main() -> None:
         replace_existing=args.replace_existing,
         do_images=args.images,
         limit_files=limit_files,
+        candidates=candidates,
     )
 
     # If --once flag is set, we're done after one pass
