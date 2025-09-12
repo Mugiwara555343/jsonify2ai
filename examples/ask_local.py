@@ -165,6 +165,15 @@ def main():
     # Output toggles
     ap.add_argument("--show-sources", action="store_true", help="Print source list")
     ap.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    ap.add_argument(
+        "--min-score",
+        type=float,
+        default=None,
+        help=(
+            "Override similarity floor (uses raw client.search score_threshold). "
+            "If omitted, uses existing wrapper thresholds with automatic fallback on empty results."
+        ),
+    )
     args = ap.parse_args()
 
     query = args.query
@@ -260,20 +269,65 @@ def main():
     client = get_qdrant_client()
     qfilter = build_filter(document_id=args.document_id, kind=args.kind, path=args.path)
 
-    # Search (explicit collection)
-    try:
-        points = q_search(
-            qv,
-            k=args.k,
-            client=client,
-            query_filter=qfilter,
-            with_payload=True,
-            collection_name=collection,
-            debug=args.debug,
-        )
-    except Exception as e:
-        print(f"[error] {e}")
-        sys.exit(1)
+    # Search logic with optional manual score threshold and fallback safety valve
+    points = []
+    fallback_used = False
+
+    if args.min_score is not None:
+        # Manual override path: direct client.search with provided score_threshold
+        if args.debug:
+            print(
+                f"[debug] manual min-score path: score_threshold={args.min_score} k={args.k}"
+            )
+        try:
+            points = client.search(
+                collection_name=collection,
+                query_vector=qv,
+                limit=args.k,
+                with_vectors=False,
+                with_payload=True,
+                query_filter=qfilter,
+                score_threshold=args.min_score,
+            )
+        except Exception as e:
+            print(f"[error] search (manual --min-score) failed: {e}")
+            sys.exit(1)
+    else:
+        # Default path: use existing helper (retains its internal default thresholds)
+        try:
+            points = q_search(
+                qv,
+                k=args.k,
+                client=client,
+                query_filter=qfilter,
+                with_payload=True,
+                collection_name=collection,
+                debug=args.debug,
+            )
+        except Exception as e:
+            print(f"[error] {e}")
+            sys.exit(1)
+
+        # Fallback: if no hits, re-run with raw client.search and score_threshold=0.0
+        if not points:
+            try:
+                points = client.search(
+                    collection_name=collection,
+                    query_vector=qv,
+                    limit=args.k,
+                    with_vectors=False,
+                    with_payload=True,
+                    query_filter=qfilter,
+                    score_threshold=0.0,
+                )
+                if points:
+                    fallback_used = True
+                    print(
+                        "[info] fallback: no matches ≥ default threshold; showing best available."
+                    )
+            except Exception as e:
+                print(f"[error] fallback search failed: {e}")
+                sys.exit(1)
 
     if not points:
         msg = "[no results] index empty or query not matched."
@@ -317,6 +371,10 @@ def main():
                     "query": query,
                     "answer": answer,
                     "sources": sources if args.show_sources else None,
+                    "meta": {
+                        "manual_min_score": args.min_score,
+                        "fallback_used": fallback_used,
+                    },
                     "filters": {
                         "document_id": args.document_id,
                         "kind": args.kind,
