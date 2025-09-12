@@ -20,7 +20,7 @@
 ![Dev Modes](https://img.shields.io/badge/dev--modes-embed%20%7C%20audio-yellow)
 ![Status](https://img.shields.io/badge/status-prototype-orange)
 ![Last Commit](https://img.shields.io/github/last-commit/Mugiwara555343/jsonify2ai)
-
+[![CI / test-worker](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml)
 ---
 
 ## Table of Contents
