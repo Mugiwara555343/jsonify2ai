@@ -52,6 +52,20 @@ if str(ROOT) not in sys.path:
 SNAP = ROOT / "snapshots"
 SNAP.mkdir(parents=True, exist_ok=True)
 
+# Alias for consistency with other entrypoints
+REPO_ROOT = ROOT
+
+# Load .env so entrypoint processes see repository defaults early (no-op if python-dotenv missing)
+try:
+    from dotenv import load_dotenv  # type: ignore
+
+    dotenv_path = REPO_ROOT.joinpath(".env")
+    if dotenv_path.exists():
+        load_dotenv(dotenv_path=str(dotenv_path))
+except Exception:
+    # If python-dotenv isn't installed or load fails, fall back to system env (no crash)
+    pass
+
 
 # ---------- Helpers
 def _now_iso() -> str:

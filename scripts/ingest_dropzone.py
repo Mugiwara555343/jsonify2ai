@@ -119,6 +119,17 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+# Load .env so entrypoint processes see repository defaults early (no-op if python-dotenv missing)
+try:
+    from dotenv import load_dotenv  # type: ignore
+
+    dotenv_path = REPO_ROOT.joinpath(".env")
+    if dotenv_path.exists():
+        load_dotenv(dotenv_path=str(dotenv_path))
+except Exception:
+    # If python-dotenv isn't installed or load fails, fall back to system env (no crash)
+    pass
+
 # ─── third-party imports ──────────────────────────────────────────────────────────
 try:
     from qdrant_client import models as qmodels  # type: ignore
