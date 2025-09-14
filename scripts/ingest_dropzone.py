@@ -85,30 +85,9 @@ def discover_candidates(
 
 # === END discovery helpers ===
 
-# === BEGIN id helpers ===
 
-# Use the top-level 'uuid' module (no mid-file imports).
-DEFAULT_NAMESPACE = uuid.UUID("00000000-0000-5000-8000-000000000000")
-
-
-def _ns() -> uuid.UUID:
-    try:
-        from worker.app import settings  # optional
-
-        return getattr(settings, "NAMESPACE_UUID", DEFAULT_NAMESPACE)
-    except Exception:
-        return DEFAULT_NAMESPACE
-
-
-def document_id_for_relpath(relpath: str) -> str:
-    return str(uuid.uuid5(_ns(), relpath))
-
-
-def chunk_id_for(document_id: str, idx: int) -> str:
-    return str(uuid.uuid5(uuid.UUID(document_id), f"chunk:{idx}"))
-
-
-def content_sig_bytes(b: bytes) -> str:
+# === BEGIN id helpers (moved to worker.app.utils.docids) ===
+def content_sig_bytes(b: bytes) -> str:  # retained local helper for hashing bytes
     return hashlib.sha256(b).hexdigest()
 
 
@@ -143,6 +122,11 @@ from worker.app.services.embed_ollama import (  # noqa: E402
     embed_texts as embed_texts_real,
 )
 from worker.app.services.image_caption import caption_image  # noqa: E402
+from worker.app.utils.docids import (  # noqa: E402
+    canonicalize_relpath,
+    document_id_for_relpath,
+    chunk_id_for,
+)
 
 try:
     from worker.app.services.qdrant_client import (  # noqa: E402
@@ -485,12 +469,17 @@ def ingest_dir(
     file_iter = candidates or discover_candidates(drop_dir, set(), None, limit_files)
 
     for fp, rel_path, kind in file_iter:
+        # Canonicalize rel path to enforce single-source path (prevents duplicates)
+        try:
+            rel_path = canonicalize_relpath(fp, drop_dir)
+        except ValueError as e:
+            skipped.append(f"{fp.name}: {e}")
+            continue
         ext = fp.suffix.lower()
         bytes_ = fp.read_bytes()
         content_sig = content_sig_bytes(bytes_)
-
-        # Always use stable document ID based on path
-        document_id = document_id_for_relpath(rel_path)
+        document_uuid = document_id_for_relpath(rel_path)
+        document_id = str(document_uuid)
 
         total_files += 1
         per_kind[kind] += 1
@@ -500,8 +489,12 @@ def ingest_dir(
             try:
                 cap = caption_image(fp)
                 vec = embed_texts([cap])[0]
+                try:  # enforce replace semantics
+                    delete_by_document_id(document_id, client=client)
+                except Exception:
+                    pass
                 item = (
-                    chunk_id_for(document_id, 0),
+                    str(chunk_id_for(document_uuid, 0)),
                     vec,
                     {
                         "document_id": document_id,
@@ -542,12 +535,11 @@ def ingest_dir(
             skipped.append(f"{fp.name}: empty content")
             continue
 
-        # write policy (now with path-stable document_id)
-        if replace_existing:
-            try:
-                delete_by_document_id(document_id, client=client)
-            except Exception as e:
-                skipped.append(f"{fp.name}: delete failed ({e})")
+        # Always delete existing points (true replacement regardless of flag)
+        try:
+            delete_by_document_id(document_id, client=client)
+        except Exception as e:
+            skipped.append(f"{fp.name}: delete failed ({e})")
 
         # chunk & embed
         chunks = chunk_text(
@@ -588,7 +580,7 @@ def ingest_dir(
                 continue
             seen_points.add(key)
             rec = ChunkRecord(
-                id=chunk_id_for(document_id, idx),
+                id=str(chunk_id_for(document_uuid, idx)),
                 document_id=document_id,
                 path=rel_path,
                 kind=kind,
@@ -742,6 +734,11 @@ def main() -> None:
     p.add_argument("--list", action="store_true")
     p.add_argument("--list-collection", action="store_true")
     p.add_argument("--limit", type=int, default=20)
+    p.add_argument(
+        "--allow-audio-with-dev-mode",
+        action="store_true",
+        help="Override AUDIO_DEV_MODE safeguard for explicit testing",
+    )
     # filters
     p.add_argument("--document-id", type=str, default=None)
     p.add_argument("--kind", type=str, default=None)
@@ -792,6 +789,22 @@ def main() -> None:
             f"'image': {sum(1 for _, _, k in candidates if k == 'image')}, "
             f"'audio': {sum(1 for _, _, k in candidates if k == 'audio')}}}"
         )
+
+    AUDIO_DEV_MODE = os.getenv("AUDIO_DEV_MODE", "0").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if (
+        AUDIO_DEV_MODE
+        and not args.allow_audio_with_dev_mode
+        and any(k == "audio" for _f, _r, k in candidates)
+    ):
+        print(
+            "[error] AUDIO_DEV_MODE=1 — refusing to run real STT. Set AUDIO_DEV_MODE=0 in this shell or pass --allow-audio-with-dev-mode to override."
+        )
+        raise SystemExit(2)
 
     if args.dry_run:
         per_kind = {"text": 0, "pdf": 0, "image": 0, "audio": 0}
