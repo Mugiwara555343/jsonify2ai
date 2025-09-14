@@ -68,6 +68,29 @@ EMBEDDINGS_MODEL = os.getenv("EMBEDDINGS_MODEL", "nomic-embed-text")
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "768"))
 
 
+def _is_filename_like(q: str) -> bool:
+    """Heuristic: treat query as filename/path if it clearly references a file.
+
+    Conditions (OR):
+      1) Ends with known extension (.wav/.mp3/.pdf/.md/.txt/.json/.jsonl/.docx)
+      2) Contains a path separator ('/' or '\\')
+      3) Basename contains a dot (e.g., 'file.ext') and basename length > 1
+    """
+    if not q:
+        return False
+    q_clean = q.strip()
+    lower = q_clean.lower()
+    exts = (".wav", ".mp3", ".pdf", ".md", ".txt", ".json", ".jsonl", ".docx")
+    if any(lower.endswith(ext) for ext in exts):
+        return True
+    if "/" in q_clean or "\\" in q_clean:
+        return True
+    basename = os.path.basename(q_clean.replace("\\", "/"))
+    if "." in basename and len(basename) > 1:
+        return True
+    return False
+
+
 def _embed_query(query: str) -> List[float]:
     vecs = embed_texts([query])  # returns List[List[float]]
     if not vecs or not vecs[0]:
@@ -263,7 +286,13 @@ def main():
     # Embed once
     qv = _embed_query(query)
     if args.debug or args.dry_run:
+        # Keep original length line for backward compatibility, add richer debug lines per new requirements
         print(f"[debug] query_vector_len={len(qv)}")
+    if args.debug:
+        qv_sample = [round(float(x), 6) for x in qv[:8]]
+        qv_norm = sum(abs(float(x)) for x in qv)
+        print(f"[debug] qv_len: {len(qv)} qv_sample: {qv_sample}")
+        print(f"[debug] qv_norm: {qv_norm:.6f}")
 
     # --dry-run: print summary and exit
     if args.dry_run:
@@ -276,9 +305,142 @@ def main():
         print(json.dumps(summary, indent=2))
         sys.exit(0)
 
-    # Build client and optional filter
+    # Build client
     client = get_qdrant_client()
+
+    # Fast path: filename/path-style query direct filter scan (skip wrapper if direct hit)
+    if _is_filename_like(query) and args.min_score is None:
+        # Path-fast heuristic: attempt exact path match first; if that fails and the query
+        # looks like it includes directories, also try its basename.
+        attempts = []
+        attempts.append((query, "full"))
+        basename = os.path.basename(query.strip().replace("\\", "/"))
+        if basename and basename != query:
+            attempts.append((basename, "basename"))
+
+        for path_candidate, label in attempts:
+            path_filter = build_filter(path=path_candidate)
+            if args.debug:
+                try:
+                    if hasattr(path_filter, "model_dump"):
+                        pf_print = path_filter.model_dump()  # type: ignore[attr-defined]
+                    elif hasattr(path_filter, "dict"):
+                        pf_print = path_filter.dict()  # type: ignore
+                    else:
+                        pf_print = (
+                            path_filter.to_dict()  # type: ignore[attr-defined]
+                            if hasattr(path_filter, "to_dict")
+                            else path_filter
+                        )
+                except Exception:
+                    pf_print = path_filter
+                print(
+                    f"[debug] qfilter (path-fast:{label}): {pf_print if pf_print else {}}"
+                )
+                print(
+                    f"[debug] path-fast-path: attempting {label} path match via scroll (candidate='{path_candidate}')"
+                )
+            try:
+                points_fast, _ = client.scroll(
+                    collection_name=collection,
+                    scroll_filter=path_filter,
+                    limit=args.k,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+            except Exception as e:
+                points_fast = []
+                if args.debug:
+                    print(f"[debug] path-fast-path scroll error ({label}): {e}")
+            if not points_fast:
+                continue
+
+            # Inject synthetic score + snippet so downstream formatting remains consistent.
+            for p in points_fast:
+                if not hasattr(p, "score"):
+                    try:
+                        setattr(p, "score", 1.0)  # synthetic score for exact path match
+                    except Exception:
+                        pass
+            context, sources = _build_context(points_fast, max_chars=args.context_chars)
+            # Add snippet (first 160 chars raw payload text) for each source without altering human list formatting.
+            for p, s in zip(points_fast, sources):
+                try:
+                    payload = getattr(p, "payload", None) or {}
+                    snippet = (payload.get("text") or "")[:160].strip()
+                    s.setdefault("text", snippet)
+                except Exception:
+                    s.setdefault("text", "")
+            use_llm = not args.no_llm and (
+                args.llm or (getattr(settings, "ASK_MODE", "search") == "llm")
+            )
+            if use_llm:
+                system = (
+                    "You are a concise assistant. Use ONLY the provided context. "
+                    "If the answer is not in context, say you don't know."
+                )
+                user = f"Question:\n{query}\n\nContext:\n{context}"
+                prompt = f"{system}\n\n{user}\n\nAnswer:"
+                answer = _ask_llm(
+                    prompt=prompt,
+                    model=args.model,
+                    max_tokens=args.max_tokens,
+                    temperature=args.temperature,
+                )
+            else:
+                answer = "Top snippets (path match):\n" + "\n---\n".join(
+                    f"{(s.get('path') or '(unknown)')}  (chunk #{s.get('idx')})  score={s.get('score'):.4f}"
+                    for s in sources[:3]
+                )
+            if args.json:
+                print(
+                    json.dumps(
+                        {
+                            "ok": True,
+                            "query": query,
+                            "answer": answer,
+                            "sources": sources if args.show_sources else None,
+                            "meta": {
+                                "manual_min_score": args.min_score,
+                                "fallback_used": False,
+                                "path_fast_path": True,
+                                "path_fast_variant": label,
+                            },
+                            "filters": {
+                                "document_id": args.document_id,
+                                "kind": args.kind,
+                                "path": path_candidate,
+                            },
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+            else:
+                print("\n" + "=" * 8 + " answer " + "=" * 8)
+                print(answer)
+                if args.show_sources:
+                    print("\n" + "=" * 8 + " sources " + "=" * 8)
+                    for s in sources:
+                        print(
+                            f"- {s['path']}  (chunk #{s.get('idx')})  score={s.get('score')}"
+                        )
+            return
+
+    # Standard filter (semantic path)
     qfilter = build_filter(document_id=args.document_id, kind=args.kind, path=args.path)
+    if args.debug:
+        try:
+            if hasattr(qfilter, "dict"):
+                qf_print = qfilter.dict()  # type: ignore
+            else:
+                qf_print = (
+                    qfilter.to_dict()  # type: ignore[attr-defined]
+                    if hasattr(qfilter, "to_dict")
+                    else qfilter
+                )
+        except Exception:
+            qf_print = qfilter
+        print(f"[debug] qfilter: {qf_print if qf_print else {}}")
 
     # Search logic with optional manual score threshold and fallback safety valve
     points = []
@@ -334,7 +496,7 @@ def main():
                 if points:
                     fallback_used = True
                     print(
-                        "[info] fallback: no matches ≥ default threshold; showing best available."
+                        "[info] fallback: wrapper returned no hits; using direct client.search() with score_threshold=0.0"
                     )
             except Exception as e:
                 print(f"[error] fallback search failed: {e}")
