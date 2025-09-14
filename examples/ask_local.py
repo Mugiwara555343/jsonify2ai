@@ -69,24 +69,28 @@ EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "768"))
 
 
 def _is_filename_like(q: str) -> bool:
-    """Heuristic: treat query as filename/path if it clearly references a file.
+    """Stricter filename/path heuristic.
 
-    Conditions (OR):
-      1) Ends with known extension (.wav/.mp3/.pdf/.md/.txt/.json/.jsonl/.docx)
-      2) Contains a path separator ('/' or '\\')
-      3) Basename contains a dot (e.g., 'file.ext') and basename length > 1
+    True iff:
+      - Regex-like suffix: .(wav|mp3|pdf|md|txt|json|jsonl|docx) case-insensitive OR
+      - Contains a path separator '/' or '\\' OR
+      - Basename differs from query AND basename has a dot and len>1.
+    Also abort (False) if query has >4 whitespace-separated tokens (treat as semantic question).
     """
     if not q:
         return False
+    if len(q.strip().split()) > 4:
+        return False
     q_clean = q.strip()
     lower = q_clean.lower()
-    exts = (".wav", ".mp3", ".pdf", ".md", ".txt", ".json", ".jsonl", ".docx")
-    if any(lower.endswith(ext) for ext in exts):
-        return True
+    exts = ("wav", "mp3", "pdf", "md", "txt", "json", "jsonl", "docx")
+    for ext in exts:
+        if lower.endswith(f".{ext}"):
+            return True
     if "/" in q_clean or "\\" in q_clean:
         return True
     basename = os.path.basename(q_clean.replace("\\", "/"))
-    if "." in basename and len(basename) > 1:
+    if basename != q_clean and "." in basename and len(basename) > 1:
         return True
     return False
 
@@ -355,41 +359,53 @@ def main():
             if not points_fast:
                 continue
 
-            # Inject synthetic score + snippet so downstream formatting remains consistent.
+            # Inject synthetic score (0.9999) + snippet so downstream formatting remains consistent.
             for p in points_fast:
                 if not hasattr(p, "score"):
                     try:
-                        setattr(p, "score", 1.0)  # synthetic score for exact path match
+                        setattr(
+                            p, "score", 0.9999
+                        )  # synthetic score for exact path match
                     except Exception:
                         pass
             context, sources = _build_context(points_fast, max_chars=args.context_chars)
-            # Add snippet (first 160 chars raw payload text) for each source without altering human list formatting.
+            # Ensure each source has snippet + score explicitly stored.
             for p, s in zip(points_fast, sources):
                 try:
                     payload = getattr(p, "payload", None) or {}
                     snippet = (payload.get("text") or "")[:160].strip()
-                    s.setdefault("text", snippet)
+                    s["text"] = snippet
+                    s["score"] = float(getattr(p, "score", 0.9999))
                 except Exception:
                     s.setdefault("text", "")
             use_llm = not args.no_llm and (
                 args.llm or (getattr(settings, "ASK_MODE", "search") == "llm")
             )
             if use_llm:
-                system = (
-                    "You are a concise assistant. Use ONLY the provided context. "
-                    "If the answer is not in context, say you don't know."
-                )
-                user = f"Question:\n{query}\n\nContext:\n{context}"
-                prompt = f"{system}\n\n{user}\n\nAnswer:"
-                answer = _ask_llm(
-                    prompt=prompt,
-                    model=args.model,
-                    max_tokens=args.max_tokens,
-                    temperature=args.temperature,
-                )
+                # Snippet-first shortcut when top source has text.
+                top_text = (sources[0].get("text") or "").strip() if sources else ""
+                top_path = sources[0].get("path") if sources else query
+                if top_text:
+                    answer = (
+                        f"Found an exact file match for {top_path}. Snippet: {top_text}. "
+                        "If you need more, show sources."
+                    )
+                else:
+                    system = (
+                        "You are a concise assistant. Use ONLY the provided context. "
+                        "If the answer is not in context, say you don't know."
+                    )
+                    user = f"Question:\n{query}\n\nContext:\n{context}"
+                    prompt = f"{system}\n\n{user}\n\nAnswer:"
+                    answer = _ask_llm(
+                        prompt=prompt,
+                        model=args.model,
+                        max_tokens=args.max_tokens,
+                        temperature=args.temperature,
+                    )
             else:
                 answer = "Top snippets (path match):\n" + "\n---\n".join(
-                    f"{(s.get('path') or '(unknown)')}  (chunk #{s.get('idx')})  score={s.get('score'):.4f}"
+                    f"{(s.get('path') or '(unknown)')}  (chunk #{s.get('idx')})  score={float(s.get('score', 0.0)):.4f}"
                     for s in sources[:3]
                 )
             if args.json:
@@ -532,7 +548,7 @@ def main():
         )
     else:
         answer = "Top snippets (retrieval-only mode):\n" + "\n---\n".join(
-            f"{(s.get('path') or '(unknown)')}  (chunk #{s.get('idx')})  score={s.get('score'):.4f}"
+            f"{(s.get('path') or '(unknown)')}  (chunk #{s.get('idx')})  score={float(s.get('score', 0.0)):.4f}"
             for s in sources[:3]
         )
 
@@ -563,7 +579,9 @@ def main():
         if args.show_sources:
             print("\n" + "=" * 8 + " sources " + "=" * 8)
             for s in sources:
-                print(f"- {s['path']}  (chunk #{s.get('idx')})  score={s.get('score')}")
+                print(
+                    f"- {s.get('path')}  (chunk #{s.get('idx')})  score={float(s.get('score', 0.0)):.4f}"
+                )
 
 
 if __name__ == "__main__":
