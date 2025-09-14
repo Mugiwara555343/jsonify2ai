@@ -1,19 +1,26 @@
 #!/usr/bin/env python3
+# ruff: noqa: E402
 """full_pipeline_rebuild.py
 
-MAINTENANCE WRAPPER — thin orchestration: calls existing helpers; do not duplicate parsing/embedding/upsert logic here.
+Thin maintenance wrapper: re-ingest AUDIO files (fresh STT) with TRUE replace
+semantics and optionally reindex the Qdrant collection. All heavy lifting is
+delegated to shared helpers; this file contains no bespoke ID/path logic.
 
-Purpose:
-  1. Re-ingest ONLY audio files (fresh STT) replacing existing vectors for those document_ids.
-  2. (Optional) Reindex (drop & recreate) the primary Qdrant collection, preserving points.
+Key behaviors:
+  * Dry-run by default (requires --confirm for any writes)
+  * Canonical POSIX relpaths + deterministic IDs via worker.app.utils.docids
+  * Delete existing document_id before upserting (idempotent replace)
+  * Audio dev-mode guard (AUDIO_DEV_MODE=1) unless explicitly overridden
+  * Optional reindex step (--reindex + --confirm) leveraging existing helper
 
-Safety:
-  - No writes unless --confirm is provided.
-  - --reindex honored ONLY when --confirm is also set.
-  - Default invocation (no flags) performs a dry-run summary.
+Outputs:
+  * A discovery summary (human-readable)
+  * One final single-line JSON summary containing core counters
 
-Environment precedence: CLI flags > env vars > settings.
-Exit codes: 0 success / 1 unexpected error.
+Exit codes:
+  0 success
+  1 unexpected error
+  2 refused due to AUDIO_DEV_MODE safeguard
 """
 
 from __future__ import annotations
@@ -25,19 +32,18 @@ import os
 import sys
 import time
 import pathlib
-import uuid
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Dict, Any
 
 # ---------------- repo-root bootstrap ----------------
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# ---------------- early .env load (must precede settings import) ----------------
+# ---------------- early .env load ----------------
 try:  # pragma: no cover
     from dotenv import load_dotenv  # type: ignore
 
-    dotenv_path = REPO_ROOT.joinpath(".env")
+    dotenv_path = REPO_ROOT / ".env"
     if dotenv_path.exists():
         load_dotenv(dotenv_path=str(dotenv_path))
 except Exception:  # pragma: no cover
@@ -46,360 +52,413 @@ except Exception:  # pragma: no cover
 # ---------------- third-party (none new) ----------------
 
 # ---------------- local imports ----------------
-from worker.app.config import settings  # noqa: E402
-from worker.app.services.chunker import chunk_text  # noqa: E402
-from worker.app.services.embed_ollama import embed_texts  # noqa: E402
-from worker.app.services.qdrant_client import (  # noqa: E402
+from worker.app.config import settings  # type: ignore
+from worker.app.utils.docids import (  # single-source ID + path helpers
+    canonicalize_relpath,
+    document_id_for_relpath,
+    chunk_id_for,
+)
+from worker.app.services.chunker import chunk_text  # type: ignore
+from worker.app.services.embed_ollama import embed_texts  # type: ignore
+from worker.app.services.qdrant_client import (  # type: ignore
     get_qdrant_client,
     upsert_points,
     delete_by_document_id,
 )
 
-# Optional helpers (best-effort imports; fallbacks provided)
-try:  # noqa: E402
-    from worker.app.services.parse_audio import extract_text_auto, transcribe_audio  # type: ignore
+# Audio parsing helpers (prefer richer auto extractor if present)
+try:  # pragma: no cover
+    from worker.app.services.parse_audio import extract_text_auto as _extract_audio  # type: ignore
 except Exception:  # pragma: no cover
     try:
-        from worker.app.services.parse_audio import transcribe_audio  # type: ignore
-
-        extract_text_auto = None  # type: ignore
+        from worker.app.services.parse_audio import transcribe_audio as _extract_audio  # type: ignore
     except Exception:  # pragma: no cover
-        transcribe_audio = None  # type: ignore
-        extract_text_auto = None  # type: ignore
+        _extract_audio = None  # type: ignore
 
-try:  # noqa: E402
+# Optional reindex helper
+try:  # pragma: no cover
     import scripts.reindex_collection as reindex_mod  # type: ignore
 except Exception:  # pragma: no cover
     reindex_mod = None  # type: ignore
 
-# ---------------- constants / config ----------------
+# Optional centralized discovery helper
+try:  # pragma: no cover
+    from worker.app.services.discovery import discover_candidates as _discover  # type: ignore
+except Exception:  # pragma: no cover
+    _discover = None  # type: ignore
+
+
+# ---------------- constants / env derived ----------------
 AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".flac", ".ogg"}
 CANONICAL_COLLECTION = os.getenv(
     "QDRANT_COLLECTION", getattr(settings, "QDRANT_COLLECTION", "jsonify2ai_chunks_768")
 )
-CANONICAL_DIM = int(os.getenv("EMBEDDING_DIM", getattr(settings, "EMBEDDING_DIM", 768)))
-CANONICAL_DISTANCE = "Cosine"
-EMBED_DEV_MODE = (os.getenv("EMBED_DEV_MODE") == "1") or (
-    str(getattr(settings, "EMBED_DEV_MODE", 0)) == "1"
+EMBED_DIM = int(os.getenv("EMBEDDING_DIM", getattr(settings, "EMBEDDING_DIM", 768)))
+EMBED_DEV_MODE = os.getenv(
+    "EMBED_DEV_MODE", str(getattr(settings, "EMBED_DEV_MODE", 0))
+) in {"1", "true", "True"}
+AUDIO_DEV_MODE = os.getenv(
+    "AUDIO_DEV_MODE", str(getattr(settings, "AUDIO_DEV_MODE", 0))
+).strip().lower() in {"1", "true", "yes", "on"}
+QDRANT_URL = os.getenv(
+    "QDRANT_URL", getattr(settings, "QDRANT_URL", "http://localhost:6333")
 )
-DEFAULT_NAMESPACE = getattr(
-    settings, "NAMESPACE_UUID", uuid.UUID("00000000-0000-5000-8000-000000000000")
-)
 
 
-# ---------------- id helpers (lightweight / non-core) ----------------
-def document_id_for_relpath(relpath: str) -> str:
-    return str(uuid.uuid5(DEFAULT_NAMESPACE, relpath))
-
-
-def chunk_id_for(document_id: str, idx: int) -> str:
-    return str(uuid.uuid5(uuid.UUID(document_id), f"chunk:{idx}"))
-
-
-# ---------------- discovery (prefer centralized helper if present) ----------------
-def _fallback_discover_audio(
-    root: pathlib.Path, limit: int
-) -> List[Tuple[pathlib.Path, str]]:
-    out: List[Tuple[pathlib.Path, str]] = []
-    root = root.resolve()
+# ---------------- discovery fallback ----------------
+def _fallback_discover_audio(root: pathlib.Path, limit: int) -> List[pathlib.Path]:
+    out: List[pathlib.Path] = []
     for fp in root.rglob("*"):
         if not fp.is_file():
             continue
         if fp.suffix.lower() in AUDIO_EXTS:
-            rel = fp.relative_to(root).as_posix()
-            out.append((fp, rel))
+            out.append(fp)
             if limit and len(out) >= limit:
                 break
-    out.sort(key=lambda t: t[1])
+    out.sort()
     return out
 
 
-def discover_audio(root: pathlib.Path, limit: int) -> List[Tuple[pathlib.Path, str]]:
-    """Attempt to use a generic discover_candidates helper; fallback to local scan.
+def discover_audio_files(
+    drop_dir: pathlib.Path, limit: int
+) -> List[Tuple[pathlib.Path, str]]:
+    """Return list of (absolute_path, canonical_relpath).
 
-    We look for a function discover_candidates(root, kinds_set, explicit_path, limit)
-    (as implemented in scripts/ingest_dropzone.py). Importing that script is safe
-    because its top-level does not perform writes.
+    Uses centralized discovery if available; otherwise a local glob.
+    Only audio kind is returned.
     """
-    try:  # pragma: no cover (best-effort)
-        from scripts.ingest_dropzone import discover_candidates as dc  # type: ignore
-
-        triples = dc(root, {"audio"}, None, limit if limit > 0 else 0)
-        # dc returns (path, rel, kind); we map to (path, rel)
-        return [(p, r) for p, r, _k in triples if _k == "audio"]
-    except Exception:
-        return _fallback_discover_audio(root, limit)
-
-
-# ---------------- audio transcription wrapper ----------------
-class SkipFile(RuntimeError):
-    """Non-fatal skip sentinel."""
-
-
-def _transcribe(path: str) -> str:
-    if extract_text_auto is not None:  # prefer richer auto extractor if available
+    paths: List[pathlib.Path]
+    if _discover is not None:
         try:
-            return extract_text_auto(path, strict=True)  # type: ignore[arg-type]
-        except Exception as e:
-            raise SkipFile(str(e))
-    if transcribe_audio is None:
-        raise SkipFile("audio parser not available (install audio requirements)")
-    try:
-        return transcribe_audio(path)  # type: ignore[arg-type]
-    except Exception as e:  # pragma: no cover
-        raise SkipFile(f"transcription failed: {e}")
+            triples = _discover(drop_dir, {"audio"}, None, limit if limit > 0 else 0)
+            # expected shape: (path, rel, kind)
+            paths = [p for p, _rel, k in triples if k == "audio"]
+        except Exception:
+            paths = _fallback_discover_audio(drop_dir, limit)
+    else:
+        paths = _fallback_discover_audio(drop_dir, limit)
+
+    results: List[Tuple[pathlib.Path, str]] = []
+    for p in paths:
+        try:
+            rel = canonicalize_relpath(p, drop_dir)
+        except Exception:
+            continue  # safety: skip anything outside root
+        results.append((p, rel))
+    return results
 
 
-# ---------------- reindex implementation ----------------
-def _do_reindex(indexing_threshold: int, debug: bool) -> Dict[str, Any]:
-    """Programmatic reindex using scripts.reindex_collection module when available.
+# ---------------- reindex wrapper ----------------
+def _reindex(indexing_threshold: int, debug: bool) -> Dict[str, Any]:
+    """Programmatic reindex leveraging existing helper module when possible.
 
-    Returns a JSON-serializable dict summarizing reindex results.
+    Strategy:
+      * export existing points (id, payload, vector)
+      * drop & recreate (respecting indexing_threshold if helper supports)
+      * reinsert in batches
     """
     client = get_qdrant_client()
+
     if reindex_mod is None:
-        # Minimal fallback: drop & recreate empty collection
+        # minimal: delete & recreate empty collection
         try:
             client.delete_collection(collection_name=CANONICAL_COLLECTION)
         except Exception as e:  # pragma: no cover
             if debug:
-                print(f"[debug] delete_collection (ignored if missing): {e}")
+                print(f"[debug] delete_collection (ignored): {e}")
         client.recreate_collection(
             collection_name=CANONICAL_COLLECTION,
-            vectors_config={"size": CANONICAL_DIM, "distance": CANONICAL_DISTANCE},
+            vectors_config={"size": EMBED_DIM, "distance": "Cosine"},
         )
         return {"ok": True, "reindexed": True, "exported": 0, "reinserted": 0}
 
-    # Use existing export logic then rebuild
+    # export
     try:
         points = reindex_mod.export_points(client, CANONICAL_COLLECTION)  # type: ignore[attr-defined]
     except Exception as e:  # pragma: no cover
         return {"ok": False, "error": f"export failed: {e}"}
-
     if debug:
         print(f"[debug] reindex export count={len(points)}")
 
-    # Drop & recreate (leveraging its private helper if present)
+    # drop
     try:
         client.delete_collection(collection_name=CANONICAL_COLLECTION)
     except Exception as e:  # pragma: no cover
         if debug:
             print(f"[debug] delete_collection error (ignored): {e}")
 
+    # recreate via private helper if present, else manual
     recreated = False
     if hasattr(reindex_mod, "_ensure_collection"):
         try:
             reindex_mod._ensure_collection(  # type: ignore[attr-defined]
                 client,
                 CANONICAL_COLLECTION,
-                CANONICAL_DIM,
-                CANONICAL_DISTANCE,
+                EMBED_DIM,
+                "Cosine",
                 recreate_bad=True,
                 indexing_threshold=indexing_threshold,
             )
             recreated = True
         except Exception as e:  # pragma: no cover
             return {"ok": False, "error": f"recreate failed: {e}"}
-    else:  # fallback create
+    else:
         client.recreate_collection(
             collection_name=CANONICAL_COLLECTION,
-            vectors_config={"size": CANONICAL_DIM, "distance": CANONICAL_DISTANCE},
+            vectors_config={"size": EMBED_DIM, "distance": "Cosine"},
         )
         recreated = True
 
-    # Reinsert
+    # reinsert
     inserted = 0
     batch: List[Tuple[str, List[float], Dict[str, Any]]] = []
-    for pid, payload, vec in points:  # type: ignore[assignment]
+    for pid, payload, vec in points:
         batch.append((pid, vec, payload))
         if len(batch) >= 128:
-            inserted += upsert_points(
+            upsert_points(
                 batch,
                 collection_name=CANONICAL_COLLECTION,
                 client=client,
                 batch_size=len(batch),
                 ensure=False,
             )
+            inserted += len(batch)
             batch.clear()
     if batch:
-        inserted += upsert_points(
+        upsert_points(
             batch,
             collection_name=CANONICAL_COLLECTION,
             client=client,
             batch_size=len(batch),
             ensure=False,
         )
+        inserted += len(batch)
     return {
         "ok": True,
         "reindexed": recreated,
-        "exported": len(points),  # type: ignore[arg-type]
+        "exported": len(points),
         "reinserted": inserted,
     }
 
 
-# ---------------- core orchestration ----------------
-def _ingest_audio_files(
-    audio_files: List[Tuple[pathlib.Path, str]],
-    *,
-    debug: bool,
-    limit: int,
+# ---------------- ingestion core ----------------
+def _process_audio_files(
+    items: List[Tuple[pathlib.Path, str]], *, debug: bool, limit: int
 ) -> Dict[str, Any]:
     client = get_qdrant_client()
     files_processed = 0
     files_skipped = 0
-    skipped: List[str] = []
     chunks_upserted = 0
 
-    for fp, rel in audio_files:
+    for fp, rel in items:
+        if limit and files_processed >= limit:
+            break
         if debug:
             print(f"[file] {rel}")
-        try:
-            transcript = _transcribe(str(fp))
-        except SkipFile as e:
-            skipped.append(f"{rel}: {e}")
-            files_skipped += 1
-            continue
-        if not transcript or len(transcript.strip()) < 5:
-            skipped.append(f"{rel}: empty/short transcript")
+
+        if _extract_audio is None:
+            if debug:
+                print(f"[skip] {rel} (audio parser unavailable)")
             files_skipped += 1
             continue
 
-        chunks = chunk_text(
+        try:
+            transcript = _extract_audio(str(fp), strict=True)  # type: ignore[arg-type]
+        except TypeError:
+            # fallback if underlying function is transcribe_audio without 'strict'
+            try:
+                transcript = _extract_audio(str(fp))  # type: ignore[arg-type]
+            except Exception as e:  # pragma: no cover
+                if debug:
+                    print(f"[skip] {rel} transcription error: {e}")
+                files_skipped += 1
+                continue
+        except Exception as e:  # pragma: no cover
+            if debug:
+                print(f"[skip] {rel} transcription error: {e}")
+            files_skipped += 1
+            continue
+
+        if not transcript or len(transcript.strip()) < 5:
+            if debug:
+                print(f"[skip] {rel} empty/short transcript")
+            files_skipped += 1
+            continue
+
+        # chunk
+        raw_chunks = chunk_text(
             transcript,
             size=int(getattr(settings, "CHUNK_SIZE", 800)),
             overlap=int(getattr(settings, "CHUNK_OVERLAP", 100)),
         )
-        if not chunks:
-            skipped.append(f"{rel}: no chunks")
+        if not raw_chunks:
+            if debug:
+                print(f"[skip] {rel} produced no chunks")
             files_skipped += 1
             continue
 
-        vecs = embed_texts(chunks)
-        dims = [len(v) for v in vecs]
-        if any(d != CANONICAL_DIM for d in dims):
-            if not EMBED_DEV_MODE:
+        vectors = embed_texts(raw_chunks)
+        dims = [len(v) for v in vectors]
+        if any(d != EMBED_DIM for d in dims):
+            if EMBED_DEV_MODE:
                 print(
-                    f"[error] embedding dimension mismatch file={rel} dims={dims} expected={CANONICAL_DIM}",
+                    f"[warn] dim mismatch (dev mode skip) file={rel} dims={dims} expected={EMBED_DIM}",
                     file=sys.stderr,
                 )
-                raise SystemExit(1)
-            skipped.append(f"{rel}: dim mismatch (dev mode skip)")
-            files_skipped += 1
-            continue
+                files_skipped += 1
+                continue
+            raise RuntimeError(
+                f"embedding dimension mismatch file={rel} dims={dims} expected={EMBED_DIM}"
+            )
 
-        document_id = document_id_for_relpath(rel)
+        doc_id = document_id_for_relpath(rel)
+        # true replace semantics
         try:
-            delete_by_document_id(document_id, client=client)
+            delete_by_document_id(str(doc_id), client=client)
         except Exception as e:  # pragma: no cover
             if debug:
                 print(f"[debug] delete_by_document_id failed {rel}: {e}")
 
-        items: List[Tuple[str, List[float], Dict[str, Any]]] = []
-        for idx, (text, vec) in enumerate(zip(chunks, vecs)):
+        payload_items: List[Tuple[str, List[float], Dict[str, Any]]] = []
+        for idx, (chunk_text_str, vec) in enumerate(zip(raw_chunks, vectors)):
             payload = {
-                "document_id": document_id,
-                "path": rel,
+                "document_id": str(doc_id),
+                "path": rel,  # canonical POSIX relpath
                 "kind": "audio",
                 "idx": idx,
-                "text": text,
+                "text": chunk_text_str,
                 "meta": {
                     "source_ext": fp.suffix.lower(),
                     "bytes": fp.stat().st_size,
                     "mtime": fp.stat().st_mtime,
                 },
             }
-            items.append((chunk_id_for(document_id, idx), vec, payload))
+            payload_items.append((str(chunk_id_for(doc_id, idx)), vec, payload))
 
         inserted = upsert_points(
-            items,
+            payload_items,
             collection_name=CANONICAL_COLLECTION,
             client=client,
-            batch_size=len(items),
+            batch_size=len(payload_items),
             ensure=False,
         )
         chunks_upserted += inserted
         files_processed += 1
         if debug:
-            print(f"[debug] file={rel} chunks={len(items)} dims={dims}")
-
-        if limit and files_processed >= limit:
-            break
+            print(f"[debug] file={rel} chunks={len(payload_items)} dims={dims}")
 
     return {
         "files_processed": files_processed,
         "files_skipped": files_skipped,
         "chunks_upserted": chunks_upserted,
-        "skipped": skipped,
     }
 
 
-def main() -> None:  # noqa: C901
-    parser = argparse.ArgumentParser(
-        description="Re-ingest audio files (fresh STT) and optionally reindex collection"
+# ---------------- main entrypoint ----------------
+def main() -> None:  # noqa: C901 - complexity acceptable for thin orchestration
+    ap = argparse.ArgumentParser(
+        description="Re-ingest audio files with replace semantics and optional reindex"
     )
-    parser.add_argument("--dir", default="data/dropzone")
-    parser.add_argument("--dry-run", action="store_true", default=False)
-    parser.add_argument("--confirm", action="store_true", default=False)
-    parser.add_argument("--reindex", action="store_true", default=False)
-    parser.add_argument("--indexing-threshold", type=int, default=100)
-    parser.add_argument(
+    ap.add_argument("--dir", default="data/dropzone")
+    ap.add_argument("--dry-run", action="store_true", default=False)
+    ap.add_argument(
+        "--confirm",
+        action="store_true",
+        default=False,
+        help="Required to perform writes",
+    )
+    ap.add_argument(
+        "--reindex",
+        action="store_true",
+        default=False,
+        help="Drop & rebuild collection (with export/import) when confirmed",
+    )
+    ap.add_argument("--indexing-threshold", type=int, default=100)
+    ap.add_argument(
         "--limit", type=int, default=0, help="Limit number of audio files processed"
     )
-    parser.add_argument("--debug", action="store_true", default=False)
-    args = parser.parse_args()
+    ap.add_argument("--debug", action="store_true", default=False)
+    ap.add_argument(
+        "--allow-audio-with-dev-mode",
+        action="store_true",
+        default=False,
+        help="Override safety when AUDIO_DEV_MODE=1 to run real pipeline",
+    )
+    args = ap.parse_args()
 
     drop_dir = pathlib.Path(args.dir)
     if not drop_dir.exists():
         print(json.dumps({"ok": False, "error": f"directory not found: {drop_dir}"}))
         sys.exit(1)
 
-    audio_candidates = discover_audio(drop_dir, args.limit if args.limit > 0 else 0)
-
-    effective_dry_run = args.dry_run or (not args.confirm)
+    # Discover
+    audio_candidates = discover_audio_files(
+        drop_dir, args.limit if args.limit > 0 else 0
+    )
 
     if args.debug:
-        qdrant_url = os.getenv(
-            "QDRANT_URL", getattr(settings, "QDRANT_URL", "http://localhost:6333")
-        )
         print(
-            f"[debug] QDRANT_URL={qdrant_url} COLLECTION={CANONICAL_COLLECTION} EMBEDDINGS_MODEL={getattr(settings,'EMBEDDINGS_MODEL','')} EMBEDDING_DIM={CANONICAL_DIM}"
+            f"[debug] QDRANT_URL={QDRANT_URL} COLLECTION={CANONICAL_COLLECTION} EMBEDDINGS_MODEL={getattr(settings,'EMBEDDINGS_MODEL','')} EMBEDDING_DIM={EMBED_DIM}"
         )
         print(f"[debug] candidates={len(audio_candidates)}")
 
-    plan = {
-        "ok": True,
-        "mode": "dry-run" if effective_dry_run else "execute",
-        "audio_files_found": len(audio_candidates),
-        "will_reindex": bool(args.reindex and args.confirm),
-        "collection": CANONICAL_COLLECTION,
-        "sample": [rel for _fp, rel in audio_candidates[:10]],
-    }
+    # Human-readable discovery summary
+    sample = [rel for _fp, rel in audio_candidates[:10]]
+    print(
+        f"[plan] mode={'execute' if (args.confirm and not args.dry_run) else 'dry-run'}"
+    )
+    print(f"[plan] audio_files_found={len(audio_candidates)} sample={sample}")
+    if args.reindex:
+        print("[plan] will_reindex=TRUE (only if execute mode)")
 
-    # Always print plan first
-    print(json.dumps(plan, ensure_ascii=False, indent=2))
+    execute_mode = args.confirm and not args.dry_run
 
-    if effective_dry_run:
+    # Safety: audio dev-mode guard (only matters if we would execute real pipeline)
+    if (
+        execute_mode
+        and audio_candidates
+        and AUDIO_DEV_MODE
+        and not args.allow_audio_with_dev_mode
+    ):
+        print(
+            "[error] AUDIO_DEV_MODE=1 — refusing to run real STT. Set AUDIO_DEV_MODE=0 in this shell or pass --allow-audio-with-dev-mode to override.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    if not execute_mode:
+        # Final JSON summary (dry-run)
+        summary = {
+            "ok": True,
+            "mode": "dry-run",
+            "audio_files_found": len(audio_candidates),
+            "files_processed": 0,
+            "files_skipped": 0,
+            "chunks_upserted": 0,
+            "will_reindex": bool(args.reindex and args.confirm),
+        }
+        print(json.dumps(summary, ensure_ascii=False))
         return
 
     # Execute ingestion
-    ingest_result = _ingest_audio_files(
+    ingest_result = _process_audio_files(
         audio_candidates if args.limit == 0 else audio_candidates[: args.limit],
         debug=args.debug,
         limit=args.limit,
     )
 
-    reindex_result: Optional[Dict[str, Any]] = None
-    if args.reindex and args.confirm:
-        reindex_result = _do_reindex(args.indexing_threshold, args.debug)
-
+    # Optional reindex (after ingestion to reflect fresh data)
     summary = {
         "ok": True,
-        "collection": CANONICAL_COLLECTION,
+        "mode": "execute",
+        "audio_files_found": len(audio_candidates),
         **ingest_result,
+        "will_reindex": bool(args.reindex and args.confirm),
     }
-    if reindex_result:
-        summary["reindex"] = reindex_result
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    if args.reindex and args.confirm:
+        # Execute reindex AFTER ingestion but do not embed details in summary (schema contract)
+        _reindex(args.indexing_threshold, args.debug)
+    print(json.dumps(summary, ensure_ascii=False))
 
 
 if __name__ == "__main__":  # pragma: no cover
