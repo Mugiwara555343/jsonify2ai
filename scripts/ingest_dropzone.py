@@ -560,6 +560,24 @@ def ingest_dir(
             continue
 
         vecs = embed_texts(chunks)
+        # Validate each embedding vector length; continue in dev mode, error otherwise
+        bad_dims = []
+        for i, v in enumerate(vecs):
+            if len(v) != CANONICAL_DIM:
+                bad_dims.append((i, len(v)))
+        if bad_dims:
+            for idx_bad, got_len in bad_dims:
+                print(
+                    f"[error] vector dim mismatch file={rel_path} chunk_idx={idx_bad} expected={CANONICAL_DIM} got={got_len}",
+                    file=sys.stderr,
+                )
+            if not (
+                os.getenv("EMBED_DEV_MODE") == "1"
+                or str(getattr(settings, "EMBED_DEV_MODE", 0)) == "1"
+            ):
+                raise RuntimeError(
+                    f"Aborting ingest due to {len(bad_dims)} malformed vectors (see errors above)."
+                )
 
         # build items
         items: List[Tuple[str, List[float], Dict[str, Any]]] = []
@@ -585,7 +603,9 @@ def ingest_dir(
             )
             items.append((rec.id, vec, rec.payload()))
             if export_f:
-                export_f.write(json.dumps(asdict(rec), ensure_ascii=False) + "\n")
+                rec_dict = asdict(rec)
+                rec_dict["vec_len"] = len(vec)
+                export_f.write(json.dumps(rec_dict, ensure_ascii=False) + "\n")
 
         if items:
             total_chunks += upsert_points(

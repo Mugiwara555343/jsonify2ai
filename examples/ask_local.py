@@ -10,6 +10,7 @@ import json
 import os
 import textwrap
 import time
+import re
 from typing import List, Tuple
 
 # repo-root import bootstrap (works even if PYTHONPATH is unset)
@@ -69,24 +70,23 @@ EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "768"))
 
 
 def _is_filename_like(q: str) -> bool:
-    """Stricter filename/path heuristic.
+    """Return True only when query looks like a filename/path (not a sentence).
 
-    True iff:
-      - Regex-like suffix: .(wav|mp3|pdf|md|txt|json|jsonl|docx) case-insensitive OR
-      - Contains a path separator '/' or '\\' OR
-      - Basename differs from query AND basename has a dot and len>1.
-    Also abort (False) if query has >4 whitespace-separated tokens (treat as semantic question).
+    Conditions (any one makes it True):
+      - Regex suffix match: .(wav|mp3|pdf|md|txt|jsonl|json|docx)  (case-insensitive)
+      - Contains a path separator ('/' or '\\')
+      - Basename differs from whole query AND basename contains a dot and len>1
+    Additionally: if query has >4 whitespace separated tokens → False (treat as sentence).
     """
     if not q:
         return False
     if len(q.strip().split()) > 4:
         return False
     q_clean = q.strip()
-    lower = q_clean.lower()
-    exts = ("wav", "mp3", "pdf", "md", "txt", "json", "jsonl", "docx")
-    for ext in exts:
-        if lower.endswith(f".{ext}"):
-            return True
+    if re.search(
+        r"\.(wav|mp3|pdf|md|txt|jsonl|json|docx)$", q_clean, flags=re.IGNORECASE
+    ):
+        return True
     if "/" in q_clean or "\\" in q_clean:
         return True
     basename = os.path.basename(q_clean.replace("\\", "/"))
@@ -212,6 +212,11 @@ def main():
             "If omitted, uses existing wrapper thresholds with automatic fallback on empty results."
         ),
     )
+    ap.add_argument(
+        "--no-path-fast",
+        action="store_true",
+        help="Disable filename/path fast-path scroll optimization (forces semantic retrieval)",
+    )
     args = ap.parse_args()
 
     query = args.query
@@ -314,6 +319,144 @@ def main():
 
     # Fast path: filename/path-style query direct filter scan (skip wrapper if direct hit)
     if _is_filename_like(query) and args.min_score is None:
+        if args.no_path_fast:
+            if args.debug:
+                print("[info] path-fast disabled by flag")
+        else:
+            # Path-fast heuristic: attempt exact path match first; if that fails and the query
+            # looks like it includes directories, also try its basename.
+            attempts = []
+            attempts.append((query, "full"))
+            basename = os.path.basename(query.strip().replace("\\", "/"))
+            if basename and basename != query:
+                attempts.append((basename, "basename"))
+
+            for path_candidate, label in attempts:
+                path_filter = build_filter(path=path_candidate)
+                if args.debug:
+                    try:
+                        if hasattr(path_filter, "model_dump"):
+                            pf_print = path_filter.model_dump()  # type: ignore[attr-defined]
+                        elif hasattr(path_filter, "dict"):
+                            pf_print = path_filter.dict()  # type: ignore
+                        else:
+                            pf_print = (
+                                path_filter.to_dict()  # type: ignore[attr-defined]
+                                if hasattr(path_filter, "to_dict")
+                                else path_filter
+                            )
+                    except Exception:
+                        pf_print = path_filter
+                    print(
+                        f"[debug] qfilter (path-fast:{label}): {pf_print if pf_print else {}}"
+                    )
+                    print(
+                        f"[debug] path-fast-path: attempting {label} path match via scroll (candidate='{path_candidate}')"
+                    )
+                try:
+                    points_fast, _ = client.scroll(
+                        collection_name=collection,
+                        scroll_filter=path_filter,
+                        limit=args.k,
+                        with_payload=True,
+                        with_vectors=False,
+                    )
+                except Exception as e:
+                    points_fast = []
+                    if args.debug:
+                        print(f"[debug] path-fast-path scroll error ({label}): {e}")
+                if not points_fast:
+                    continue
+
+                # Inject synthetic score (0.9999) + snippet so downstream formatting remains consistent.
+                for p in points_fast:
+                    if not hasattr(p, "score"):
+                        try:
+                            setattr(
+                                p, "score", 0.9999
+                            )  # synthetic score for exact path match
+                        except Exception:
+                            pass
+                context, sources = _build_context(
+                    points_fast, max_chars=args.context_chars
+                )
+                # Ensure each source has snippet + score explicitly stored.
+                for p, s in zip(points_fast, sources):
+                    try:
+                        payload = getattr(p, "payload", None) or {}
+                        snippet = (payload.get("text") or "")[:160].strip()
+                        s["text"] = snippet
+                        s["score"] = float(getattr(p, "score", 0.9999))
+                        s["source_kind"] = "path-fast"
+                    except Exception:
+                        s.setdefault("text", "")
+                        s.setdefault("source_kind", "path-fast")
+                use_llm = not args.no_llm and (
+                    args.llm or (getattr(settings, "ASK_MODE", "search") == "llm")
+                )
+                if use_llm:
+                    # Snippet-first shortcut when top source has text.
+                    top_text = (sources[0].get("text") or "").strip() if sources else ""
+                    top_path = sources[0].get("path") if sources else query
+                    if top_text:
+                        if args.debug:
+                            print(
+                                "[info] path-fast short-circuit: returning snippet for",
+                                top_path,
+                            )
+                        answer = f'Found an exact file match for {top_path}. Snippet: "{top_text}". (Showing top match.)'
+                    else:
+                        system = (
+                            "You are a concise assistant. Use ONLY the provided context. "
+                            "If the answer is not in context, say you don't know."
+                        )
+                        user = f"Question:\n{query}\n\nContext:\n{context}"
+                        prompt = f"{system}\n\n{user}\n\nAnswer:"
+                        answer = _ask_llm(
+                            prompt=prompt,
+                            model=args.model,
+                            max_tokens=args.max_tokens,
+                            temperature=args.temperature,
+                        )
+                else:
+                    answer = "Top snippets (path match):\n" + "\n---\n".join(
+                        f"{(s.get('path') or '(unknown)')}  (chunk #{s.get('idx')})  score={float(s.get('score', 0.0)):.4f}"
+                        for s in sources[:3]
+                    )
+                if args.json:
+                    print(
+                        json.dumps(
+                            {
+                                "ok": True,
+                                "query": query,
+                                "answer": answer,
+                                "sources": sources if args.show_sources else None,
+                                "meta": {
+                                    "manual_min_score": args.min_score,
+                                    "fallback_used": False,
+                                    "path_fast_path": True,
+                                    "path_fast_variant": label,
+                                },
+                                "filters": {
+                                    "document_id": args.document_id,
+                                    "kind": args.kind,
+                                    "path": path_candidate,
+                                },
+                            },
+                            ensure_ascii=False,
+                        )
+                    )
+                else:
+                    print("\n" + "=" * 8 + " answer " + "=" * 8)
+                    print(answer)
+                    if args.show_sources:
+                        print("\n" + "=" * 8 + " sources " + "=" * 8)
+                        for s in sources:
+                            score_val = float(s.get("score", 0.0))
+                            print(
+                                f"- {s.get('path')}  (chunk #{s.get('idx')})  score={score_val:.4f}"
+                            )
+                return
         # Path-fast heuristic: attempt exact path match first; if that fails and the query
         # looks like it includes directories, also try its basename.
         attempts = []
@@ -376,8 +519,10 @@ def main():
                     snippet = (payload.get("text") or "")[:160].strip()
                     s["text"] = snippet
                     s["score"] = float(getattr(p, "score", 0.9999))
+                    s["source_kind"] = "path-fast"
                 except Exception:
                     s.setdefault("text", "")
+                    s.setdefault("source_kind", "path-fast")
             use_llm = not args.no_llm and (
                 args.llm or (getattr(settings, "ASK_MODE", "search") == "llm")
             )
@@ -386,10 +531,12 @@ def main():
                 top_text = (sources[0].get("text") or "").strip() if sources else ""
                 top_path = sources[0].get("path") if sources else query
                 if top_text:
-                    answer = (
-                        f"Found an exact file match for {top_path}. Snippet: {top_text}. "
-                        "If you need more, show sources."
-                    )
+                    if args.debug:
+                        print(
+                            "[info] path-fast short-circuit: returning snippet for",
+                            top_path,
+                        )
+                    answer = f'Found an exact file match for {top_path}. Snippet: "{top_text}". (Showing top match.)'
                 else:
                     system = (
                         "You are a concise assistant. Use ONLY the provided context. "
@@ -437,8 +584,9 @@ def main():
                 if args.show_sources:
                     print("\n" + "=" * 8 + " sources " + "=" * 8)
                     for s in sources:
+                        score_val = float(s.get("score", 0.0))
                         print(
-                            f"- {s['path']}  (chunk #{s.get('idx')})  score={s.get('score')}"
+                            f"- {s.get('path')}  (chunk #{s.get('idx')})  score={score_val:.4f}"
                         )
             return
 
@@ -446,7 +594,9 @@ def main():
     qfilter = build_filter(document_id=args.document_id, kind=args.kind, path=args.path)
     if args.debug:
         try:
-            if hasattr(qfilter, "dict"):
+            if hasattr(qfilter, "model_dump"):
+                qf_print = qfilter.model_dump()  # type: ignore[attr-defined]
+            elif hasattr(qfilter, "dict"):
                 qf_print = qfilter.dict()  # type: ignore
             else:
                 qf_print = (

@@ -275,3 +275,17 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines, or just open an issue/PR.
 ## License
 
 MIT — use, hack, extend.
+
+---
+
+## Operational Notes
+
+- Keep `AUDIO_DEV_MODE=1` in your `.env` for fast/dev-safe runs. Set `AUDIO_DEV_MODE=0` in your shell session when you want real STT transcription.
+- Rebuild (export → drop → recreate → reinsert) the collection early with an HNSW index:
+    ```bash
+    python scripts/reindex_collection.py --drop-and-recreate --indexing_threshold 100
+    ```
+- Disable the filename/path first fast-path during testing with:
+    ```bash
+    python examples/ask_local.py --q "somefile.txt" --no-path-fast
+    ```
