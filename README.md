@@ -289,3 +289,20 @@ MIT — use, hack, extend.
     ```bash
     python examples/ask_local.py --q "somefile.txt" --no-path-fast
     ```
+
+## Maintenance
+
+Dry-run a full audio re-ingest + (optional) reindex plan (no writes):
+```bash
+python scripts/full_pipeline_rebuild.py --dir data/dropzone --dry-run --debug
+```
+
+Execute audio re-ingest only (replace existing audio document chunks):
+```bash
+python scripts/full_pipeline_rebuild.py --dir data/dropzone --confirm --debug
+```
+
+Execute audio re-ingest + drop & recreate collection with custom indexing threshold:
+```bash
+python scripts/full_pipeline_rebuild.py --dir data/dropzone --confirm --reindex --indexing-threshold 100 --debug
+```
