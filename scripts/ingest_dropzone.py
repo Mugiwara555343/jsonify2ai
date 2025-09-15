@@ -790,16 +790,29 @@ def main() -> None:
             f"'audio': {sum(1 for _, _, k in candidates if k == 'audio')}}}"
         )
 
+    # --- Narrow AUDIO_DEV_MODE guard ---
+    # Only enforce when the operation will perform real ingestion (parse/embed/upsert)
+    # Allow purely read-only modes: --stats, --list, --list-files, --list-collection, dry-run listing paths, etc.
     AUDIO_DEV_MODE = os.getenv("AUDIO_DEV_MODE", "0").lower() in {
         "1",
         "true",
         "yes",
         "on",
     }
+    read_only_mode = (
+        args.stats
+        or args.list
+        or args.list_files
+        or args.list_collection
+        or args.dry_run  # dry-run should not trigger real STT
+    )
+    requested_audio = any(k == "audio" for _f, _r, k in candidates)
+    will_ingest = not read_only_mode  # ingest path executes later in script
     if (
         AUDIO_DEV_MODE
+        and will_ingest
+        and requested_audio
         and not args.allow_audio_with_dev_mode
-        and any(k == "audio" for _f, _r, k in candidates)
     ):
         print(
             "[error] AUDIO_DEV_MODE=1 — refusing to run real STT. Set AUDIO_DEV_MODE=0 in this shell or pass --allow-audio-with-dev-mode to override."
