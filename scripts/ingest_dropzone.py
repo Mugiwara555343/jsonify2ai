@@ -588,7 +588,7 @@ def do_list(
                 "kind": payload.get("kind"),
                 "idx": payload.get("idx"),
                 "text": textwrap.shorten(
-                    (payload.get("text") or "").strip(), width=160, placeholder="…"
+                    (payload.get("text") or "").strip(), width=160, placeholder="..."
                 ),
             }
         )
