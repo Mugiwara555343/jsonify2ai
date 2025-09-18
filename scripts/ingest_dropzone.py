@@ -17,7 +17,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.util
-import inspect
 import json
 import os
 import sys
@@ -29,61 +28,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 import pathlib
 
-# === BEGIN discovery helpers ===
-
-KIND_MAP = {
-    ".txt": "text",
-    ".md": "text",
-    ".rst": "text",
-    ".json": "text",
-    ".csv": "text",
-    ".pdf": "pdf",
-    ".png": "image",
-    ".jpg": "image",
-    ".jpeg": "image",
-    ".webp": "image",
-    ".wav": "audio",
-    ".mp3": "audio",
-    ".m4a": "audio",
-}
-
-
-def _infer_kind(fp: Path) -> str:
-    return KIND_MAP.get(fp.suffix.lower(), "text")
-
-
-def _posix_rel(fp: Path, root: Path) -> str:
-    return fp.relative_to(root).as_posix()
-
-
-def discover_candidates(
-    root: Path, kinds_set: set[str], explicit_path: Optional[Path], limit: int
-) -> List[Tuple[Path, str, str]]:
-    """
-    Return [(abs_path, posix_rel_path, kind)] sorted by rel path.
-    Applies kinds filter, explicit file path, then limit (0 = no limit).
-    """
-    out: List[Tuple[Path, str, str]] = []
-    root = root.resolve()
-    if explicit_path:
-        fp = Path(explicit_path).resolve()
-        if fp.is_file() and str(fp).startswith(str(root)):
-            kind = _infer_kind(fp)
-            if not kinds_set or kind in kinds_set:
-                out.append((fp, _posix_rel(fp, root), kind))
-    else:
-        for fp in root.rglob("*"):
-            if not fp.is_file():
-                continue
-            kind = _infer_kind(fp)
-            if kinds_set and kind not in kinds_set:
-                continue
-            out.append((fp, _posix_rel(fp, root), kind))
-    out.sort(key=lambda t: t[1])
-    return out[:limit] if limit and limit > 0 else out
-
-
-# === END discovery helpers ===
+## Discovery helpers removed; now using centralized worker.app.services.discovery
 
 
 # === BEGIN id helpers (moved to worker.app.utils.docids) ===
@@ -118,15 +63,17 @@ except Exception:  # pragma: no cover
 # ─── local imports (after bootstrap; silenced for E402) ──────────────────────
 from worker.app.config import settings  # noqa: E402
 from worker.app.services.chunker import chunk_text  # noqa: E402
-from worker.app.services.embed_ollama import (  # noqa: E402
-    embed_texts as embed_texts_real,
-)
+import worker.app.services.embed_ollama as _embed_mod  # noqa: E402
+from worker.app.services.discovery import discover_candidates  # noqa: E402
 from worker.app.services.image_caption import caption_image  # noqa: E402
 from worker.app.utils.docids import (  # noqa: E402
     canonicalize_relpath,
     document_id_for_relpath,
     chunk_id_for,
 )
+
+# Local alias to keep call sites unchanged after module import above
+embed_texts_real = _embed_mod.embed_texts
 
 try:
     from worker.app.services.qdrant_client import (  # noqa: E402
@@ -135,9 +82,7 @@ try:
         delete_by_document_id,
         count as q_count,
         build_filter,
-    )
-    from worker.app.services.qdrant_minimal import (  # noqa: E402
-        ensure_collection_minimal,
+        ensure_collection,
     )
 except ImportError:
     from worker.app.services.qdrant_client import (  # noqa: E402
@@ -146,22 +91,17 @@ except ImportError:
         delete_by_document_id,
         count as q_count,
         build_filter,
+        ensure_collection,
     )
 
-    def ensure_collection_minimal(*a, **kw):  # type: ignore
-        raise RuntimeError("ensure_collection_minimal not available")
+    def ensure_collection(*a, **kw):  # type: ignore  # noqa: F811
+        raise RuntimeError("ensure_collection not available")
 
 
 # ─── config/constants ─────────────────────────────────────────────────────────
-CANONICAL_COLLECTION = getattr(
-    settings,
-    "QDRANT_COLLECTION",
-    os.getenv("QDRANT_COLLECTION", "jsonify2ai_chunks_768"),
-)
-CANONICAL_DIM = int(getattr(settings, "EMBEDDING_DIM", 768))
-CANONICAL_MODEL = getattr(
-    settings, "EMBEDDINGS_MODEL", os.getenv("EMBEDDINGS_MODEL", "nomic-embed-text")
-)
+CANONICAL_COLLECTION = settings.QDRANT_COLLECTION
+CANONICAL_DIM = settings.EMBEDDING_DIM
+CANONICAL_MODEL = settings.EMBEDDINGS_MODEL
 CANONICAL_DISTANCE = "Cosine"
 
 AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".flac", ".ogg"}
@@ -302,16 +242,22 @@ def _deterministic_vec(s: str, dim: int) -> List[float]:
 
 
 def embed_texts(texts: List[str]) -> List[List[float]]:
+    """Standard embedding adapter (settings-only; deterministic dev mode)."""
     dim = CANONICAL_DIM
     if (
         str(getattr(settings, "EMBED_DEV_MODE", 0)) == "1"
         or os.getenv("EMBED_DEV_MODE") == "1"
     ):
         return [_deterministic_vec(t, dim) for t in texts]
-    vecs = embed_texts_real(texts, model=CANONICAL_MODEL)
+    vecs = embed_texts_real(
+        texts,
+        model=CANONICAL_MODEL,
+        base_url=getattr(settings, "OLLAMA_URL", None),
+        dim=dim,
+    )
     if not vecs or len(vecs[0]) != dim:
         raise RuntimeError(
-            f"Embedding dimension mismatch: expected {dim}, got {len(vecs[0]) if vecs else 'none'}"
+            f"embedding dimension mismatch: expected {dim}, got {len(vecs[0]) if vecs else 'none'}"
         )
     return vecs
 
@@ -338,81 +284,7 @@ def qdrant_preflight(client) -> None:
         raise SystemExit(f"[qdrant] unreachable or misconfigured: {e}")
 
 
-def ensure_collection_compat(
-    client, *, name: str, dim: int, distance: str, recreate_bad: bool
-) -> None:
-    """
-    Call ensure_collection_minimal with *only* the parameters it supports.
-    Handles:
-      - keyword vs positional
-      - missing params (e.g., no 'distance' or no 'dim')
-      - functions that do not accept 'client'
-    """
-    func = ensure_collection_minimal
-    sig = inspect.signature(func)
-
-    # Map available values
-    values = {
-        "client": client,
-        "name": name,
-        "collection": name,  # some variants use 'collection'
-        "collection_name": name,
-        "dim": dim,
-        "vector_size": dim,  # alt name in some helpers
-        "distance": distance,
-        "recreate_bad": recreate_bad,
-        "recreate": recreate_bad,  # alt flag
-    }
-
-    # Build call respecting declared parameter order/kind
-    args = []
-    kwargs = {}
-    for pname, p in sig.parameters.items():
-        if pname in values:
-            val = values[pname]
-        else:
-            # Unsupported/unrecognized param; skip by leaving default
-            continue
-
-        if (
-            p.kind
-            in (
-                inspect.Parameter.POSITIONAL_ONLY,
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            )
-            and pname != "client"
-        ):
-            # Prefer positional for non-client params to satisfy older 2-arg helpers
-            args.append(val)
-        elif p.kind is inspect.Parameter.POSITIONAL_ONLY and pname == "client":
-            args.insert(0, val)  # client first if required positionally
-        else:
-            kwargs[pname] = val
-
-    try:
-        func(*args, **kwargs)
-    except TypeError as e:
-        # Last resort: try the minimal shapes in descending richness
-        tried = False
-        for shape in (
-            ("client", "name", "dim", "distance", "recreate_bad"),
-            ("client", "name", "dim", "distance"),
-            ("client", "name"),
-            ("name", "dim", "distance", "recreate_bad"),
-            ("name", "dim", "distance"),
-            ("name",),
-        ):
-            try:
-                call_args = [values[k] for k in shape if k in values]
-                func(*call_args)
-                tried = True
-                break
-            except Exception:
-                continue
-        if not tried:
-            raise RuntimeError(
-                f"ensure_collection_minimal incompatible signature: {e}"
-            ) from e
+## ensure_collection_compat removed; using ensure_collection directly
 
 
 # ─── orchestration ───────────────────────────────────────────────────────────
@@ -433,9 +305,9 @@ def ingest_dir(
     client = get_qdrant_client()
     qdrant_preflight(client)
 
-    # Ensure canonical collection (via adaptive shim)
-    ensure_collection_compat(
-        client,
+    # Ensure canonical collection
+    ensure_collection(
+        client=client,
         name=CANONICAL_COLLECTION,
         dim=CANONICAL_DIM,
         distance=CANONICAL_DISTANCE,
@@ -444,9 +316,9 @@ def ingest_dir(
 
     # Optional image collection
     if do_images:
-        ensure_collection_compat(
-            client,
-            name=getattr(settings, "QDRANT_COLLECTION_IMAGES", "jsonify2ai_images_768"),
+        ensure_collection(
+            client=client,
+            name=f"{CANONICAL_COLLECTION}_images",
             dim=CANONICAL_DIM,
             distance=CANONICAL_DISTANCE,
             recreate_bad=recreate_bad,
@@ -465,8 +337,8 @@ def ingest_dir(
     batch_size = int(getattr(settings, "QDRANT_UPSERT_BATCH_SIZE", 128))
     per_kind = {"text": 0, "pdf": 0, "image": 0, "audio": 0}
 
-    # Use candidates if provided, otherwise scan drop_dir
-    file_iter = candidates or discover_candidates(drop_dir, set(), None, limit_files)
+    # Use candidates if provided, otherwise scan drop_dir (ingest path ignores limit)
+    file_iter = candidates or discover_candidates(drop_dir, set(), None, 0)
 
     for fp, rel_path, kind in file_iter:
         # Canonicalize rel path to enforce single-source path (prevents duplicates)
@@ -489,10 +361,11 @@ def ingest_dir(
             try:
                 cap = caption_image(fp)
                 vec = embed_texts([cap])[0]
-                try:  # enforce replace semantics
-                    delete_by_document_id(document_id, client=client)
-                except Exception:
-                    pass
+                if replace_existing:
+                    try:  # enforce replace semantics only when requested
+                        delete_by_document_id(document_id, client=client)
+                    except Exception:
+                        pass
                 item = (
                     str(chunk_id_for(document_uuid, 0)),
                     vec,
@@ -535,11 +408,12 @@ def ingest_dir(
             skipped.append(f"{fp.name}: empty content")
             continue
 
-        # Always delete existing points (true replacement regardless of flag)
-        try:
-            delete_by_document_id(document_id, client=client)
-        except Exception as e:
-            skipped.append(f"{fp.name}: delete failed ({e})")
+        # Delete existing points only when --replace-existing
+        if replace_existing:
+            try:
+                delete_by_document_id(document_id, client=client)
+            except Exception as e:
+                skipped.append(f"{fp.name}: delete failed ({e})")
 
         # chunk & embed
         chunks = chunk_text(
@@ -733,7 +607,12 @@ def main() -> None:
     p.add_argument("--list-files", action="store_true")
     p.add_argument("--list", action="store_true")
     p.add_argument("--list-collection", action="store_true")
-    p.add_argument("--limit", type=int, default=20)
+    p.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Limit rows for --list / --list-collection (not used for ingestion)",
+    )
     p.add_argument(
         "--allow-audio-with-dev-mode",
         action="store_true",
@@ -767,18 +646,21 @@ def main() -> None:
     drop = Path(args.dir)
     explicit_path = Path(path) if path else None
 
-    # Single source of truth for file discovery
+    # Single source of truth for file discovery (apply limit only for read-only listing modes)
+    discovery_limit = (
+        args.limit
+        if (args.list or args.list_files or args.list_collection) and args.limit > 0
+        else 0
+    )
     candidates = discover_candidates(
         root=drop,
         kinds_set=kinds_set,
         explicit_path=explicit_path,
-        limit=args.limit if args.limit > 0 else 0,
+        limit=discovery_limit,
     )
 
     if args.debug:
-        qdrant_url = os.getenv(
-            "QDRANT_URL", getattr(settings, "QDRANT_URL", "http://localhost:6333")
-        )
+        qdrant_url = getattr(settings, "QDRANT_URL", "http://localhost:6333")
         print(
             f"[debug] QDRANT_URL={qdrant_url} QDRANT_COLLECTION={CANONICAL_COLLECTION} EMBEDDINGS_MODEL={CANONICAL_MODEL} EMBEDDING_DIM={CANONICAL_DIM}"
         )

@@ -28,7 +28,6 @@ from __future__ import annotations
 # ---------------- stdlib imports ----------------
 import argparse
 import json
-import os
 import sys
 import time
 import pathlib
@@ -59,7 +58,7 @@ from worker.app.utils.docids import (  # single-source ID + path helpers
     chunk_id_for,
 )
 from worker.app.services.chunker import chunk_text  # type: ignore
-from worker.app.services.embed_ollama import embed_texts  # type: ignore
+from worker.app.services.embed_ollama import embed_texts as embed_texts_real  # type: ignore
 from worker.app.services.qdrant_client import (  # type: ignore
     get_qdrant_client,
     upsert_points,
@@ -81,70 +80,72 @@ try:  # pragma: no cover
 except Exception:  # pragma: no cover
     reindex_mod = None  # type: ignore
 
-# Optional centralized discovery helper
-try:  # pragma: no cover
-    from worker.app.services.discovery import discover_candidates as _discover  # type: ignore
-except Exception:  # pragma: no cover
-    _discover = None  # type: ignore
+from worker.app.services.discovery import discover_candidates  # centralized
 
 
-# ---------------- constants / env derived ----------------
+# ---------------- constants (settings only) ----------------
 AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".flac", ".ogg"}
-CANONICAL_COLLECTION = os.getenv(
-    "QDRANT_COLLECTION", getattr(settings, "QDRANT_COLLECTION", "jsonify2ai_chunks_768")
-)
-EMBED_DIM = int(os.getenv("EMBEDDING_DIM", getattr(settings, "EMBEDDING_DIM", 768)))
-EMBED_DEV_MODE = os.getenv(
-    "EMBED_DEV_MODE", str(getattr(settings, "EMBED_DEV_MODE", 0))
-) in {"1", "true", "True"}
-AUDIO_DEV_MODE = os.getenv(
-    "AUDIO_DEV_MODE", str(getattr(settings, "AUDIO_DEV_MODE", 0))
-).strip().lower() in {"1", "true", "yes", "on"}
-QDRANT_URL = os.getenv(
-    "QDRANT_URL", getattr(settings, "QDRANT_URL", "http://localhost:6333")
-)
+CANONICAL_COLLECTION = settings.QDRANT_COLLECTION
+EMBED_DIM = settings.EMBEDDING_DIM
+EMBED_DEV_MODE = str(getattr(settings, "EMBED_DEV_MODE", 0)) in {
+    "1",
+    "true",
+    "True",
+    "yes",
+}
+AUDIO_DEV_MODE = str(getattr(settings, "AUDIO_DEV_MODE", 0)).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+QDRANT_URL = getattr(settings, "QDRANT_URL", "http://localhost:6333")
+
+
+# ---------------- embeddings adapter ----------------
+def _deterministic_vec(s: str, dim: int) -> List[float]:
+    import hashlib as _hashlib
+
+    h = _hashlib.sha256(s.encode("utf-8")).digest()
+    return [((h[i % len(h)]) / 255.0) * 2 - 1 for i in range(dim)]
+
+
+def embed_texts(texts: List[str]) -> List[List[float]]:
+    """Standard embedding adapter using settings.* only.
+
+    Provides deterministic vectors in dev mode; otherwise delegates to real embed implementation
+    with explicit model, base_url and dimension enforcement.
+    """
+    if EMBED_DEV_MODE:
+        return [_deterministic_vec(t, EMBED_DIM) for t in texts]
+    vecs = embed_texts_real(
+        texts,
+        model=getattr(settings, "EMBEDDINGS_MODEL", None),
+        base_url=getattr(settings, "OLLAMA_URL", None),
+        dim=EMBED_DIM,
+    )
+    if not vecs or len(vecs[0]) != EMBED_DIM:
+        raise RuntimeError(
+            f"embedding dimension mismatch: expected {EMBED_DIM}, got {len(vecs[0]) if vecs else 'none'}"
+        )
+    return vecs
 
 
 # ---------------- discovery fallback ----------------
-def _fallback_discover_audio(root: pathlib.Path, limit: int) -> List[pathlib.Path]:
-    out: List[pathlib.Path] = []
-    for fp in root.rglob("*"):
-        if not fp.is_file():
-            continue
-        if fp.suffix.lower() in AUDIO_EXTS:
-            out.append(fp)
-            if limit and len(out) >= limit:
-                break
-    out.sort()
-    return out
-
-
 def discover_audio_files(
     drop_dir: pathlib.Path, limit: int
 ) -> List[Tuple[pathlib.Path, str]]:
-    """Return list of (absolute_path, canonical_relpath).
-
-    Uses centralized discovery if available; otherwise a local glob.
-    Only audio kind is returned.
-    """
-    paths: List[pathlib.Path]
-    if _discover is not None:
-        try:
-            triples = _discover(drop_dir, {"audio"}, None, limit if limit > 0 else 0)
-            # expected shape: (path, rel, kind)
-            paths = [p for p, _rel, k in triples if k == "audio"]
-        except Exception:
-            paths = _fallback_discover_audio(drop_dir, limit)
-    else:
-        paths = _fallback_discover_audio(drop_dir, limit)
-
+    """Centralized audio discovery via shared discover_candidates."""
+    triples = discover_candidates(drop_dir, {"audio"}, None, limit if limit > 0 else 0)
     results: List[Tuple[pathlib.Path, str]] = []
-    for p in paths:
+    for p, rel, k in triples:
+        if k != "audio":
+            continue
         try:
-            rel = canonicalize_relpath(p, drop_dir)
+            rel_canon = canonicalize_relpath(p, drop_dir)
         except Exception:
-            continue  # safety: skip anything outside root
-        results.append((p, rel))
+            continue
+        results.append((p, rel_canon))
     return results
 
 
@@ -384,17 +385,53 @@ def main() -> None:  # noqa: C901 - complexity acceptable for thin orchestration
         default=False,
         help="Override safety when AUDIO_DEV_MODE=1 to run real pipeline",
     )
+    ap.add_argument(
+        "--only",
+        type=str,
+        default=None,
+        help="Re-ingest only a single POSIX relative path within --dir (audio file)",
+    )
     args = ap.parse_args()
 
+    # Resolve drop_dir relative to repo root (mirrors ingest pattern) for --only handling
     drop_dir = pathlib.Path(args.dir)
+    if not drop_dir.is_absolute():
+        drop_dir = (REPO_ROOT / args.dir).resolve()
     if not drop_dir.exists():
         print(json.dumps({"ok": False, "error": f"directory not found: {drop_dir}"}))
         sys.exit(1)
 
-    # Discover
-    audio_candidates = discover_audio_files(
-        drop_dir, args.limit if args.limit > 0 else 0
-    )
+    # Discover (supports --only override)
+    audio_candidates: List[Tuple[pathlib.Path, str]]
+    if args.only:
+        target_path = (drop_dir / args.only).resolve()
+        if not target_path.exists() or not target_path.is_file():
+            print(
+                f"[error] --only path not found or not a file: {args.only}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        if target_path.suffix.lower() not in AUDIO_EXTS:
+            print(
+                f"[error] --only path is not an audio file (ext must be one of {sorted(AUDIO_EXTS)}): {args.only}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        try:
+            rel = canonicalize_relpath(target_path, drop_dir)
+        except Exception as e:
+            print(
+                f"[error] canonicalize failed for --only path: {args.only} ({e})",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        audio_candidates = [(target_path, rel)]
+        effective_limit = 0  # ignore --limit when --only is specified
+    else:
+        audio_candidates = discover_audio_files(
+            drop_dir, args.limit if args.limit > 0 else 0
+        )
+        effective_limit = args.limit
 
     if args.debug:
         print(
@@ -441,11 +478,23 @@ def main() -> None:  # noqa: C901 - complexity acceptable for thin orchestration
         return
 
     # Execute ingestion
-    ingest_result = _process_audio_files(
-        audio_candidates if args.limit == 0 else audio_candidates[: args.limit],
-        debug=args.debug,
-        limit=args.limit,
-    )
+    if args.only:
+        # Always process exactly that one file; ignore slicing & limit enforcement
+        ingest_result = _process_audio_files(
+            audio_candidates,
+            debug=args.debug,
+            limit=0,
+        )
+    else:
+        ingest_result = _process_audio_files(
+            (
+                audio_candidates
+                if effective_limit == 0
+                else audio_candidates[:effective_limit]
+            ),
+            debug=args.debug,
+            limit=effective_limit,
+        )
 
     # Optional reindex (after ingestion to reflect fresh data)
     summary = {
