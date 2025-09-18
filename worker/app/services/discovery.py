@@ -32,7 +32,10 @@ from typing import List, Tuple, Optional, Set
 
 from worker.app.utils.docids import canonicalize_relpath  # type: ignore
 
-# Ignored extensions (same semantics as prior ingest script)
+# Image extensions that we DO allow (ingestion may be gated by flags elsewhere)
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
+
+# Ignored extensions (exclude image types; keep archives/binaries/logs etc.)
 IGNORED_EXTS = {
     ".jsonl",
     ".zip",
@@ -45,14 +48,10 @@ IGNORED_EXTS = {
     ".so",
     ".dylib",
     ".bin",
-    ".webp",
-    ".png",
-    ".jpg",
-    ".jpeg",
 }
 
 _TEXT_EXTS = {".txt", ".md", ".rst", ".json", ".csv"}
-_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+_IMAGE_EXTS = IMAGE_EXTS
 _AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".flac", ".ogg"}
 
 

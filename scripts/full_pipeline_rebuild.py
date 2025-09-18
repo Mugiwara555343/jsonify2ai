@@ -49,6 +49,10 @@ except Exception:  # pragma: no cover
     pass
 
 # ---------------- third-party (none new) ----------------
+try:  # pragma: no cover
+    from qdrant_client.models import Distance as _QD_Distance  # type: ignore
+except Exception:  # pragma: no cover
+    _QD_Distance = None  # type: ignore
 
 # ---------------- local imports ----------------
 from worker.app.config import settings  # type: ignore
@@ -63,6 +67,7 @@ from worker.app.services.qdrant_client import (  # type: ignore
     get_qdrant_client,
     upsert_points,
     delete_by_document_id,
+    ensure_collection,
 )
 
 # Audio parsing helpers (prefer richer auto extractor if present)
@@ -93,13 +98,12 @@ EMBED_DEV_MODE = str(getattr(settings, "EMBED_DEV_MODE", 0)) in {
     "True",
     "yes",
 }
-AUDIO_DEV_MODE = str(getattr(settings, "AUDIO_DEV_MODE", 0)).strip().lower() in {
-    "1",
-    "true",
-    "yes",
-    "on",
-}
+AUDIO_DEV_MODE = bool(getattr(settings, "AUDIO_DEV_MODE", False))
 QDRANT_URL = getattr(settings, "QDRANT_URL", "http://localhost:6333")
+if _QD_Distance is not None:
+    CANONICAL_DISTANCE = _QD_Distance.COSINE  # type: ignore[attr-defined]
+else:
+    CANONICAL_DISTANCE = "Cosine"
 
 
 # ---------------- embeddings adapter ----------------
@@ -161,16 +165,17 @@ def _reindex(indexing_threshold: int, debug: bool) -> Dict[str, Any]:
     client = get_qdrant_client()
 
     if reindex_mod is None:
-        # minimal: delete & recreate empty collection
+        # minimal: ensure (recreate when bad) empty collection
         try:
-            client.delete_collection(collection_name=CANONICAL_COLLECTION)
+            ensure_collection(
+                client=client,
+                name=CANONICAL_COLLECTION,
+                dim=EMBED_DIM,
+                distance=CANONICAL_DISTANCE,
+                recreate_bad=True,
+            )
         except Exception as e:  # pragma: no cover
-            if debug:
-                print(f"[debug] delete_collection (ignored): {e}")
-        client.recreate_collection(
-            collection_name=CANONICAL_COLLECTION,
-            vectors_config={"size": EMBED_DIM, "distance": "Cosine"},
-        )
+            return {"ok": False, "error": f"ensure failed: {e}"}
         return {"ok": True, "reindexed": True, "exported": 0, "reinserted": 0}
 
     # export
@@ -181,34 +186,18 @@ def _reindex(indexing_threshold: int, debug: bool) -> Dict[str, Any]:
     if debug:
         print(f"[debug] reindex export count={len(points)}")
 
-    # drop
+    # ensure via wrapper (drop/recreate if mismatched)
     try:
-        client.delete_collection(collection_name=CANONICAL_COLLECTION)
-    except Exception as e:  # pragma: no cover
-        if debug:
-            print(f"[debug] delete_collection error (ignored): {e}")
-
-    # recreate via private helper if present, else manual
-    recreated = False
-    if hasattr(reindex_mod, "_ensure_collection"):
-        try:
-            reindex_mod._ensure_collection(  # type: ignore[attr-defined]
-                client,
-                CANONICAL_COLLECTION,
-                EMBED_DIM,
-                "Cosine",
-                recreate_bad=True,
-                indexing_threshold=indexing_threshold,
-            )
-            recreated = True
-        except Exception as e:  # pragma: no cover
-            return {"ok": False, "error": f"recreate failed: {e}"}
-    else:
-        client.recreate_collection(
-            collection_name=CANONICAL_COLLECTION,
-            vectors_config={"size": EMBED_DIM, "distance": "Cosine"},
+        ensure_collection(
+            client=client,
+            name=CANONICAL_COLLECTION,
+            dim=EMBED_DIM,
+            distance=CANONICAL_DISTANCE,
+            recreate_bad=True,
         )
         recreated = True
+    except Exception as e:  # pragma: no cover
+        return {"ok": False, "error": f"ensure failed: {e}"}
 
     # reinsert
     inserted = 0
@@ -247,6 +236,17 @@ def _process_audio_files(
     items: List[Tuple[pathlib.Path, str]], *, debug: bool, limit: int
 ) -> Dict[str, Any]:
     client = get_qdrant_client()
+    # Ensure target collection exists before any upsert
+    try:
+        ensure_collection(
+            client=client,
+            name=CANONICAL_COLLECTION,
+            dim=EMBED_DIM,
+            distance=CANONICAL_DISTANCE,
+            recreate_bad=False,
+        )
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError(f"qdrant ensure failed: {e}")
     files_processed = 0
     files_skipped = 0
     chunks_upserted = 0

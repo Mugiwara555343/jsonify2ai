@@ -7,8 +7,8 @@ Also provides read-only utilities: --stats, --list-files, --list, --list-collect
 
 Notes (to prevent regressions):
 - Imports: stdlib → repo-root bootstrap → local imports with # noqa: E402.
-- Idempotence: deterministic document_id (from file bytes); --replace-existing re-writes.
-- Dev mode: EMBED_DEV_MODE=1 returns deterministic fake vectors (keeps pipeline alive).
+- Idempotence: deterministic document_id (from canonical POSIX relpath); --replace-existing re-writes.
+- Dev mode: settings.EMBED_DEV_MODE returns deterministic fake vectors (keeps pipeline alive).
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ import os
 import sys
 import textwrap
 import time
-import uuid
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
@@ -60,12 +59,19 @@ try:
 except Exception:  # pragma: no cover
     qmodels = None  # type: ignore
 
+# Optional Distance enum (prefer enum if available)
+try:  # pragma: no cover
+    from qdrant_client.models import Distance as _QD_Distance  # type: ignore
+except Exception:  # pragma: no cover
+    _QD_Distance = None  # type: ignore
+
 # ─── local imports (after bootstrap; silenced for E402) ──────────────────────
 from worker.app.config import settings  # noqa: E402
 from worker.app.services.chunker import chunk_text  # noqa: E402
 import worker.app.services.embed_ollama as _embed_mod  # noqa: E402
 from worker.app.services.discovery import discover_candidates  # noqa: E402
-from worker.app.services.image_caption import caption_image  # noqa: E402
+
+# Lazy image caption import performed in the images branch to avoid hard dependency.
 from worker.app.utils.docids import (  # noqa: E402
     canonicalize_relpath,
     document_id_for_relpath,
@@ -100,9 +106,22 @@ except ImportError:
 
 # ─── config/constants ─────────────────────────────────────────────────────────
 CANONICAL_COLLECTION = settings.QDRANT_COLLECTION
+CANONICAL_IMAGES_COLLECTION = (
+    getattr(settings, "QDRANT_COLLECTION_IMAGES", None)
+    or f"{CANONICAL_COLLECTION}_images"
+)
 CANONICAL_DIM = settings.EMBEDDING_DIM
 CANONICAL_MODEL = settings.EMBEDDINGS_MODEL
-CANONICAL_DISTANCE = "Cosine"
+if _QD_Distance is not None:
+    CANONICAL_DISTANCE = _QD_Distance.COSINE  # type: ignore[attr-defined]
+else:
+    CANONICAL_DISTANCE = "Cosine"
+EMBED_DEV_MODE = str(getattr(settings, "EMBED_DEV_MODE", 0)).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".flac", ".ogg"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -244,10 +263,7 @@ def _deterministic_vec(s: str, dim: int) -> List[float]:
 def embed_texts(texts: List[str]) -> List[List[float]]:
     """Standard embedding adapter (settings-only; deterministic dev mode)."""
     dim = CANONICAL_DIM
-    if (
-        str(getattr(settings, "EMBED_DEV_MODE", 0)) == "1"
-        or os.getenv("EMBED_DEV_MODE") == "1"
-    ):
+    if EMBED_DEV_MODE:
         return [_deterministic_vec(t, dim) for t in texts]
     vecs = embed_texts_real(
         texts,
@@ -269,10 +285,7 @@ def _iter_files(root: Path) -> Iterable[Path]:
             yield p
 
 
-def _document_id_for_file(fp: Path) -> str:
-    data = fp.read_bytes()
-    doc_hash = hashlib.sha256(data).hexdigest()
-    return str(uuid.uuid5(settings.NAMESPACE_UUID, doc_hash))
+# removed unused helper
 
 
 # ─── qdrant ensure (signature-adaptive) ──────────────────────────────────────
@@ -318,7 +331,7 @@ def ingest_dir(
     if do_images:
         ensure_collection(
             client=client,
-            name=f"{CANONICAL_COLLECTION}_images",
+            name=CANONICAL_IMAGES_COLLECTION,
             dim=CANONICAL_DIM,
             distance=CANONICAL_DISTANCE,
             recreate_bad=recreate_bad,
@@ -359,7 +372,19 @@ def ingest_dir(
         # images path (optional)
         if do_images and kind == "image":
             try:
-                cap = caption_image(fp)
+                try:
+                    from worker.app.services.image_caption import caption_image  # type: ignore
+                except Exception:
+                    caption_image = None  # type: ignore
+                    try:
+                        import logging as _logging
+
+                        _logging.getLogger(__name__).warning(
+                            "image_caption module not available; proceeding without captions."
+                        )
+                    except Exception:
+                        pass
+                cap = caption_image(fp) if caption_image else ""
                 vec = embed_texts([cap])[0]
                 if replace_existing:
                     try:  # enforce replace semantics only when requested
@@ -374,7 +399,7 @@ def ingest_dir(
                         "path": rel_path,
                         "kind": "image",
                         "idx": 0,
-                        "text": cap,
+                        **({"text": cap} if cap else {}),
                         "meta": {
                             "source_ext": ext,
                             "caption_model": "blip",
@@ -386,9 +411,7 @@ def ingest_dir(
                 )
                 upsert_points(
                     [item],
-                    collection_name=getattr(
-                        settings, "QDRANT_COLLECTION_IMAGES", "jsonify2ai_images_768"
-                    ),
+                    collection_name=CANONICAL_IMAGES_COLLECTION,
                     client=client,
                     batch_size=1,
                     ensure=False,
@@ -437,10 +460,7 @@ def ingest_dir(
                     f"[error] vector dim mismatch file={rel_path} chunk_idx={idx_bad} expected={CANONICAL_DIM} got={got_len}",
                     file=sys.stderr,
                 )
-            if not (
-                os.getenv("EMBED_DEV_MODE") == "1"
-                or str(getattr(settings, "EMBED_DEV_MODE", 0)) == "1"
-            ):
+            if not EMBED_DEV_MODE:
                 raise RuntimeError(
                     f"Aborting ingest due to {len(bad_dims)} malformed vectors (see errors above)."
                 )
@@ -520,7 +540,7 @@ def do_stats(
     client = get_qdrant_client()
     total = q_count(collection_name=CANONICAL_COLLECTION, client=client)
     per_kind: Dict[str, int] = {}
-    for k in ("text", "pdf", "audio", "image", "md"):
+    for k in ("text", "pdf", "audio", "image"):
         per_kind[k] = q_count(
             collection_name=CANONICAL_COLLECTION,
             client=client,
@@ -583,7 +603,7 @@ def do_list(
 # ─── CLI ─────────────────────────────────────────────────────────────────────
 def main() -> None:
     p = argparse.ArgumentParser(
-        description="Ingest dropzone → Qdrant (+ JSONL export) with stats/list utilities"
+        description="Ingest dropzone -> Qdrant (+ JSONL export) with stats/list utilities"
     )
     # ingest
     p.add_argument("--dir", default="data/dropzone")
@@ -675,12 +695,7 @@ def main() -> None:
     # --- Narrow AUDIO_DEV_MODE guard ---
     # Only enforce when the operation will perform real ingestion (parse/embed/upsert)
     # Allow purely read-only modes: --stats, --list, --list-files, --list-collection, dry-run listing paths, etc.
-    AUDIO_DEV_MODE = os.getenv("AUDIO_DEV_MODE", "0").lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    AUDIO_DEV_MODE = bool(getattr(settings, "AUDIO_DEV_MODE", False))
     read_only_mode = (
         args.stats
         or args.list

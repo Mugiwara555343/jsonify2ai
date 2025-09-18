@@ -16,3 +16,12 @@ repos:
       - id: trailing-whitespace
       - id: check-yaml
       - id: check-added-large-files
+
+  - repo: local
+    hooks:
+      - id: smoke-cli
+        name: smoke-cli (help + discovery)
+        entry: python scripts/smoke_precommit.py
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
