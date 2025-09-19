@@ -1,4 +1,4 @@
-# STATE.md — 2025-09-07T19:03:40-04:00
+# STATE.md — 2025-09-18T21:31:36-04:00
 
 ## Scope today
 - Audio: dev-mode (skip or stub)
@@ -15,8 +15,8 @@
 - OLLAMA_URL: `http://localhost:11434`
 
 ## Qdrant
-- Total points: **57**
-- Per kind: text:7, pdf:6, docx:0, audio:1, image:0, email:0
+- Total points: **116**
+- Per kind: text:57, pdf:12, docx:0, audio:4, image:0, email:0
 
 ## One-step smoke (host shell)
 ```powershell

@@ -664,7 +664,16 @@ def main() -> None:
                 kinds_set.add(k.strip().lower())
 
     drop = Path(args.dir)
-    explicit_path = Path(path) if path else None
+    # Determine read-only mode early to decide whether to narrow discovery by --path
+    read_only_mode = (
+        args.stats
+        or args.list
+        or args.list_files
+        or args.list_collection
+        or args.dry_run
+    )
+    # Only pass explicit_path for ingestion flows; keep full listing for read-only
+    explicit_path = Path(path) if (path and not read_only_mode) else None
 
     # Single source of truth for file discovery (apply limit only for read-only listing modes)
     discovery_limit = (
@@ -678,6 +687,10 @@ def main() -> None:
         explicit_path=explicit_path,
         limit=discovery_limit,
     )
+
+    # Safety net: when --path is set for ingestion, ensure only that POSIX relpath remains
+    if path and not read_only_mode:
+        candidates = [c for c in candidates if c[1] == path]
 
     if args.debug:
         qdrant_url = getattr(settings, "QDRANT_URL", "http://localhost:6333")
@@ -696,13 +709,7 @@ def main() -> None:
     # Only enforce when the operation will perform real ingestion (parse/embed/upsert)
     # Allow purely read-only modes: --stats, --list, --list-files, --list-collection, dry-run listing paths, etc.
     AUDIO_DEV_MODE = bool(getattr(settings, "AUDIO_DEV_MODE", False))
-    read_only_mode = (
-        args.stats
-        or args.list
-        or args.list_files
-        or args.list_collection
-        or args.dry_run  # dry-run should not trigger real STT
-    )
+    # read_only_mode already computed above
     requested_audio = any(k == "audio" for _f, _r, k in candidates)
     will_ingest = not read_only_mode  # ingest path executes later in script
     if (

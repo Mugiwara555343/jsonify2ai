@@ -84,24 +84,32 @@ def discover_candidates(
     except Exception:
         return out
 
-    # Explicit path short circuit
+    # Explicit path short circuit (treat explicit_path as POSIX-relative under root)
     if explicit_path:
         try:
-            fp = Path(explicit_path).resolve()
-            if fp.is_file() and str(fp).startswith(str(root)):
-                if fp.suffix.lower() in IGNORED_EXTS:
-                    return []
-                kind = _infer_kind(fp)
-                if kinds_set and kinds_set and kind not in kinds_set:
-                    return []
-                try:
-                    rel = canonicalize_relpath(fp, root)
-                except Exception:
-                    rel = fp.relative_to(root).as_posix()
-                out.append((fp, rel, kind))
-                return out
+            # Normalize to relative path under root
+            rel_str = str(explicit_path).replace("\\", "/")
+            # Construct absolute path relative to root and resolve
+            fp = (root / rel_str).resolve()
+            # Ensure path does not escape root
+            try:
+                _ = fp.relative_to(root)
+            except Exception:
+                return []
+            if not fp.is_file():
+                return []
+            if fp.suffix.lower() in IGNORED_EXTS:
+                return []
+            kind = _infer_kind(fp)
+            if kinds_set and kind not in kinds_set:
+                return []
+            try:
+                rel = canonicalize_relpath(fp, root)
+            except Exception:
+                rel = fp.relative_to(root).as_posix()
+            return [(fp, rel, kind)]
         except Exception:
-            return out
+            return []
 
     # Recursive scan
     for fp in root.rglob("*"):
