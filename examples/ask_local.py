@@ -42,9 +42,13 @@ from worker.app.config import settings  # noqa: E402
 from worker.app.services.embed_ollama import embed_texts  # noqa: E402
 from worker.app.services.qdrant_client import (  # noqa: E402
     get_qdrant_client,
-    search as q_search,
     build_filter,
 )
+
+try:  # qdrant models for filters and query api
+    from qdrant_client import models as qm  # type: ignore
+except Exception:  # pragma: no cover
+    qm = None  # type: ignore
 
 """
 ask_local.py — query -> retrieve -> (optional) answer
@@ -155,6 +159,103 @@ def _ask_llm(prompt: str, model: str, max_tokens: int, temperature: float) -> st
         return f"[LLM unavailable @ {url}] {e}\n---\nPrompt preview:\n{prompt[:600]}"
 
 
+def _query_qdrant(
+    client,
+    collection: str,
+    vec: List[float],
+    top_k: int,
+    qfilter,
+    *,
+    score_threshold: float | None = None,
+):
+    """Query Qdrant: try modern query_points first, then fall back to legacy search.
+
+    - Pass a raw vector to query_points with top-level kwargs.
+    - Handle param name differences between 'filter' and 'query_filter'.
+    - If the client rejects extra args (e.g., with_vectors), retry without them.
+    - Finally, fall back to client.search(...).
+    """
+    # Preferred modern path
+    try:
+        kwargs = {
+            "collection_name": collection,
+            "query": vec,
+            "limit": top_k,
+            "with_payload": True,
+            "with_vectors": False,
+        }
+        if qfilter is not None:
+            kwargs["filter"] = qfilter
+        if score_threshold is not None:
+            kwargs["score_threshold"] = score_threshold
+        res = client.query_points(**kwargs)
+        return getattr(res, "points", res)
+    except TypeError:
+        # Retry with query_filter instead of filter
+        try:
+            kwargs = {
+                "collection_name": collection,
+                "query": vec,
+                "limit": top_k,
+                "with_payload": True,
+                "with_vectors": False,
+            }
+            if qfilter is not None:
+                kwargs["query_filter"] = qfilter
+            if score_threshold is not None:
+                kwargs["score_threshold"] = score_threshold
+            res = client.query_points(**kwargs)
+            return getattr(res, "points", res)
+        except TypeError:
+            # Some versions forbid with_vectors entirely for query_points; try without it
+            try:
+                kwargs = {
+                    "collection_name": collection,
+                    "query": vec,
+                    "limit": top_k,
+                    "with_payload": True,
+                }
+                if qfilter is not None:
+                    kwargs["filter"] = qfilter
+                if score_threshold is not None:
+                    kwargs["score_threshold"] = score_threshold
+                res = client.query_points(**kwargs)
+                return getattr(res, "points", res)
+            except Exception:
+                pass
+        except Exception:
+            pass
+    except Exception:
+        # Fall through to legacy search
+        pass
+
+    # Legacy fallback
+    res = client.search(
+        collection_name=collection,
+        query_vector=vec,
+        limit=top_k,
+        with_payload=True,
+        with_vectors=False,
+        query_filter=qfilter,
+        score_threshold=score_threshold,
+    )
+    return res
+
+
+def _parse_kinds(args) -> set[str]:
+    out: set[str] = set()
+    if getattr(args, "kind", None):
+        out.add(str(args.kind).strip())
+    if getattr(args, "kinds", None):
+        toks = [s.strip() for s in str(args.kinds).split(",") if s.strip()]
+        out |= set(toks)
+    valid = {"text", "pdf", "image", "audio"}
+    bad = [k for k in out if k not in valid]
+    if bad and getattr(args, "debug", False):
+        print(f"[warn] ignoring unknown kinds: {bad}")
+    return {k for k in out if k in valid}
+
+
 def main():
     ap = argparse.ArgumentParser(description="Local Ask over Qdrant (optional Ollama)")
     ap.add_argument(
@@ -178,6 +279,12 @@ def main():
         "--document-id", type=str, default=None, help="Filter by document_id"
     )
     ap.add_argument("--kind", type=str, default=None, help="Filter by payload.kind")
+    ap.add_argument(
+        "--kinds",
+        type=str,
+        default=None,
+        help="Comma-separated kinds to filter by (e.g., text,pdf,image,audio)",
+    )
     ap.add_argument("--path", type=str, default=None, help="Filter by payload.path")
     # LLM options
     ap.add_argument("--llm", action="store_true", help="Ask local LLM via Ollama")
@@ -291,6 +398,12 @@ def main():
             )
         except Exception as e:
             print(f"[debug] collection_info unavailable: {e}")
+
+    # Parse kinds into a normalized set (optional)
+    kinds_filter: set[str] | None = None
+    parsed_kinds = _parse_kinds(args)
+    if parsed_kinds:
+        kinds_filter = parsed_kinds
 
     # Embed once
     qv = _embed_query(query)
@@ -591,22 +704,60 @@ def main():
             return
 
     # Standard filter (semantic path)
-    qfilter = build_filter(document_id=args.document_id, kind=args.kind, path=args.path)
+    # Build base conditions for document_id/path locally and add kinds filter using MatchAny for multi-kinds
+    def _build_where():  # -> qm.Filter | None
+        # If qdrant models aren't available, fall back to local helper for single-kind only
+        if qm is None:
+            fk = None
+            if kinds_filter and len(kinds_filter) == 1:
+                fk = next(iter(kinds_filter))
+            return build_filter(document_id=args.document_id, kind=fk, path=args.path)  # type: ignore
+
+        must_conds: list = []
+        if args.document_id:
+            must_conds.append(
+                qm.FieldCondition(
+                    key="document_id", match=qm.MatchValue(value=args.document_id)
+                )
+            )
+        if args.path:
+            must_conds.append(
+                qm.FieldCondition(key="path", match=qm.MatchValue(value=args.path))
+            )
+
+        # Apply kinds filter logic only when explicitly provided
+        if kinds_filter:
+            if len(kinds_filter) == 1:
+                v = next(iter(kinds_filter))
+                # Prefer local build_filter for single-kind to keep parity with worker helpers
+                return build_filter(
+                    document_id=args.document_id, kind=v, path=args.path
+                )  # type: ignore
+            else:
+                must_conds.append(
+                    qm.FieldCondition(
+                        key="kind", match=qm.MatchAny(any=list(kinds_filter))
+                    )
+                )
+
+        if not must_conds:
+            return None
+        return qm.Filter(must=must_conds)
+
+    where = _build_where()
     if args.debug:
         try:
-            if hasattr(qfilter, "model_dump"):
-                qf_print = qfilter.model_dump()  # type: ignore[attr-defined]
-            elif hasattr(qfilter, "dict"):
-                qf_print = qfilter.dict()  # type: ignore
+            if where is None:
+                qf_print = None
+            elif hasattr(where, "model_dump"):
+                qf_print = where.model_dump()  # type: ignore[attr-defined]
+            elif hasattr(where, "dict"):
+                qf_print = where.dict()  # type: ignore
             else:
-                qf_print = (
-                    qfilter.to_dict()  # type: ignore[attr-defined]
-                    if hasattr(qfilter, "to_dict")
-                    else qfilter
-                )
+                qf_print = where
         except Exception:
-            qf_print = qfilter
-        print(f"[debug] qfilter: {qf_print if qf_print else {}}")
+            qf_print = where
+        print(f"[debug] qfilter: {qf_print if qf_print is not None else None}")
 
     # Search logic with optional manual score threshold and fallback safety valve
     points = []
@@ -619,50 +770,40 @@ def main():
                 f"[debug] manual min-score path: score_threshold={args.min_score} k={args.k}"
             )
         try:
-            points = client.search(
-                collection_name=collection,
-                query_vector=qv,
-                limit=args.k,
-                with_vectors=False,
-                with_payload=True,
-                query_filter=qfilter,
+            points = _query_qdrant(
+                client,
+                collection,
+                qv,
+                args.k,
+                where,
                 score_threshold=args.min_score,
             )
         except Exception as e:
             print(f"[error] search (manual --min-score) failed: {e}")
             sys.exit(1)
     else:
-        # Default path: use existing helper (retains its internal default thresholds)
+        # Default path: use client.query_points (modern API)
         try:
-            points = q_search(
-                qv,
-                k=args.k,
-                client=client,
-                query_filter=qfilter,
-                with_payload=True,
-                collection_name=collection,
-                debug=args.debug,
-            )
+            points = _query_qdrant(client, collection, qv, args.k, where)
         except Exception as e:
-            print(f"[error] {e}")
+            print(f"[error] query_points failed: {e}")
             sys.exit(1)
 
         # Fallback: if no hits, re-run with raw client.search and score_threshold=0.0
         if not points:
             try:
-                points = client.search(
-                    collection_name=collection,
-                    query_vector=qv,
-                    limit=args.k,
-                    with_vectors=False,
-                    with_payload=True,
-                    query_filter=qfilter,
+                points = _query_qdrant(
+                    client,
+                    collection,
+                    qv,
+                    args.k,
+                    where,
                     score_threshold=0.0,
                 )
                 if points:
                     fallback_used = True
                     print(
-                        "[info] fallback: wrapper returned no hits; using direct client.search() with score_threshold=0.0"
+                        "[info] fallback: retry with score_threshold=0.0 returned hits"
                     )
             except Exception as e:
                 print(f"[error] fallback search failed: {e}")

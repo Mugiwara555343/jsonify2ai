@@ -124,24 +124,24 @@ EMBED_DEV_MODE = str(getattr(settings, "EMBED_DEV_MODE", 0)).strip().lower() in 
 }
 
 AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".flac", ".ogg"}
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+# Images are ingested via the dedicated image path; don't classify them as ignored
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
+# Only non-image junk belongs here (archives, binaries, temp, etc.)
 IGNORED_EXTS = {
-    ".jsonl",
     ".zip",
+    ".7z",
+    ".rar",
     ".tar",
     ".gz",
-    ".rar",
-    ".7z",
     ".exe",
     ".dll",
     ".so",
-    ".dylib",
     ".bin",
-    ".webp",
-    ".png",
-    ".jpg",
-    ".jpeg",
-}  # images handled via --images
+    ".class",
+    ".obj",
+    ".o",
+    ".log",
+}
 
 
 # ─── parser registry (ext → factory) ──────────────────────────────────────────
@@ -207,7 +207,8 @@ def extract_text_auto(path: str, strict: bool = False) -> str:
     """Detect by extension and route to the correct parser; fallback to raw text."""
     p = Path(path)
     ext = p.suffix.lower()
-    if ext in IGNORED_EXTS:
+    # Don't ignore image files here; they are handled by the image branch in ingest
+    if (ext in IGNORED_EXTS) and (ext not in IMAGE_EXTS):
         raise SkipFile(f"ignored extension: {ext}")
 
     for exts, factory, _need in REGISTRY:
@@ -761,8 +762,11 @@ def main() -> None:
 
     if args.list_collection:
         client = get_qdrant_client()
+        collection_name = (
+            CANONICAL_IMAGES_COLLECTION if args.images else CANONICAL_COLLECTION
+        )
         points, _ = client.scroll(
-            collection_name=CANONICAL_COLLECTION,
+            collection_name=collection_name,
             scroll_filter=None,
             limit=args.limit,
             with_payload=True,
@@ -780,8 +784,8 @@ def main() -> None:
                     "idx": payload.get("idx"),
                 }
             )
-        print(json.dumps({"rows": rows, "count": len(rows)}))
-        return
+    print(json.dumps({"rows": rows, "count": len(rows), "collection": collection_name}))
+    return
 
     # ingest execution
     t0 = time.time()
