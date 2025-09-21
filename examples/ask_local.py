@@ -68,9 +68,15 @@ Usage:
 """
 
 # Environment config (align with worker services)
-QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "jsonify2ai_chunks")
-EMBEDDINGS_MODEL = os.getenv("EMBEDDINGS_MODEL", "nomic-embed-text")
-EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "768"))
+QDRANT_COLLECTION = getattr(settings, "QDRANT_COLLECTION", None) or os.getenv(
+    "QDRANT_COLLECTION", "jsonify2ai_chunks"
+)
+EMBEDDINGS_MODEL = getattr(settings, "EMBEDDINGS_MODEL", None) or os.getenv(
+    "EMBEDDINGS_MODEL", "nomic-embed-text"
+)
+EMBEDDING_DIM = int(
+    getattr(settings, "EMBEDDING_DIM", None) or os.getenv("EMBEDDING_DIM", "768")
+)
 
 
 def _is_filename_like(q: str) -> bool:
@@ -123,7 +129,7 @@ def _build_context(points, max_chars: int = 1800) -> Tuple[str, List[dict]]:
         idx = payload.get("idx")
         if not text:
             continue
-        chunk = textwrap.shorten(text, width=400, placeholder="…")
+        chunk = textwrap.shorten(text, width=400, placeholder="...")
         addition = "\n" + chunk + "\n"
         if used + len(addition) > max_chars and parts:
             break
@@ -168,14 +174,26 @@ def _query_qdrant(
     *,
     score_threshold: float | None = None,
 ):
-    """Query Qdrant: try modern query_points first, then fall back to legacy search.
+    """Query Qdrant with query_points preference; fallback to legacy search as last resort."""
+    # Try modern `query_points` with `query_filter` (some client builds require this name)
+    try:
+        kwargs = {
+            "collection_name": collection,
+            "query": vec,  # raw vector
+            "limit": top_k,
+            "with_payload": True,
+            "with_vectors": False,
+        }
+        if qfilter is not None:
+            kwargs["query_filter"] = qfilter
+        if score_threshold is not None:
+            kwargs["score_threshold"] = score_threshold
+        res = client.query_points(**kwargs)
+        return getattr(res, "points", res)
+    except TypeError:
+        pass
 
-    - Pass a raw vector to query_points with top-level kwargs.
-    - Handle param name differences between 'filter' and 'query_filter'.
-    - If the client rejects extra args (e.g., with_vectors), retry without them.
-    - Finally, fall back to client.search(...).
-    """
-    # Preferred modern path
+    # Retry `query_points` with `filter` kw (other client builds use this)
     try:
         kwargs = {
             "collection_name": collection,
@@ -190,56 +208,18 @@ def _query_qdrant(
             kwargs["score_threshold"] = score_threshold
         res = client.query_points(**kwargs)
         return getattr(res, "points", res)
-    except TypeError:
-        # Retry with query_filter instead of filter
-        try:
-            kwargs = {
-                "collection_name": collection,
-                "query": vec,
-                "limit": top_k,
-                "with_payload": True,
-                "with_vectors": False,
-            }
-            if qfilter is not None:
-                kwargs["query_filter"] = qfilter
-            if score_threshold is not None:
-                kwargs["score_threshold"] = score_threshold
-            res = client.query_points(**kwargs)
-            return getattr(res, "points", res)
-        except TypeError:
-            # Some versions forbid with_vectors entirely for query_points; try without it
-            try:
-                kwargs = {
-                    "collection_name": collection,
-                    "query": vec,
-                    "limit": top_k,
-                    "with_payload": True,
-                }
-                if qfilter is not None:
-                    kwargs["filter"] = qfilter
-                if score_threshold is not None:
-                    kwargs["score_threshold"] = score_threshold
-                res = client.query_points(**kwargs)
-                return getattr(res, "points", res)
-            except Exception:
-                pass
-        except Exception:
-            pass
     except Exception:
-        # Fall through to legacy search
         pass
 
-    # Legacy fallback
-    res = client.search(
+    # Final fallback: legacy `search` (kept for maximal compatibility)
+    return client.search(
         collection_name=collection,
         query_vector=vec,
         limit=top_k,
         with_payload=True,
         with_vectors=False,
         query_filter=qfilter,
-        score_threshold=score_threshold,
     )
-    return res
 
 
 def _parse_kinds(args) -> set[str]:
@@ -257,7 +237,9 @@ def _parse_kinds(args) -> set[str]:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Local Ask over Qdrant (optional Ollama)")
+    ap = argparse.ArgumentParser(
+        description="Local Ask over Qdrant (optional Ollama)", allow_abbrev=False
+    )
     ap.add_argument(
         "--collection",
         type=str,
@@ -570,138 +552,7 @@ def main():
                                 f"- {s.get('path')}  (chunk #{s.get('idx')})  score={score_val:.4f}"
                             )
                 return
-        # Path-fast heuristic: attempt exact path match first; if that fails and the query
-        # looks like it includes directories, also try its basename.
-        attempts = []
-        attempts.append((query, "full"))
-        basename = os.path.basename(query.strip().replace("\\", "/"))
-        if basename and basename != query:
-            attempts.append((basename, "basename"))
-
-        for path_candidate, label in attempts:
-            path_filter = build_filter(path=path_candidate)
-            if args.debug:
-                try:
-                    if hasattr(path_filter, "model_dump"):
-                        pf_print = path_filter.model_dump()  # type: ignore[attr-defined]
-                    elif hasattr(path_filter, "dict"):
-                        pf_print = path_filter.dict()  # type: ignore
-                    else:
-                        pf_print = (
-                            path_filter.to_dict()  # type: ignore[attr-defined]
-                            if hasattr(path_filter, "to_dict")
-                            else path_filter
-                        )
-                except Exception:
-                    pf_print = path_filter
-                print(
-                    f"[debug] qfilter (path-fast:{label}): {pf_print if pf_print else {}}"
-                )
-                print(
-                    f"[debug] path-fast-path: attempting {label} path match via scroll (candidate='{path_candidate}')"
-                )
-            try:
-                points_fast, _ = client.scroll(
-                    collection_name=collection,
-                    scroll_filter=path_filter,
-                    limit=args.k,
-                    with_payload=True,
-                    with_vectors=False,
-                )
-            except Exception as e:
-                points_fast = []
-                if args.debug:
-                    print(f"[debug] path-fast-path scroll error ({label}): {e}")
-            if not points_fast:
-                continue
-
-            # Inject synthetic score (0.9999) + snippet so downstream formatting remains consistent.
-            for p in points_fast:
-                if not hasattr(p, "score"):
-                    try:
-                        setattr(
-                            p, "score", 0.9999
-                        )  # synthetic score for exact path match
-                    except Exception:
-                        pass
-            context, sources = _build_context(points_fast, max_chars=args.context_chars)
-            # Ensure each source has snippet + score explicitly stored.
-            for p, s in zip(points_fast, sources):
-                try:
-                    payload = getattr(p, "payload", None) or {}
-                    snippet = (payload.get("text") or "")[:160].strip()
-                    s["text"] = snippet
-                    s["score"] = float(getattr(p, "score", 0.9999))
-                    s["source_kind"] = "path-fast"
-                except Exception:
-                    s.setdefault("text", "")
-                    s.setdefault("source_kind", "path-fast")
-            use_llm = not args.no_llm and (
-                args.llm or (getattr(settings, "ASK_MODE", "search") == "llm")
-            )
-            if use_llm:
-                # Snippet-first shortcut when top source has text.
-                top_text = (sources[0].get("text") or "").strip() if sources else ""
-                top_path = sources[0].get("path") if sources else query
-                if top_text:
-                    if args.debug:
-                        print(
-                            "[info] path-fast short-circuit: returning snippet for",
-                            top_path,
-                        )
-                    answer = f'Found an exact file match for {top_path}. Snippet: "{top_text}". (Showing top match.)'
-                else:
-                    system = (
-                        "You are a concise assistant. Use ONLY the provided context. "
-                        "If the answer is not in context, say you don't know."
-                    )
-                    user = f"Question:\n{query}\n\nContext:\n{context}"
-                    prompt = f"{system}\n\n{user}\n\nAnswer:"
-                    answer = _ask_llm(
-                        prompt=prompt,
-                        model=args.model,
-                        max_tokens=args.max_tokens,
-                        temperature=args.temperature,
-                    )
-            else:
-                answer = "Top snippets (path match):\n" + "\n---\n".join(
-                    f"{(s.get('path') or '(unknown)')}  (chunk #{s.get('idx')})  score={float(s.get('score', 0.0)):.4f}"
-                    for s in sources[:3]
-                )
-            if args.json:
-                print(
-                    json.dumps(
-                        {
-                            "ok": True,
-                            "query": query,
-                            "answer": answer,
-                            "sources": sources if args.show_sources else None,
-                            "meta": {
-                                "manual_min_score": args.min_score,
-                                "fallback_used": False,
-                                "path_fast_path": True,
-                                "path_fast_variant": label,
-                            },
-                            "filters": {
-                                "document_id": args.document_id,
-                                "kind": args.kind,
-                                "path": path_candidate,
-                            },
-                        },
-                        ensure_ascii=False,
-                    )
-                )
-            else:
-                print("\n" + "=" * 8 + " answer " + "=" * 8)
-                print(answer)
-                if args.show_sources:
-                    print("\n" + "=" * 8 + " sources " + "=" * 8)
-                    for s in sources:
-                        score_val = float(s.get("score", 0.0))
-                        print(
-                            f"- {s.get('path')}  (chunk #{s.get('idx')})  score={score_val:.4f}"
-                        )
-            return
+        # (duplicate path-fast block removed)
 
     # Standard filter (semantic path)
     # Build base conditions for document_id/path locally and add kinds filter using MatchAny for multi-kinds
