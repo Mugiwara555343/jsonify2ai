@@ -255,7 +255,9 @@ def main():
         help="Run embedding logic but do not query. Print summary JSON and exit.",
     )
     ap.add_argument("--q", "--query", dest="query", type=str, help="Your question")
-    ap.add_argument("-k", "--topk", dest="k", type=int, default=6, help="Top-k chunks")
+    ap.add_argument(
+        "-k", "--k", "--topk", dest="k", type=int, default=6, help="Top-k chunks"
+    )
     # optional scope filters
     ap.add_argument(
         "--document-id", type=str, default=None, help="Filter by document_id"

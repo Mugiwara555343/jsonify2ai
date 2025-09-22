@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
 	"jsonify2ai/api/internal/config"
@@ -33,6 +34,19 @@ func main() {
 
 	r := gin.New()
 	r.Use(gin.Recovery())
+
+	// CORS middleware
+	r.Use(cors.New(cors.Config{
+		AllowOrigins: []string{
+			"http://localhost:5173",
+			"http://127.0.0.1:5173",
+			"http://localhost:5174",
+			"http://127.0.0.1:5174",
+		},
+		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
+		AllowHeaders:     []string{"*"},
+		AllowCredentials: true,
+	}))
 
 	// Do not trust any upstream proxies by default.
 	// This silences the "You trusted all proxies" warning and is safer for dev.

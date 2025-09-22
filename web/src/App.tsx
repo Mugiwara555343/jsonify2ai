@@ -3,7 +3,7 @@ import './App.css'
 
 type Status = { ok: boolean; counts: { chunks: number; images: number } }
 type Hit = { id: string; score: number; text?: string; caption?: string; path?: string }
-const WORKER = import.meta.env.VITE_WORKER_URL || 'http://localhost:8090'
+const WORKER = import.meta.env.VITE_API_URL || 'http://localhost:8082'
 type AskResp = { ok: boolean; mode: 'search' | 'llm'; model?: string; answer: string; sources: Hit[] }
 
 function App() {
