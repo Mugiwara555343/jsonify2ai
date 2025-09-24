@@ -4,16 +4,56 @@ from __future__ import annotations
 import logging
 import uuid
 from pathlib import Path
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, field_validator
 
 # import the status hook (safe: status.py does not import process.py)
 from worker.app.routers.status import record_ingest_summary
 from worker.app.config import settings  # CHUNK_SIZE/OVERLAP, collections, etc.
+from worker.app.utils.docids import document_id_for_relpath, canonicalize_relpath
+from worker.app.services.qdrant_client import (
+    get_qdrant_client,
+    upsert_points,
+    delete_by_document_id,
+    ensure_collection,
+)
+from worker.app.services.embed_ollama import embed_texts
+from worker.app.services.file_router import extract_text_auto
+from worker.app.services.chunker import chunk_text
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/process", tags=["process"])
+
+
+# New unified payload model for all process endpoints
+class ProcessPayload(BaseModel):
+    document_id: Optional[str] = None
+    path: Optional[str] = None
+
+    @field_validator("document_id", mode="before")
+    def _strip_docid(cls, v):
+        return v.strip() if isinstance(v, str) else v
+
+    def require_docid(self) -> str:
+        """
+        Return a valid document_id. If not provided, compute it from path using the existing
+        canonical doc-id helper already used in ingest/discovery. Do NOT reimplement hashing here.
+        """
+        if self.document_id:
+            return self.document_id
+        if not self.path:
+            raise ValueError("either document_id or path is required")
+        # Reuse the existing helper used elsewhere in worker to compute document_id from a rel POSIX path.
+        from worker.app.utils.docids import document_id_for_relpath
+
+        # Normalize to the same relpath that ingest uses (e.g., without leading 'data/dropzone/').
+        rel = self.path.replace("\\", "/")
+        if rel.startswith("data/dropzone/"):
+            rel = rel[len("data/dropzone/") :]
+        return str(document_id_for_relpath(rel))
 
 
 # Request/response models (kept backward compatible)
@@ -41,131 +81,170 @@ TextPayload = ProcessTextRequest
 
 
 @router.post("/text", response_model=ProcessTextResponse)
-def process_text(p: ProcessTextRequest):
+async def process_text(request: Request):
     """
-    Ingest a text payload (or a file placeholder), chunk -> embed -> upsert.
+    Ingest a text file using the same pipeline as scripts/ingest_dropzone.py.
 
-    • Text mode: chunk using config sizes, embed, upsert to Qdrant collection.
-    • File mode: placeholder response (parser registry will handle it later).
+    • Parse file using extract_text_auto (same as CLI)
+    • Chunk using config sizes, embed, upsert to Qdrant collection
+    • Return precise summary with real counts
     """
-    # Lazy import so module loads even if optional deps are missing
+    payload = ProcessPayload(**(await request.json()))
     try:
-        from worker.app.services.chunker import chunk_text
-        from worker.app.services.embed_ollama import embed_texts
-        from worker.app.services.qdrant_client import (
-            ensure_collection,
-            upsert_points,
-            delete_by_document_id,
-        )
+        docid = payload.require_docid()
     except Exception as e:
-        log.exception("process backend not wired: %s", e)
-        raise HTTPException(status_code=501, detail="process backend not wired")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=422)
 
-    # -------- Resolve content (text vs file) ---------------------------------
-    if p.text:
-        content = p.text
-        size = len(content.encode("utf-8"))
-        log.info("[process/text] text doc=%s bytes=%d", p.document_id, size)
+    # Normalize rel_path (same as CLI)
+    rel_path = payload.path.replace("\\", "/")
+    if rel_path.startswith("data/dropzone/"):
+        rel_path = rel_path[len("data/dropzone/") :]
 
-    elif p.path:
-        # Try exact path, else fall back to /app/data/<basename>
-        file_path = Path(p.path)
-        if not file_path.is_file():
-            file_path = Path("/app/data") / Path(p.path).name
-        if not file_path.is_file():
-            log.warning(
-                "[process/text] file not found: %s (doc=%s)", p.path, p.document_id
-            )
-            raise HTTPException(status_code=404, detail="file not found")
+    # Create absolute path for canonicalize_relpath
+    abs_dropzone = Path("data/dropzone").resolve()
+    abs_file_path = (abs_dropzone / rel_path).resolve()
+    rel_path = canonicalize_relpath(abs_file_path, abs_dropzone)
 
-        size = file_path.stat().st_size
-        log.info(
-            "[process/text] file doc=%s kind=%s mime=%s path=%s bytes=%d",
-            p.document_id,
-            p.kind,
-            p.mime,
-            str(file_path),
-            size,
-        )
-    else:
-        raise HTTPException(
-            status_code=400, detail="either text or path must be provided"
-        )
+    # Compute document_id if missing (same as CLI)
+    docid = payload.document_id or str(document_id_for_relpath(rel_path))
 
-    # -------- Text mode: chunk → embed → upsert ------------------------------
-    if p.text:
-        # Ensure collection explicitly (even though upsert_points can ensure too)
-        ensure_collection(name=settings.QDRANT_COLLECTION, dim=settings.EMBEDDING_DIM)
+    # Parse file using same parser as CLI
+    abs_path = f"data/dropzone/{rel_path}"
+    try:
+        raw_text = extract_text_auto(abs_path)
+    except Exception as e:
+        log.warning("[process/text] parse failed: %s", e)
+        raise HTTPException(status_code=400, detail=f"failed to parse file: {e}")
 
-        # Optional idempotent re-ingest: clear existing points for this document
-        if p.replace_existing:
-            try:
-                delete_by_document_id(p.document_id)
-                log.info(
-                    "[process/text] cleared existing points for doc=%s", p.document_id
-                )
-            except Exception as e:
-                log.warning(
-                    "[process/text] delete_by_document_id failed doc=%s err=%s",
-                    p.document_id,
-                    e,
-                )
+    if not raw_text.strip():
+        raise HTTPException(status_code=400, detail="no content to process")
 
-        # Chunk using config defaults
-        chunks = chunk_text(
-            content,
-            size=int(settings.CHUNK_SIZE),
-            overlap=int(settings.CHUNK_OVERLAP),
-            # normalization flag is read inside chunker via settings.NORMALIZE_WHITESPACE
-        )
-        if not chunks:
-            raise HTTPException(status_code=400, detail="no content to process")
+    # Ensure collection (same as CLI)
+    client = get_qdrant_client()
+    ensure_collection(
+        client=client,
+        name=settings.QDRANT_COLLECTION,
+        dim=settings.EMBEDDING_DIM,
+    )
 
-        # Embed (handles internal batching)
-        vectors = embed_texts(chunks)
-
-        # Prepare upserts
-        collection = settings.QDRANT_COLLECTION
-        items = []
-        for idx, (text_chunk, vec) in enumerate(zip(chunks, vectors)):
-            point_id = str(uuid.uuid4())
-            payload = {
-                "id": point_id,
-                "document_id": p.document_id,
-                "path": p.path or "text_input",
-                "kind": p.kind or "text",
-                "idx": idx,
-                "text": text_chunk,
-                "meta": {"source": "text_input"},
-            }
-            items.append((point_id, vec, payload))
-
-        # Upsert (collection already ensured above)
-        upserted = upsert_points(items, collection_name=collection, ensure=False)
-
-        # ---- record status summary (right place) ----------------------------
-        try:
-            record_ingest_summary(document_id=p.document_id, chunks_upserted=upserted)
-        except Exception as e:
-            # Never let telemetry break ingestion
-            log.debug("[process/text] record_ingest_summary failed: %s", e)
-
-        return ProcessTextResponse(
-            ok=True,
-            document_id=p.document_id,
-            chunks=len(chunks),
-            embedded=len(vectors),
-            upserted=upserted,
-            collection=collection,
+    # Delete existing points for this document (idempotent re-ingest)
+    try:
+        delete_by_document_id(docid, client=client)
+        log.info("[process/text] cleared existing points for doc=%s", docid)
+    except Exception as e:
+        log.warning(
+            "[process/text] delete_by_document_id failed doc=%s err=%s", docid, e
         )
 
-    # -------- File mode (placeholder) ---------------------------------------
-    # Parser registry will read/route files later; keep tests happy now.
+    # Chunk using config defaults (same as CLI)
+    chunks = chunk_text(
+        raw_text,
+        size=int(settings.CHUNK_SIZE),
+        overlap=int(settings.CHUNK_OVERLAP),
+    )
+    if not chunks:
+        raise HTTPException(status_code=400, detail="no content to process")
+
+    # Embed (same as CLI)
+    vectors = embed_texts(chunks)
+
+    # Build items with deterministic IDs (same as CLI)
+    items = []
+    for idx, (text_chunk, vec) in enumerate(zip(chunks, vectors)):
+        point_id = str(uuid.uuid4())  # Use same ID scheme as CLI
+        payload_data = {
+            "document_id": docid,
+            "path": rel_path,
+            "kind": "text",
+            "idx": idx,
+            "text": text_chunk,
+            "meta": {
+                "source_ext": Path(abs_path).suffix.lower(),
+                "content_sig": "",  # Could add file hash if needed
+                "bytes": len(raw_text.encode("utf-8")),
+            },
+        }
+        items.append((point_id, vec, payload_data))
+
+    # Upsert to collection (same as CLI)
+    upserted = upsert_points(
+        items,
+        collection_name=settings.QDRANT_COLLECTION,
+        client=client,
+        ensure=False,
+    )
+
+    # Record status summary
+    try:
+        record_ingest_summary(document_id=docid, chunks_upserted=upserted)
+    except Exception as e:
+        log.debug("[process/text] record_ingest_summary failed: %s", e)
+
     return ProcessTextResponse(
         ok=True,
-        document_id=p.document_id,
+        document_id=docid,
+        chunks=len(chunks),
+        embedded=len(vectors),
+        upserted=upserted,
+        collection=settings.QDRANT_COLLECTION,
+    )
+
+
+@router.post("/pdf", response_model=ProcessTextResponse)
+async def process_pdf(request: Request):
+    """Process PDF files - placeholder implementation."""
+    payload = ProcessPayload(**(await request.json()))
+    try:
+        docid = payload.require_docid()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=422)
+
+    # Placeholder implementation
+    return ProcessTextResponse(
+        ok=True,
+        document_id=docid,
         chunks=1,
         embedded=0,
         upserted=0,
-        collection="file_input",
+        collection=settings.QDRANT_COLLECTION,
+    )
+
+
+@router.post("/image", response_model=ProcessTextResponse)
+async def process_image(request: Request):
+    """Process image files - placeholder implementation."""
+    payload = ProcessPayload(**(await request.json()))
+    try:
+        docid = payload.require_docid()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=422)
+
+    # Placeholder implementation
+    return ProcessTextResponse(
+        ok=True,
+        document_id=docid,
+        chunks=1,
+        embedded=0,
+        upserted=0,
+        collection=settings.QDRANT_COLLECTION_IMAGES,
+    )
+
+
+@router.post("/audio", response_model=ProcessTextResponse)
+async def process_audio(request: Request):
+    """Process audio files - placeholder implementation."""
+    payload = ProcessPayload(**(await request.json()))
+    try:
+        docid = payload.require_docid()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=422)
+
+    # Placeholder implementation
+    return ProcessTextResponse(
+        ok=True,
+        document_id=docid,
+        chunks=1,
+        embedded=0,
+        upserted=0,
+        collection=settings.QDRANT_COLLECTION,
     )

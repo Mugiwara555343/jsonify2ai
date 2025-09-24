@@ -15,13 +15,24 @@ function App() {
   const [busy, setBusy] = useState(false)
   const [askQ, setAskQ] = useState('')
   const [ans, setAns] = useState<AskResp | null>(null)
+  const [uploadBusy, setUploadBusy] = useState<boolean>(false)
+  const [lastCounts, setLastCounts] = useState<{total:number, byKind:Record<string,number>} | null>(null)
 
   useEffect(() => {
-    fetch(`${WORKER}/status`)
-      .then(r => r.json())
-      .then(setS)
-      .catch(() => setS(null))
+    fetchStatus()
   }, [])
+
+  const fetchStatus = async () => {
+    const res = await fetch(`${WORKER}/status`)
+    const j = await res.json()
+    setS(j)
+    // cache counts for later comparison
+    try {
+      const byKind = j?.counts_by_kind ?? j?.counts ?? {}
+      const total = Object.values(byKind).reduce((a:any,b:any)=>a+(typeof b==='number'?b:0),0) as number
+      setLastCounts({ total, byKind })
+    } catch {}
+  }
 
   const doSearch = async () => {
     const r = await fetch(`${WORKER}/search?q=${encodeURIComponent(q)}&kind=${kind}&k=8`)
@@ -34,23 +45,33 @@ function App() {
     if (!f) return
     const fd = new FormData()
     fd.append('file', f)
-    setBusy(true)
+    const before = lastCounts
+    setUploadBusy(true)
     setMsg('')
     try {
       const r = await fetch(`${WORKER}/upload`, { method: 'POST', body: fd })
-      const j = await r.json()
-      setMsg(j.ok ? 'Uploaded' : 'Failed')
-      // refresh status after a moment (watcher/ingest may update counts)
-      setTimeout(() => {
-        fetch(`${WORKER}/status`)
-          .then(r => r.json())
-          .then(setS)
-          .catch(() => {})
-      }, 1200)
+      // swallow worker JSON; we rely on status polling
+      try { await r.json() } catch {}
+      // poll status for ~30s or until counts increase
+      const started = Date.now()
+      const maxMs = 30000
+      let seenIncrease = false
+      while (Date.now() - started < maxMs) {
+        await new Promise(r => setTimeout(r, 3000))
+        const sres = await fetch(`${WORKER}/status`)
+        const sj = await sres.json()
+        setS(sj)
+        const byKind = sj?.counts_by_kind ?? sj?.counts ?? {}
+        const total = Object.values(byKind).reduce((a:any,b:any)=>a+(typeof b==='number'?b:0),0) as number
+        if (before && total > before.total) { seenIncrease = true; break; }
+      }
+      // final refresh
+      await fetchStatus()
+      setMsg(seenIncrease ? 'Uploaded & processed' : 'Uploaded (processing...)')
     } catch {
       setMsg('Failed')
     } finally {
-      setBusy(false)
+      setUploadBusy(false)
     }
   }
 
@@ -72,7 +93,10 @@ function App() {
       )}
       <div style={{ marginTop: 24 }}>
         <div style={{ marginBottom: 8, opacity: .7 }}>Upload to drop‑zone</div>
-        <input type="file" onChange={doUpload} disabled={busy} />
+        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+          <input type="file" onChange={doUpload} disabled={busy} />
+          {uploadBusy && <span>ingesting…</span>}
+        </div>
         {msg && <div style={{ marginTop: 6, fontSize: 12, opacity: .8 }}>{msg}</div>}
       </div>
       <div style={{ marginTop: 24 }}>

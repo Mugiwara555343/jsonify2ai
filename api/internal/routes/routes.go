@@ -20,13 +20,8 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 	// Basic API-only health (liveness)
 	RegisterHealth(r)
 
-	// Upload endpoint (unchanged)
-	uploadHandler := &UploadHandler{
-		DB:         db,
-		DocsDir:    docsDir,
-		WorkerBase: workerBase,
-	}
-	r.POST("/upload", uploadHandler.Post)
+	// Upload endpoint - now forwards directly to worker
+	r.POST("/upload", (&UploadHandler{}).Post)
 	log.Printf("[routes] registered upload endpoint with docsDir=%s", docsDir)
 
 	// Resolve worker base URL (env WORKER_URL takes precedence; default to http://worker:8090)

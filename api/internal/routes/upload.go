@@ -3,14 +3,14 @@ package routes
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -19,168 +19,167 @@ import (
 	"github.com/google/uuid"
 )
 
-type UploadHandler struct {
-	DB         *sql.DB
-	DocsDir    string
-	WorkerBase string
-}
-
-// DetectKindAndMIME detects the kind and MIME type of a file
-func DetectKindAndMIME(filePath, fileName string) (kind, mime string, err error) {
-	// Read first 512 bytes for MIME detection
-	file, err := os.Open(filePath)
-	if err != nil {
-		return "", "", err
-	}
-	defer file.Close()
-
-	buf := make([]byte, 512)
-	n, err := file.Read(buf)
-	if err != nil && err != io.EOF {
-		return "", "", err
-	}
-	buf = buf[:n]
-
-	// Detect MIME type
-	mime = http.DetectContentType(buf)
-
-	// Map MIME to kind
-	switch {
-	case strings.HasPrefix(mime, "text/"):
-		return "text", mime, nil
-	case strings.HasPrefix(mime, "image/"):
-		return "image", mime, nil
-	case mime == "application/pdf":
-		return "pdf", mime, nil
-	case strings.HasPrefix(mime, "audio/"):
-		return "audio", mime, nil
-	case mime == "application/json" || mime == "application/x-yaml":
-		return "text", mime, nil
-	default:
-		// Check file extension for common text formats
-		ext := strings.ToLower(filepath.Ext(fileName))
-		switch ext {
-		case ".md", ".txt", ".csv", ".tsv", ".json", ".jsonl":
-			return "text", mime, nil
-		default:
-			return "", "", fmt.Errorf("unsupported file type: %s", mime)
-		}
-	}
-}
+// UploadHandler forwards incoming multipart data directly to the worker /upload endpoint.
+// No local filesystem writes, no DB writes. The worker ingests from its dropzone.
+type UploadHandler struct{}
 
 func (h *UploadHandler) Post(c *gin.Context) {
-	// Parse multipart form with 25MB limit
-	if err := c.Request.ParseMultipartForm(25 << 20); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": "failed to parse multipart form"})
-		return
-	}
-
-	// Get the uploaded file
-	file, header, err := c.Request.FormFile("file")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": "no file provided"})
-		return
-	}
-	defer file.Close()
-
-	// Generate document ID
-	docID := uuid.New()
-
-	// Sanitize filename (strip path separators, keep base name)
-	sanitizedFilename := filepath.Base(header.Filename)
-	sanitizedFilename = strings.ReplaceAll(sanitizedFilename, "/", "")
-	sanitizedFilename = strings.ReplaceAll(sanitizedFilename, "\\", "")
-
-	// Create destination directory
-	dest := path.Join(h.DocsDir, docID.String())
-	if err := os.MkdirAll(dest, 0755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": "failed to create directory"})
-		return
-	}
-
-	// Save file to destination
-	destPath := path.Join(dest, sanitizedFilename)
-	destFile, err := os.Create(destPath)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": "failed to create file"})
-		return
-	}
-	defer destFile.Close()
-
-	if _, err := io.Copy(destFile, file); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": "failed to save file"})
-		return
-	}
-
-	// Detect MIME type and kind
-	kind, mime, err := DetectKindAndMIME(destPath, sanitizedFilename)
-	if err != nil {
-		// Clean up saved file
-		os.RemoveAll(dest)
-		c.JSON(http.StatusUnsupportedMediaType, gin.H{"ok": false, "error": err.Error()})
-		return
-	}
-
-	// Get file size
-	fileInfo, err := os.Stat(destPath)
-	if err != nil {
-		os.RemoveAll(dest)
-		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": "failed to get file info"})
-		return
-	}
-
-	// Insert into database if available
-	if h.DB != nil {
-		_, err = h.DB.Exec(
-			"INSERT INTO documents (id, filename, kind, size_bytes, mime) VALUES ($1, $2, $3, $4, $5)",
-			docID, sanitizedFilename, kind, fileInfo.Size(), mime,
-		)
-		if err != nil {
-			// Clean up saved file
-			os.RemoveAll(dest)
-			c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": "failed to save to database"})
-			return
-		}
+	// Resolve worker base URL (env WORKER_URL takes precedence; default to http://worker:8090)
+	workerBase := ""
+	if v := os.Getenv("WORKER_URL"); v != "" {
+		workerBase = v
 	} else {
-		// Log warning but continue without database
-		c.Writer.Header().Set("X-Database-Status", "disconnected")
+		workerBase = "http://worker:8090"
+	}
+	workerURL := fmt.Sprintf("%s/upload", workerBase)
+
+	// Parse incoming multipart *without* buffering whole file to disk
+	// (Gin already parsed up to its memory limit; we re-stream parts)
+	if err := c.Request.ParseMultipartForm(32 << 20); err != nil && err != http.ErrNotMultipart {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": "invalid multipart", "detail": err.Error()})
+		return
 	}
 
-	// Non-blocking worker dispatch
+	// Build outgoing multipart body
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+
+	// Copy all form fields (non-file)
+	for key, vals := range c.Request.PostForm {
+		for _, v := range vals {
+			_ = mw.WriteField(key, v)
+		}
+	}
+
+	// Copy file parts
+	form, _ := c.MultipartForm()
+	if form != nil {
+		for key, files := range form.File {
+			for _, fh := range files {
+				src, err := fh.Open()
+				if err != nil {
+					_ = mw.Close()
+					c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": "failed to open file", "detail": err.Error()})
+					return
+				}
+				defer src.Close()
+				// Preserve original filename; attach a request-id so worker logs can correlate
+				partHeader := textproto.MIMEHeader{}
+				partHeader.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, key, fh.Filename))
+				if fh.Header.Get("Content-Type") != "" {
+					partHeader.Set("Content-Type", fh.Header.Get("Content-Type"))
+				}
+				pw, err := mw.CreatePart(partHeader)
+				if err != nil {
+					_ = mw.Close()
+					c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": "failed to create multipart part", "detail": err.Error()})
+					return
+				}
+				if _, err := io.Copy(pw, src); err != nil {
+					_ = mw.Close()
+					c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": "failed to stream file", "detail": err.Error()})
+					return
+				}
+			}
+		}
+	}
+	_ = mw.Close()
+
+	// Forward to worker
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, workerURL, &body)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": "forward build failed", "detail": err.Error()})
+		return
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	// Tag a request id for traceability
+	req.Header.Set("X-Request-Id", uuid.New().String())
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "worker unreachable", "detail": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	// Read worker JSON once so we can both relay it and trigger processing
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, resp.Body); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "worker read failed", "detail": err.Error()})
+		return
+	}
+
+	// Relay the worker's JSON response
+	c.Status(resp.StatusCode)
+	_, _ = io.Copy(c.Writer, bytes.NewReader(buf.Bytes()))
+
+	// Best-effort: parse worker JSON and trigger processing in the background
+	type workerUpload struct {
+		Ok       bool   `json:"ok"`
+		Path     string `json:"path"`
+		Filename string `json:"filename"`
+		MIME     string `json:"mime"`
+	}
+	var wu workerUpload
+	if err := json.Unmarshal(buf.Bytes(), &wu); err != nil {
+		log.Printf("[api] upload: worker JSON parse failed: %v", err)
+		return
+	}
+	if wu.Path == "" && wu.Filename == "" {
+		return // nothing to process
+	}
+
+	// Infer kind from extension
+	name := wu.Filename
+	if name == "" {
+		name = filepath.Base(wu.Path)
+	}
+	ext := strings.ToLower(filepath.Ext(name))
+	kind := ""
+	switch ext {
+	case ".txt", ".md", ".csv", ".json":
+		kind = "text"
+	case ".pdf":
+		kind = "pdf"
+	case ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif":
+		kind = "image"
+	case ".wav", ".mp3", ".m4a", ".flac", ".ogg":
+		kind = "audio"
+	default:
+		// fallback on MIME if available
+		if strings.HasPrefix(wu.MIME, "text/") {
+			kind = "text"
+		} else if wu.MIME == "application/pdf" {
+			kind = "pdf"
+		} else if strings.HasPrefix(wu.MIME, "image/") {
+			kind = "image"
+		} else if strings.HasPrefix(wu.MIME, "audio/") {
+			kind = "audio"
+		}
+	}
+	if kind == "" {
+		log.Printf("[api] upload: unknown kind for %q (mime=%q); skipping process trigger", name, wu.MIME)
+		return
+	}
+
+	// POST to worker /process/<kind> with {"path": wu.Path}
+	processURL := fmt.Sprintf("%s/process/%s", workerBase, kind)
+	bodyJSON, _ := json.Marshal(map[string]string{"path": wu.Path})
 	go func() {
-		if h.WorkerBase == "" {
-			log.Printf("[upload] worker dispatch skipped: WORKER_BASE empty")
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		payload := struct {
-			DocumentID string `json:"document_id"`
-			Path       string `json:"path"`
-			MIME       string `json:"mime"`
-			Kind       string `json:"kind"`
-		}{docID.String(), destPath, mime, kind}
-		b, _ := json.Marshal(payload)
-
-		req, err := http.NewRequestWithContext(ctx, "POST", h.WorkerBase+"/process/text", bytes.NewReader(b))
+		req2, err := http.NewRequestWithContext(ctx, http.MethodPost, processURL, bytes.NewReader(bodyJSON))
 		if err != nil {
-			log.Printf("[upload] worker req err: %v", err)
+			log.Printf("[api] process build failed: %v", err)
 			return
 		}
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			log.Printf("[upload] worker call failed: %v", err)
-			return
+		req2.Header.Set("Content-Type", "application/json")
+		if resp2, err := client.Do(req2); err != nil {
+			log.Printf("[api] process call failed: %v", err)
+		} else {
+			_ = resp2.Body.Close()
+			log.Printf("[api] process %s triggered for %s (status=%d)", kind, name, resp2.StatusCode)
 		}
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-		log.Printf("[upload] worker dispatched: %s status=%d", payload.DocumentID, resp.StatusCode)
 	}()
-
-	c.JSON(http.StatusOK, gin.H{
-		"ok":          true,
-		"document_id": docID.String(),
-	})
 }
