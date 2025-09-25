@@ -81,7 +81,7 @@ async def status():
     )
 
     # Per-kind counts for the chunks collection
-    kinds = ["text", "pdf", "audio", "image"]
+    kinds = ["text", "pdf", "audio"]
     counts_by_kind = {
         k: q_count(
             collection_name=settings.QDRANT_COLLECTION,
@@ -90,6 +90,9 @@ async def status():
         )
         for k in kinds
     }
+
+    # Add image counts from images collection
+    counts_by_kind["image"] = images_total
 
     # Keep your existing initialized field if available; fall back to booleans
     initialized = {
@@ -104,6 +107,9 @@ async def status():
     except Exception:
         pass
 
+    # Calculate total count
+    total = chunks_total + images_total
+
     return {
         "ok": True,
         "qdrant_url": settings.QDRANT_URL,
@@ -115,6 +121,7 @@ async def status():
         "counts": {
             "chunks": chunks_total,
             "images": images_total,
+            "total": total,
         },
         "counts_by_kind": counts_by_kind,
         "last_ingest_summary": _ingest_state.summary(),
