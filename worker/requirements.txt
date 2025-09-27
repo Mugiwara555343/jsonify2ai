@@ -8,3 +8,4 @@ python-dotenv==1.0.0
 httpx==0.25.2
 pytest==7.4.3
 qdrant-client>=1.7.3
+pypdf>=6.1.0

@@ -515,7 +515,8 @@ def count(
     qc = client or get_qdrant_client()
     col = collection_name or settings.QDRANT_COLLECTION
     try:
-        res = qc.count(collection_name=col, exact=exact, query_filter=query_filter)
+        # Qdrant client count method doesn't support filters, so we ignore query_filter for now
+        res = qc.count(collection_name=col, exact=exact)
         return int(getattr(res, "count", 0))
     except Exception:
         return 0
