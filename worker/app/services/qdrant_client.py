@@ -16,6 +16,7 @@ qdrant-client 1.6–1.9 without surprises.
 from __future__ import annotations
 
 
+import requests
 import sys
 from typing import Iterable, List, Dict, Any, Tuple, Optional
 
@@ -528,3 +529,28 @@ def count(
 def _batched(seq: List[Any], n: int) -> Iterable[List[Any]]:
     for i in range(0, len(seq), n):
         yield seq[i : i + n]
+
+
+# -------------------------- Count helpers --------------------------
+
+
+def count_total(collection: str) -> int:
+    """Count total points in a collection using Qdrant's count endpoint."""
+    url = f"{settings.QDRANT_URL}/collections/{collection}/points/count"
+    r = requests.post(url, json={"exact": True}, timeout=5)
+    r.raise_for_status()
+    j = r.json()
+    return int(j.get("result", {}).get("count", 0))
+
+
+def count_match(collection: str, key: str, value: str) -> int:
+    """Count points matching a specific key-value filter using Qdrant's count endpoint."""
+    url = f"{settings.QDRANT_URL}/collections/{collection}/points/count"
+    body = {
+        "exact": True,
+        "filter": {"must": [{"key": key, "match": {"value": value}}]},
+    }
+    r = requests.post(url, json=body, timeout=5)
+    r.raise_for_status()
+    j = r.json()
+    return int(j.get("result", {}).get("count", 0))

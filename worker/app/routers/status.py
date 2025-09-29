@@ -9,7 +9,8 @@ from fastapi.responses import JSONResponse
 
 from worker.app.config import settings
 from worker.app.services.qdrant_client import (
-    get_qdrant_client as get_client,
+    count_total,
+    count_match,
 )
 
 # Keep router path exactly as-is for compatibility
@@ -68,32 +69,17 @@ async def status():
       - counts_by_kind: {'text','pdf','audio','image'}
       - last_ingest_summary: last ingest event snapshot (if any)
     """
-    client = get_client()
-    chunks_coll = "jsonify2ai_chunks_768"  # Use the collection that actually has data
+    chunks_coll = settings.QDRANT_COLLECTION
     images_coll = settings.QDRANT_COLLECTION_IMAGES
 
-    # Use scroll-based counting as Qdrant count method seems unreliable
-    def _count_by_scroll(collection_name):
-        try:
-            result = client.scroll(collection_name=collection_name, limit=10000)
-            # Scroll returns a tuple: (points, next_page_offset)
-            if isinstance(result, tuple) and len(result) >= 1:
-                points = result[0]
-                return len(points)
-            return 0
-        except Exception:
-            return 0
+    chunks_total = count_total(chunks_coll)
+    images_total = count_total(images_coll)
 
-    chunks_total = _count_by_scroll(chunks_coll)
-    images_total = _count_by_scroll(images_coll)
-
-    # Note: Qdrant client count method doesn't support filters, so per-kind counts are not available
-    # For now, set all to 0. In the future, this could be implemented using search with filters
     counts_by_kind = {
-        "text": 0,  # Would need search with kind filter to get accurate count
-        "pdf": 0,  # Would need search with kind filter to get accurate count
-        "audio": 0,  # Would need search with kind filter to get accurate count
-        "image": images_total,  # All images are in the images collection
+        "text": count_match(chunks_coll, "kind", "text"),
+        "pdf": count_match(chunks_coll, "kind", "pdf"),
+        "audio": count_match(chunks_coll, "kind", "audio"),
+        "image": count_match(images_coll, "kind", "image"),
     }
 
     last_ingest_summary = _ingest_state.summary()

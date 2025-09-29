@@ -2,14 +2,14 @@ import { useEffect, useState } from 'react'
 import './App.css'
 
 type Status = { ok: boolean; counts: { chunks: number; images: number } }
-type Hit = { id: string; score: number; text?: string; caption?: string; path?: string }
-const WORKER = import.meta.env.VITE_API_URL || 'http://localhost:8082'
+type Hit = { id: string; score: number; text?: string; caption?: string; path?: string; idx?: number }
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8082"
 type AskResp = { ok: boolean; mode: 'search' | 'llm'; model?: string; answer: string; sources: Hit[] }
 
 function App() {
   const [s, setS] = useState<Status | null>(null)
   const [q, setQ] = useState('')
-  const [kind, setKind] = useState<'text' | 'images'>('text')
+  const [kind, setKind] = useState<'text' | 'pdf' | 'image' | 'audio'>('text')
   const [res, setRes] = useState<Hit[]>([])
   const [msg, setMsg] = useState<string>('')
   const [busy, setBusy] = useState(false)
@@ -23,7 +23,7 @@ function App() {
   }, [])
 
   const fetchStatus = async () => {
-    const res = await fetch(`${WORKER}/status`)
+    const res = await fetch(`${API_BASE}/status`)
     const j = await res.json()
     setS(j)
     // cache counts for later comparison
@@ -34,10 +34,27 @@ function App() {
     } catch {}
   }
 
-  const doSearch = async () => {
-    const r = await fetch(`${WORKER}/search?q=${encodeURIComponent(q)}&kind=${kind}&k=8`)
-    const j = await r.json()
-    setRes(j.results || [])
+  async function doSearch(q: string, kind: string) {
+    const k = 5;
+    try {
+      const url = `${API_BASE}/search?q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&k=${k}`;
+      const r = await fetch(url, { method: "GET" });
+      if (r.ok) return await r.json();
+      // fallback to POST body if GET not supported
+      const r2 = await fetch(`${API_BASE}/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ q, kind, k }),
+      });
+      return await r2.json();
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  }
+
+  const handleSearch = async () => {
+    const resp = await doSearch(q, kind);
+    setRes(resp.results ?? []);
   }
 
   const doUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -49,7 +66,7 @@ function App() {
     setUploadBusy(true)
     setMsg('')
     try {
-      const r = await fetch(`${WORKER}/upload`, { method: 'POST', body: fd })
+      const r = await fetch(`${API_BASE}/upload`, { method: 'POST', body: fd })
       // swallow worker JSON; we rely on status polling
       try { await r.json() } catch {}
       // poll status for ~30s or until counts increase
@@ -58,7 +75,7 @@ function App() {
       let seenIncrease = false
       while (Date.now() - started < maxMs) {
         await new Promise(r => setTimeout(r, 3000))
-        const sres = await fetch(`${WORKER}/status`)
+        const sres = await fetch(`${API_BASE}/status`)
         const sj = await sres.json()
         setS(sj)
         const byKind = sj?.counts_by_kind ?? sj?.counts ?? {}
@@ -109,7 +126,7 @@ function App() {
             style={{ flex: 1, padding: 12, borderRadius: 8, border: '1px solid #ddd' }}
           />
           <button onClick={async () => {
-            const r = await fetch(`${WORKER}/ask`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: askQ, k: 6 }) })
+            const r = await fetch(`${API_BASE}/ask`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: askQ, k: 6 }) })
             const j: AskResp = await r.json()
             setAns(j)
           }} style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid #ddd' }}>Ask</button>
@@ -139,10 +156,12 @@ function App() {
           style={{ padding: 12, borderRadius: 8, border: '1px solid #ddd' }}
         >
           <option value="text">text</option>
-          <option value="images">images</option>
+          <option value="pdf">pdf</option>
+          <option value="image">image</option>
+          <option value="audio">audio</option>
         </select>
         <button
-          onClick={doSearch}
+          onClick={handleSearch}
           style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid #ddd' }}
         >
           Search
@@ -151,15 +170,18 @@ function App() {
       {res.length > 0 && (
         <div style={{ marginTop: 16, display: 'grid', gap: 8 }}>
           {res.map((h, i) => (
-            <div key={i} style={{ padding: 12, border: '1px solid #eee', borderRadius: 10 }}>
-              <div style={{ fontSize: 12, opacity: .6 }}>score {(h.score || 0).toFixed(3)}</div>
-              <div style={{ marginTop: 4 }}>{h.caption || h.text || '(no text)'}</div>
-              {h.path && <div style={{ fontSize: 12, opacity: .6, marginTop: 4 }}>{h.path}</div>}
+            <div key={i} className="mb-2 p-2 rounded border">
+              <div className="text-sm opacity-70">score: {h.score?.toFixed?.(3) ?? "-"}</div>
+              <div className="text-xs">
+                <span className="inline-block px-2 py-0.5 bg-gray-100 rounded mr-2">{h.path}</span>
+                <span className="inline-block px-2 py-0.5 bg-gray-100 rounded">idx: {h.idx}</span>
+              </div>
+              <div className="mt-1">{h.caption || h.text || '(no text)'}</div>
             </div>
           ))}
         </div>
       )}
-      <div style={{ marginTop: 16, opacity: .7, fontSize: 12 }}>Worker: {WORKER}</div>
+      <div style={{ marginTop: 16, opacity: .7, fontSize: 12 }}>API: {API_BASE}</div>
     </div>
   )
 }

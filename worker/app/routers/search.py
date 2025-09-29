@@ -8,7 +8,9 @@ from worker.app.services.embed_ollama import embed_texts
 router = APIRouter()
 
 
-def _build_filter(path: Optional[str], document_id: Optional[str]) -> Optional[Filter]:
+def _build_filter(
+    path: Optional[str], document_id: Optional[str], kind: Optional[str] = None
+) -> Optional[Filter]:
     conds: List[FieldCondition] = []
     if path:
         conds.append(FieldCondition(key="path", match=MatchValue(value=path)))
@@ -16,6 +18,8 @@ def _build_filter(path: Optional[str], document_id: Optional[str]) -> Optional[F
         conds.append(
             FieldCondition(key="document_id", match=MatchValue(value=document_id))
         )
+    if kind:
+        conds.append(FieldCondition(key="kind", match=MatchValue(value=kind)))
     return Filter(must=conds) if conds else None
 
 
@@ -25,9 +29,10 @@ def _search(
     k: int,
     path: Optional[str] = None,
     document_id: Optional[str] = None,
+    kind: Optional[str] = None,
 ):
     q = QdrantClient(url=settings.QDRANT_URL)
-    qf = _build_filter(path, document_id)
+    qf = _build_filter(path, document_id, kind)
 
     # NOTE: older/newer qdrant-client versions need `query_filter`, not `filter`
     hits = q.search(
@@ -48,7 +53,7 @@ def _search(
 @router.get("/search")
 def search(
     q: str = Query(...),
-    kind: Literal["text", "images"] = "text",
+    kind: Literal["text", "pdf", "image", "audio"] = "text",
     k: int = 10,
     path: Optional[str] = Query(None),
     document_id: Optional[str] = Query(None),
@@ -57,14 +62,16 @@ def search(
         vec = embed_texts([q])[0]
         col = (
             settings.QDRANT_COLLECTION
-            if kind == "text"
+            if kind in ["text", "pdf", "audio"]
             else getattr(settings, "QDRANT_COLLECTION_IMAGES", "jsonify2ai_images_768")
         )
         return {
             "ok": True,
             "kind": kind,
             "q": q,
-            "results": _search(col, vec, k, path=path, document_id=document_id),
+            "results": _search(
+                col, vec, k, path=path, document_id=document_id, kind=kind
+            ),
         }
     except Exception as e:
         msg = str(e).lower()
@@ -84,14 +91,16 @@ def search_post(body: dict):
         vec = embed_texts([q])[0]
         col = (
             settings.QDRANT_COLLECTION
-            if kind == "text"
+            if kind in ["text", "pdf", "audio"]
             else getattr(settings, "QDRANT_COLLECTION_IMAGES", "jsonify2ai_images_768")
         )
         return {
             "ok": True,
             "kind": kind,
             "q": q,
-            "results": _search(col, vec, k, path=path, document_id=document_id),
+            "results": _search(
+                col, vec, k, path=path, document_id=document_id, kind=kind
+            ),
         }
     except Exception as e:
         msg = str(e).lower()
