@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import './App.css'
 
 type Status = { ok: boolean; counts: { chunks: number; images: number } }
-type Hit = { id: string; score: number; text?: string; caption?: string; path?: string; idx?: number }
+type Hit = { id: string; score: number; text?: string; caption?: string; path?: string; idx?: number; kind?: string }
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8082"
 type AskResp = { ok: boolean; mode: 'search' | 'llm'; model?: string; answer: string; sources: Hit[] }
 
@@ -17,6 +17,7 @@ function App() {
   const [ans, setAns] = useState<AskResp | null>(null)
   const [uploadBusy, setUploadBusy] = useState<boolean>(false)
   const [lastCounts, setLastCounts] = useState<{total:number, byKind:Record<string,number>} | null>(null)
+  const [showToast, setShowToast] = useState(false)
 
   useEffect(() => {
     fetchStatus()
@@ -26,10 +27,14 @@ function App() {
     const res = await fetch(`${API_BASE}/status`)
     const j = await res.json()
     setS(j)
-    // cache counts for later comparison
+    // cache counts for later comparison and toast on increase
     try {
       const byKind = j?.counts_by_kind ?? j?.counts ?? {}
       const total = Object.values(byKind).reduce((a:any,b:any)=>a+(typeof b==='number'?b:0),0) as number
+      if (lastCounts && total > lastCounts.total) {
+        setShowToast(true)
+        setTimeout(() => setShowToast(false), 2000)
+      }
       setLastCounts({ total, byKind })
     } catch {}
   }
@@ -174,11 +179,19 @@ function App() {
               <div className="text-sm opacity-70">score: {h.score?.toFixed?.(3) ?? "-"}</div>
               <div className="text-xs">
                 <span className="inline-block px-2 py-0.5 bg-gray-100 rounded mr-2">{h.path}</span>
-                <span className="inline-block px-2 py-0.5 bg-gray-100 rounded">idx: {h.idx}</span>
+                <span className="inline-block px-2 py-0.5 bg-gray-100 rounded mr-2">idx: {h.idx}</span>
+              </div>
+              <div className="text-xs opacity-60">
+                {h.kind === "image" ? "images" : "chunks"} • idx: {h.idx}
               </div>
               <div className="mt-1">{h.caption || h.text || '(no text)'}</div>
             </div>
           ))}
+        </div>
+      )}
+      {showToast && (
+        <div style={{ position: 'fixed', bottom: 20, right: 20, background: 'rgba(0,0,0,0.8)', color: '#fff', padding: '8px 12px', borderRadius: 999, fontSize: 12 }}>
+          Processed ✓
         </div>
       )}
       <div style={{ marginTop: 16, opacity: .7, fontSize: 12 }}>API: {API_BASE}</div>

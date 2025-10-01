@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Optional
 
 # Always‑available parsers (no heavy deps)
-from .parse_csv import extract_text_from_csv
 from .parse_json import extract_text_from_json
 
 # NOTE:
@@ -42,9 +41,16 @@ def extract_text_auto(path: str | Path, mime: Optional[str] = None) -> str:
     if ext in {".txt", ".md"}:
         return _read_text(p)
 
-    # CSV / TSV
+    # CSV / TSV (use lightweight row joiner)
     if ext in {".csv", ".tsv"}:
-        return extract_text_from_csv(str(p))
+        try:
+            from .parsers_csv import parse_csv  # noqa: WPS433
+        except Exception as e:
+            raise ModuleNotFoundError(
+                "CSV support missing. This parser is stdlib-only; check import paths."
+            ) from e
+        rows = parse_csv(str(p))
+        return "\n".join(rows)
 
     # JSON / JSONL
     if ext in {".json", ".jsonl"}:
@@ -53,14 +59,13 @@ def extract_text_auto(path: str | Path, mime: Optional[str] = None) -> str:
     # DOCX (lazy import)
     if ext == ".docx":
         try:
-            from .parse_docx import (
-                extract_text_from_docx,
-            )  # noqa: WPS433 (local import)
+            from .parsers_docx import parse_docx  # noqa: WPS433 (local import)
         except Exception as e:  # ModuleNotFoundError or other import-time issues
             raise ModuleNotFoundError(
                 "DOCX support not installed. Run: pip install -r worker/requirements.docx.txt"
             ) from e
-        return extract_text_from_docx(str(p))
+        parts = parse_docx(str(p))
+        return "\n\n".join(parts)
 
     # PDF (lazy import)
     if ext == ".pdf":
@@ -71,6 +76,17 @@ def extract_text_auto(path: str | Path, mime: Optional[str] = None) -> str:
                 "PDF support not installed. Run: pip install -r worker/requirements.pdf.txt"
             ) from e
         return extract_text_from_pdf(str(p))
+
+    # HTML / HTM (lazy import)
+    if ext in {".html", ".htm"}:
+        try:
+            from .parsers_html import parse_html  # noqa: WPS433
+        except Exception as e:
+            raise ModuleNotFoundError(
+                "HTML support not installed. Run: pip install -r worker/requirements.txt"
+            ) from e
+        blocks = parse_html(str(p))
+        return "\n\n".join(blocks)
 
     # Audio (lazy import; AUDIO_DEV_MODE handled inside parse_audio)
     if ext in AUDIO_EXTS:

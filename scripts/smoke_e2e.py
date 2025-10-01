@@ -90,6 +90,20 @@ def run() -> int:
     ap.add_argument("--q-pdf", default="Pallet")
     ap.add_argument("--q-image", default="image")
     ap.add_argument(
+        "--csv", default=None, help="optional CSV to process via /process/text"
+    )
+    ap.add_argument(
+        "--docx", default=None, help="optional DOCX to process via /process/text"
+    )
+    ap.add_argument(
+        "--html", default=None, help="optional HTML to process via /process/text"
+    )
+    ap.add_argument("--q-csv", default="id,name", help="query token for csv search")
+    ap.add_argument(
+        "--q-docx", default="Experience", help="query token for docx search"
+    )
+    ap.add_argument("--q-html", default="html", help="query token for html search")
+    ap.add_argument(
         "--strict-increase",
         action="store_true",
         help="require counters to increase; otherwise allow idempotent no-op",
@@ -138,6 +152,31 @@ def run() -> int:
     )  # adjust if you use custom captions; "image" matches default
     jprint("[search/image]", si)
     must_ge(len(si.get("results", [])), 1, "search.image.results")
+
+    # Optional new types
+    if args.csv and os.path.exists(args.csv):
+        tc = worker_process("text", args.csv)
+        jprint("[process/csv]", tc)
+        must_ge(tc.get("upserted", 0), 0, "csv.upserted")
+        sc = api_search(args.q_csv, "text")
+        jprint("[search/csv]", sc)
+        must_ge(len(sc.get("results", [])), 1, "search.csv.results")
+
+    if args.docx and os.path.exists(args.docx):
+        td = worker_process("text", args.docx)
+        jprint("[process/docx]", td)
+        must_ge(td.get("upserted", 0), 0, "docx.upserted")
+        sd = api_search(args.q_docx, "text")
+        jprint("[search/docx]", sd)
+        must_ge(len(sd.get("results", [])), 1, "search.docx.results")
+
+    if args.html and os.path.exists(args.html):
+        th = worker_process("text", args.html)
+        jprint("[process/html]", th)
+        must_ge(th.get("upserted", 0), 0, "html.upserted")
+        sh = api_search(args.q_html, "text")
+        jprint("[search/html]", sh)
+        must_ge(len(sh.get("results", [])), 1, "search.html.results")
 
     print("[ok] smoke succeeded")
     return 0
