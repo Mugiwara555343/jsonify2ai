@@ -8,7 +8,7 @@ python-dotenv==1.0.0
 httpx==0.25.2
 pytest==7.4.3
 qdrant-client>=1.7.3
-pypdf>=6.1.0
-python-docx>=1.1.2
-beautifulsoup4>=4.12.3
-lxml>=5.2.1
+pypdf==6.1.0
+python-docx==1.1.2
+beautifulsoup4==4.12.3
+lxml==5.2.1

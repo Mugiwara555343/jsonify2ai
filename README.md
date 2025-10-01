@@ -49,6 +49,23 @@
 
 ## Quick Start
 
+### Option 1: Docker Compose (Recommended)
+
+```bash
+# Start all services
+docker compose up -d
+
+# Or start individually
+docker compose up -d qdrant    # Vector database
+docker compose up -d worker    # Python processing service
+docker compose up -d api       # Go API service
+docker compose up -d web       # React web interface
+
+# Access the web interface at http://localhost:5173
+```
+
+### Option 2: Manual Setup
+
 > Works on plain CPU. Docker is used only for Qdrant.
 
 ```bash
@@ -76,7 +93,7 @@ export EMBED_DEV_MODE=1; export AUDIO_DEV_MODE=1
 # Windows (PowerShell):
 $env:EMBED_DEV_MODE=1; $env:AUDIO_DEV_MODE=1
 
-# 6) Drop files into data/dropzone (txt, md, csv, pdf, docx, wav/mp3…)
+# 6) Drop files into data/dropzone (txt, md, csv, html, pdf, docx, wav/mp3…)
 
 # 7) Ingest → JSONL + Qdrant (single pass)
 # --once = single pass (no watch loop), not 'one file'.
@@ -106,6 +123,16 @@ Note: The script uses the correct Qdrant route PUT /collections/{collection}/ind
 If `make` is not available in PowerShell, either:
 - run commands directly (e.g., `docker compose up -d worker api`, `python scripts/smoke_e2e.py`), or
 - use Git Bash (`make up`, `make smoke`).
+
+### Quick Start with Docker Compose
+
+```bash
+# Start all services
+docker compose up -d
+
+# Access the web interface at http://localhost:5173
+# Upload files and search through the web UI
+```
 
 ## .env example
 
@@ -199,20 +226,37 @@ Tip: keep your preferred LLM tag in `ASK_MODEL` so you don’t edit code. Use `-
 
 ---
 
-## What’s Supported?
+## What's Supported?
 
 | Type   | Extensions           | Notes                              |
 |--------|----------------------|------------------------------------|
 | Text   | .txt, .md            | Always on                          |
 | CSV    | .csv, .tsv           | Always on                          |
 | JSON   | .json, .jsonl        | Always on                          |
-| DOCX   | .docx                | `pip install -r worker/requirements.docx.txt` |
+| HTML   | .html, .htm          | Always on                          |
+| DOCX   | .docx                | Always on (pinned)                 |
 | PDF    | .pdf                 | `pip install -r worker/requirements.pdf.txt` |
 | Audio  | .wav, .mp3, .m4a ... | `pip install -r worker/requirements.audio.txt` + ffmpeg |
-| Images | .jpg, .png, .webp    | Optional, via BLIP captioning      |
+| Images | .jpg, .png, .webp    | `pip install -r worker/requirements.images.txt` |
 
-If an optional parser isn’t installed, files are **skipped gracefully**.
-Install optional parsers via the corresponding worker/requirements.*.txt file (e.g., pip install -r worker/requirements.pdf.txt).
+**Core requirements (always installed):**
+```bash
+pip install -r worker/requirements.txt
+```
+
+**Optional parsers:**
+```bash
+# PDF support
+pip install -r worker/requirements.pdf.txt
+
+# Audio transcription (requires ffmpeg)
+pip install -r worker/requirements.audio.txt
+
+# Image captioning
+pip install -r worker/requirements.images.txt
+```
+
+If an optional parser isn't installed, files are **skipped gracefully**.
 
 ---
 
@@ -228,12 +272,46 @@ Great for demos and testing.
 ## Repository Layout
 
 ```text
-worker/   → parsers, services, tests
-scripts/  → ingest_dropzone, watch_dropzone (WIP)
+worker/   → Python parsers, services, tests
+api/      → Go API service (upload/search/ask)
+web/      → React web interface
+scripts/  → ingest_dropzone, smoke tests, utilities
 examples/ → ask_local, control_panel
-api/      → Go (upload/search/ask) [WIP]
-web/      → React interface [WIP]
-data/     → dropzone, exports, docs
+data/     → dropzone, exports, smoke samples
+```
+
+## API Endpoints
+
+### Worker Service (Port 8090)
+- `GET /health` - Health check
+- `GET /status` - System status and counts
+- `POST /process/{text|pdf|image|audio}` - Process files
+- `GET /search` - Semantic search
+- `POST /ask` - Ask questions with LLM
+
+### API Service (Port 8082)
+- `GET /health` - Basic health check
+- `GET /health/full` - Full health check (includes worker)
+- `GET /status` - Forwarded from worker
+- `POST /upload` - File upload and processing
+- `GET /search` - Forwarded search
+- `POST /ask` - Forwarded ask
+
+## Web Interface
+
+A React-based web interface is available at `http://localhost:5173` with:
+- **File Upload**: Drag-and-drop file processing with progress indicators
+- **Search**: Semantic search across all document types
+- **Ask**: Natural language Q&A with your data
+- **Status Dashboard**: Real-time processing statistics
+- **Collection Hints**: Visual indicators for chunks vs images
+- **Processed Toast**: Notifications when new content is processed
+
+Start the web interface:
+```bash
+docker compose up web
+# or for development:
+cd web && npm run dev
 ```
 
 ---
@@ -241,7 +319,7 @@ data/     → dropzone, exports, docs
 ## Installation and Requirements
 
 - **Python:** 3.10+ (tested on Linux, macOS, Windows)
-- **Docker:** For Qdrant vector DB (see `docker-compose.yml`)
+- **Docker:** For Qdrant vector DB and services (see `docker-compose.yml`)
 - **Minimal RAM/CPU:** Designed to run on modest laptops/desktops
 - **Optional:** ffmpeg, Ollama for advanced audio/LLM features
 
@@ -250,19 +328,40 @@ data/     → dropzone, exports, docs
 | Python           | 3.10–3.12                        |
 | qdrant           | 1.x (Docker image: qdrant/qdrant:<tag>) |
 | qdrant-client    | v1.9.1                           |
+| Go               | 1.21+ (for API service)          |
+| Node.js          | 18+ (for web interface)          |
 
-*See [worker/requirements.txt](worker/requirements.txt) and [worker/requirements.\*.txt](worker/) for optional parsers.*
+**Core requirements (always installed):**
+```bash
+pip install -r worker/requirements.txt
+```
+
+**Optional parsers:**
+```bash
+# PDF support
+pip install -r worker/requirements.pdf.txt
+
+# Audio transcription (requires ffmpeg)
+pip install -r worker/requirements.audio.txt
+
+# Image captioning
+pip install -r worker/requirements.images.txt
+```
 
 ---
 
 ## Roadmap
 
-- [ ] Image captioning → embed
-- [ ] Web UI for drop‑zone + previews
+- [x] Image captioning → embed ✅
+- [x] Web UI for drop‑zone + previews ✅
+- [x] Unified API service (Go + FastAPI) ✅
 - [ ] Auto‑watch mode (real‑time ingest)
-- [ ] Unified API service (Go + FastAPI)
+- [ ] Document preview in web UI
+- [ ] Advanced search filters
+- [ ] Batch processing interface
 - [ ] More enrichers (tags, summaries, OCR)
 - [ ] Benchmarks and sample results
+- [ ] Real-time file watching
 
 *Check the [issues](https://github.com/Mugiwara555343/jsonify2ai/issues) and project board for progress.*
 
@@ -337,6 +436,50 @@ API_URL=http://localhost:8082 WORKER_URL=http://localhost:8090 python scripts/sm
 ```
 
 Expect a final `[ok] smoke succeeded`.
+
+### Smoke samples (checked-in)
+We ship minimal samples to exercise multiple parsers:
+
+- `data/dropzone/smoke_golden/mini.csv`
+- `data/dropzone/smoke_golden/mini.html`
+- `data/dropzone/smoke_golden/mini.docx` (generated if missing via `scripts/gen_smoke_docs.py`)
+
+> The DOCX is created deterministically using `python-docx` to avoid binary drift.
+
+### Extended smoke
+Baseline smoke:
+```bash
+python scripts/smoke_e2e.py
+```
+
+Extended smoke (CSV/DOCX/HTML):
+```bash
+python scripts/smoke_e2e.py \
+  --csv  data/dropzone/smoke_golden/mini.csv  --q-csv golden \
+  --docx data/dropzone/smoke_golden/mini.docx --q-docx Experience \
+  --html data/dropzone/smoke_golden/mini.html --q-html title
+```
+
+The smoke asserts that the search results include the same document just processed (not just any older data).
+
+### Dependency pins
+The worker pins a few parser dependencies for reproducibility:
+
+```
+pypdf==6.1.0
+python-docx==1.1.2
+beautifulsoup4==4.12.3
+lxml==5.2.1
+```
+
+### Windows note
+If make is unavailable in PowerShell, run commands directly:
+
+```bash
+docker compose build worker
+docker compose up -d worker
+python scripts/smoke_e2e.py
+```
 
 ## Maintenance
 

@@ -4,7 +4,7 @@ import os
 import sys
 import json
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import urllib.parse
 import requests
 
@@ -81,6 +81,34 @@ def must_ge(val: int, minv: int, label: str):
         raise AssertionError(f"{label}: expected ≥{minv}, got {val}")
 
 
+def must_true(val: bool, label: str):
+    if not val:
+        raise AssertionError(f"{label}: expected True, got {val}")
+
+
+def _assert_has_doc(
+    results,
+    want_document_id: Optional[str] = None,
+    want_path: Optional[str] = None,
+    lane: str = "",
+):
+    """
+    Ensure search results include either the given document_id or path from the just-processed file.
+    """
+    if not results:
+        raise AssertionError(f"[{lane}] no results")
+    if want_document_id is None and want_path is None:
+        return  # nothing to check specifically
+    for r in results:
+        if want_document_id and str(r.get("document_id")) == str(want_document_id):
+            return
+        if want_path and str(r.get("path")) == str(want_path):
+            return
+    raise AssertionError(
+        f"[{lane}] results did not include expected doc_id={want_document_id} or path={want_path}"
+    )
+
+
 def run() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--text", default=TEXT_PATH)
@@ -153,30 +181,53 @@ def run() -> int:
     jprint("[search/image]", si)
     must_ge(len(si.get("results", [])), 1, "search.image.results")
 
+    # If DOCX path provided but file missing, generate it
+    if args.docx and not os.path.exists(args.docx):
+        print(f"[gen] {args.docx} missing; generating via scripts/gen_smoke_docs.py")
+        os.system(f"{sys.executable} scripts/gen_smoke_docs.py")
+
     # Optional new types
     if args.csv and os.path.exists(args.csv):
-        tc = worker_process("text", args.csv)
-        jprint("[process/csv]", tc)
-        must_ge(tc.get("upserted", 0), 0, "csv.upserted")
-        sc = api_search(args.q_csv, "text")
-        jprint("[search/csv]", sc)
-        must_ge(len(sc.get("results", [])), 1, "search.csv.results")
+        csv_proc = worker_process("text", args.csv)
+        jprint("[process/csv]", csv_proc)
+        must_true(csv_proc.get("ok") is True, "csv process ok")
+        csv_doc = csv_proc.get("document_id")
+        csv_search = api_search(args.q_csv, "text")
+        jprint("[search/csv]", csv_search)
+        _assert_has_doc(
+            csv_search.get("results", []),
+            want_document_id=csv_doc,
+            want_path="smoke_golden/mini.csv",
+            lane="csv",
+        )
 
     if args.docx and os.path.exists(args.docx):
-        td = worker_process("text", args.docx)
-        jprint("[process/docx]", td)
-        must_ge(td.get("upserted", 0), 0, "docx.upserted")
-        sd = api_search(args.q_docx, "text")
-        jprint("[search/docx]", sd)
-        must_ge(len(sd.get("results", [])), 1, "search.docx.results")
+        docx_proc = worker_process("text", args.docx)
+        jprint("[process/docx]", docx_proc)
+        must_true(docx_proc.get("ok") is True, "docx process ok")
+        docx_doc = docx_proc.get("document_id")
+        docx_search = api_search(args.q_docx, "text")
+        jprint("[search/docx]", docx_search)
+        _assert_has_doc(
+            docx_search.get("results", []),
+            want_document_id=docx_doc,
+            want_path="smoke_golden/mini.docx",
+            lane="docx",
+        )
 
     if args.html and os.path.exists(args.html):
-        th = worker_process("text", args.html)
-        jprint("[process/html]", th)
-        must_ge(th.get("upserted", 0), 0, "html.upserted")
-        sh = api_search(args.q_html, "text")
-        jprint("[search/html]", sh)
-        must_ge(len(sh.get("results", [])), 1, "search.html.results")
+        html_proc = worker_process("text", args.html)
+        jprint("[process/html]", html_proc)
+        must_true(html_proc.get("ok") is True, "html process ok")
+        html_doc = html_proc.get("document_id")
+        html_search = api_search(args.q_html, "text")
+        jprint("[search/html]", html_search)
+        _assert_has_doc(
+            html_search.get("results", []),
+            want_document_id=html_doc,
+            want_path="smoke_golden/mini.html",
+            lane="html",
+        )
 
     print("[ok] smoke succeeded")
     return 0
