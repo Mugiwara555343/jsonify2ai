@@ -1,0 +1,82 @@
+name: smoke
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node (optional; lets web build if needed later)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Bring up Qdrant on the host so containers can reach http://host.docker.internal:6333
+      - name: Start Qdrant
+        run: |
+          docker run -d --name qdrant -p 6333:6333 qdrant/qdrant:latest
+          # wait for Qdrant
+          for i in {1..30}; do
+            curl -sf http://localhost:6333/collections && break || sleep 2
+          done
+
+      - name: Build worker & api
+        run: |
+          docker compose build worker api
+
+      - name: Start worker & api
+        run: |
+          docker compose up -d worker api
+          # wait for API to be healthy (it forwards /status)
+          for i in {1..30}; do
+            curl -sf http://localhost:8082/status && break || sleep 2
+          done
+
+      - name: Python deps for scripts (no-op safety)
+        run: |
+          pip install -r worker/requirements.txt || true
+          pip install requests || true
+
+      - name: Prepare Qdrant indexes
+        env:
+          QDRANT_URL: http://localhost:6333
+          QDRANT_COLLECTION: jsonify2ai_chunks_768
+          QDRANT_COLLECTION_IMAGES: jsonify2ai_images_768
+        run: |
+          python scripts/qdrant_indexes.py
+
+      - name: Run smoke
+        env:
+          API_URL: http://localhost:8082
+          WORKER_URL: http://localhost:8090
+        run: |
+          python scripts/smoke_e2e.py
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          docker compose logs api > api.log || true
+          docker compose logs worker > worker.log || true
+          docker logs qdrant > qdrant.log || true
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-logs
+          path: |
+            api.log
+            worker.log
+            qdrant.log

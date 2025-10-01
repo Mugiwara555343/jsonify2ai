@@ -25,3 +25,9 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-commit]
+      - id: smoke-e2e
+        name: Smoke E2E (API/Worker/Web)
+        entry: python scripts/smoke_e2e.py
+        language: system
+        pass_filenames: false
+        stages: [manual]

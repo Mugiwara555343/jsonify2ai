@@ -83,6 +83,30 @@ $env:EMBED_DEV_MODE=1; $env:AUDIO_DEV_MODE=1
 python scripts/ingest_dropzone.py --dir data/dropzone --export data/exports/ingest.jsonl --once
 ```
 
+### Create payload indexes (Qdrant)
+
+Use the provided script (works on Windows PowerShell and Unix):
+
+```powershell
+# PowerShell
+python scripts/qdrant_indexes.py
+
+# Bash / Git Bash / WSL
+python scripts/qdrant_indexes.py
+```
+
+This ensures document_id, kind, and path are indexed on both collections:
+
+- QDRANT_COLLECTION (e.g., jsonify2ai_chunks_768)
+- QDRANT_COLLECTION_IMAGES (e.g., jsonify2ai_images_768)
+
+Note: The script uses the correct Qdrant route PUT /collections/{collection}/index/{field} and is safe to run multiple times.
+
+### Windows note (make)
+If `make` is not available in PowerShell, either:
+- run commands directly (e.g., `docker compose up -d worker api`, `python scripts/smoke_e2e.py`), or
+- use Git Bash (`make up`, `make smoke`).
+
 ## .env example
 
 ```bash
@@ -289,6 +313,30 @@ MIT — use, hack, extend.
     ```bash
     python examples/ask_local.py --q "somefile.txt" --no-path-fast
     ```
+
+### Smoke test (end-to-end)
+
+After starting Qdrant, Worker, and API, you can validate the full loop:
+
+```bash
+# in repo root
+python scripts/smoke_e2e.py
+```
+
+The test:
+
+- checks /status via the API,
+- processes one text, one PDF, and one image via the Worker,
+- waits for /status counters to move,
+- and runs /search (API) for each kind.
+
+Environment overrides:
+
+```bash
+API_URL=http://localhost:8082 WORKER_URL=http://localhost:8090 python scripts/smoke_e2e.py
+```
+
+Expect a final `[ok] smoke succeeded`.
 
 ## Maintenance
 

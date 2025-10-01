@@ -13,7 +13,11 @@ from pydantic import BaseModel, field_validator
 # import the status hook (safe: status.py does not import process.py)
 from worker.app.routers.status import record_ingest_summary
 from worker.app.config import settings  # CHUNK_SIZE/OVERLAP, collections, etc.
-from worker.app.utils.docids import document_id_for_relpath, canonicalize_relpath
+from worker.app.utils.docids import (
+    document_id_for_relpath,
+    canonicalize_relpath,
+    chunk_id_for,
+)
 from worker.app.services.qdrant_client import (
     get_qdrant_client,
     upsert_points,
@@ -338,7 +342,9 @@ async def process_image(request: Request):
 
     # Delete existing points for this document
     try:
-        delete_by_document_id(docid, client=client)
+        delete_by_document_id(
+            docid, collection_name=settings.QDRANT_COLLECTION_IMAGES, client=client
+        )
         log.info("[process/image] cleared existing points for doc=%s", docid)
     except Exception as e:
         log.warning(
@@ -349,10 +355,10 @@ async def process_image(request: Request):
     chunks = [caption]
     vectors = embed_texts(chunks)
 
-    # Build items
+    # Build items with deterministic IDs
     items = []
     for idx, (text_chunk, vec) in enumerate(zip(chunks, vectors)):
-        point_id = str(uuid.uuid4())
+        point_id = str(chunk_id_for(uuid.UUID(docid), idx))
         payload_data = {
             "document_id": docid,
             "path": rel_path,
@@ -466,7 +472,7 @@ async def process_audio(request: Request):
     # Build items with deterministic IDs
     items = []
     for idx, (text_chunk, vec) in enumerate(zip(chunks, vectors)):
-        point_id = str(uuid.uuid4())
+        point_id = str(chunk_id_for(uuid.UUID(docid), idx))
         payload_data = {
             "document_id": docid,
             "path": rel_path,
