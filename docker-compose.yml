@@ -1,4 +1,24 @@
 services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-jsonify2ai-main}-qdrant-1
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    container_name: ${COMPOSE_PROJECT_NAME:-jsonify2ai-main}-web-1
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8082
+    depends_on:
+      - api
+    restart: unless-stopped
+
   api:
     build: ./api
     container_name: ${COMPOSE_PROJECT_NAME:-jsonify2ai-main}-api-1
@@ -38,6 +58,9 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
+
+volumes:
+  qdrant_data:
 
 networks:
   default:
