@@ -1,6 +1,7 @@
 # worker/app/config.py
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
 from uuid import UUID
@@ -58,7 +59,10 @@ class Settings(BaseSettings):
     # --- Dev Toggles / Modes --------------------------------------------------
     EMBED_DEV_MODE: int = 0  # 1 to bypass real embeddings in dev/tests
     AUDIO_DEV_MODE: int = 0  # 1 -> stub transcript; requires no ffmpeg/whisper
-    IMAGES_CAPTION: int = 0  # 1 -> enable BLIP captioning path (optional)
+    IMAGES_CAPTION: int = int(os.getenv("IMAGES_CAPTION", "0"))
+    IMAGES_CAPTION_MODEL: str = os.getenv(
+        "IMAGES_CAPTION_MODEL", "Salesforce/blip-image-captioning-base"
+    )
     STT_MODEL: str = "tiny"
     DEBUG_CONFIG: Optional[int] = 0
     QDRANT_RECREATE_BAD: int = 0  # 1 -> auto recreate bad/mismatched collection

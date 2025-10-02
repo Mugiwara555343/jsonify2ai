@@ -270,6 +270,10 @@ OLLAMA_URL=http://localhost:11434      # Ollama service URL
 EMBED_DEV_MODE=1                       # Skip embeddings, use dummy vectors
 AUDIO_DEV_MODE=1                       # Skip audio transcription
 
+# Image Captioning (optional)
+IMAGES_CAPTION=1                       # Enable BLIP-based image captions
+IMAGES_CAPTION_MODEL=Salesforce/blip-image-captioning-base  # Caption model
+
 # API Configuration
 API_URL=http://localhost:8082
 WORKER_URL=http://localhost:8090
@@ -309,6 +313,12 @@ This creates indexes on:
 - **Rapid prototyping for local AI data pipelines**
 
 ---
+
+### Optional: image captions
+To enable BLIP-based captions on CPU:
+- Set `IMAGES_CAPTION=1` for the worker
+- (Optional) pick a model via `IMAGES_CAPTION_MODEL` (default: `Salesforce/blip-image-captioning-base`)
+Captions are generated lazily and cached; if captioning fails, the system falls back to `image: <path>`.
 
 ## Advanced Usage
 

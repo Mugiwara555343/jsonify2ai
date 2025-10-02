@@ -27,7 +27,7 @@ from worker.app.services.qdrant_client import (
 from worker.app.services.embed_ollama import embed_texts
 from worker.app.services.file_router import extract_text_auto
 from worker.app.services.chunker import chunk_text
-from worker.app.services.image_caption import caption_image
+from worker.app.services.images import generate_caption
 from worker.app.services.parse_audio import transcribe_audio
 
 log = logging.getLogger(__name__)
@@ -324,13 +324,8 @@ async def process_image(request: Request):
 
     # Get image caption
     abs_path = f"data/dropzone/{rel_path}"
-    try:
-        caption = caption_image(abs_path)
-        if not caption.strip():
-            caption = f"image: {rel_path}"
-    except Exception as e:
-        log.warning("[process/image] caption failed: %s", e)
-        caption = f"image: {rel_path}"
+    caption = generate_caption(str(abs_path))
+    text = caption if caption else f"image: {rel_path}"
 
     # Ensure images collection
     client = get_qdrant_client()
@@ -352,7 +347,7 @@ async def process_image(request: Request):
         )
 
     # Create single chunk from caption
-    chunks = [caption]
+    chunks = [text]
     vectors = embed_texts(chunks)
 
     # Build items with deterministic IDs
