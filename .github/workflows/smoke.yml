@@ -83,6 +83,19 @@ jobs:
         run: |
           python scripts/qdrant_indexes.py
 
+      - name: Verify sample files exist
+        run: |
+          echo "Current working directory: $(pwd)"
+          echo "Repository contents:"
+          ls -la
+          echo "Checking required sample files..."
+          ls -la data/dropzone/smoke_golden/
+          ls -la data/dropzone/
+          echo "Checking specific files:"
+          test -f data/dropzone/smoke_golden/text_sample.md && echo "✓ text_sample.md exists" || echo "✗ text_sample.md missing"
+          test -f data/dropzone/Mauricio-A-Ventura-FlowCV-Resume-20250805-3.pdf && echo "✓ PDF exists" || echo "✗ PDF missing"
+          test -f data/dropzone/smoke_golden/test.png && echo "✓ test.png exists" || echo "✗ test.png missing"
+
       - name: Run smoke
         env:
           API_URL: http://localhost:8082
