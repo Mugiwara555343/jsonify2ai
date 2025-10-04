@@ -213,6 +213,16 @@ cd web && npm run dev
 - `GET /search` - Forwarded search
 - `POST /ask` - Forwarded ask
 
+### Export JSONL for a document
+Download all chunks for a document as JSONL:
+
+```
+GET /export?document_id=...&collection=chunks  # text/pdf/csv/docx/html
+GET /export?document_id=...&collection=images  # image captions
+```
+
+The JSONL rows include: `id, document_id, path, kind, idx, text, meta`.
+
 ---
 
 ## Installation & Requirements
@@ -504,6 +514,15 @@ Contributions, issues, and feature requests are welcome!
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines, or just open an issue/PR.
 
 ---
+
+### Upload via Web UI (API-backed)
+- The web app uploads files to the API (`POST /upload`).
+- The API saves the file and triggers the correct worker pipeline based on extension:
+  - `.pdf` → `/process/pdf`
+  - image types (`.png`, `.jpg`, …) → `/process/image`
+  - common audio (`.mp3`, `.wav`, …) → `/process/audio`
+  - everything else → `/process/text` (auto-detected downstream)
+- After a successful upload, the UI polls `/status` and shows **Processed ✓** when `counts.total` increases.
 
 ## License
 

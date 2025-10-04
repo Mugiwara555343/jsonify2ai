@@ -15,6 +15,34 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		// allow localhost dev ports; keep it simple
+		allowed := map[string]bool{
+			"http://localhost:5173": true,
+			"http://127.0.0.1:5173": true,
+		}
+		if allowed[origin] {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// WithCORS wraps a Gin engine with CORS middleware
+func WithCORS(ginEngine *gin.Engine) http.Handler {
+	return withCORS(ginEngine)
+}
+
 // RegisterRoutes registers all routes with the given gin engine
 func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string) {
 	// Basic API-only health (liveness)
@@ -121,6 +149,24 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 		}
 
 		target := getWorkerBase() + "/search?" + qb.Encode()
+		req, err := http.NewRequestWithContext(c.Request.Context(), "GET", target, nil)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
+			return
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
+			return
+		}
+		forwardResp(c, resp)
+	})
+
+	// ----------------------------- /export -----------------------------
+	// GET /export?document_id=...&collection=...
+	r.GET("/export", func(c *gin.Context) {
+		// proxy GET /export preserving raw query
+		target := getWorkerBase() + "/export?" + c.Request.URL.RawQuery
 		req, err := http.NewRequestWithContext(c.Request.Context(), "GET", target, nil)
 		if err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})

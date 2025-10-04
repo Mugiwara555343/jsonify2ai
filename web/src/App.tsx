@@ -1,10 +1,37 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 
-type Status = { ok: boolean; counts: { chunks: number; images: number } }
-type Hit = { id: string; score: number; text?: string; caption?: string; path?: string; idx?: number; kind?: string }
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8082"
+type Status = { ok: boolean; counts: { chunks: number; images: number; total?: number } }
+type Hit = { id: string; score: number; text?: string; caption?: string; path?: string; idx?: number; kind?: string; document_id?: string }
+const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8082"
 type AskResp = { ok: boolean; mode: 'search' | 'llm'; model?: string; answer: string; sources: Hit[] }
+
+async function uploadFile(file: File): Promise<any> {
+  const fd = new FormData();
+  fd.append("file", file, file.name);
+  const res = await fetch(`${apiBase}/upload`, { method: "POST", body: fd });
+  // API proxies worker response; assume JSON
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.detail || `Upload failed (${res.status})`);
+  return data; // expect {"ok":true, ...}
+}
+
+async function waitForProcessed(oldTotal: number, timeoutMs = 15000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    const s = await fetch(`${apiBase}/status`).then(r => r.json());
+    const total = s?.counts?.total ?? 0;
+    if (total > oldTotal) return { ok: true, total };
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  return { ok: false };
+}
+
+function downloadJson(documentId: string, kind: string | undefined) {
+  const collection = kind === 'image' ? 'images' : 'chunks'
+  const url = `${apiBase}/export?document_id=${encodeURIComponent(documentId)}&collection=${collection}`
+  window.open(url, '_blank')
+}
 
 function App() {
   const [s, setS] = useState<Status | null>(null)
@@ -15,38 +42,32 @@ function App() {
   const [busy, setBusy] = useState(false)
   const [askQ, setAskQ] = useState('')
   const [ans, setAns] = useState<AskResp | null>(null)
-  const [uploadBusy, setUploadBusy] = useState<boolean>(false)
-  const [lastCounts, setLastCounts] = useState<{total:number, byKind:Record<string,number>} | null>(null)
-  const [showToast, setShowToast] = useState(false)
+  const [uploadBusy, setUploadBusy] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
+
+  function showToast(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  }
 
   useEffect(() => {
     fetchStatus()
   }, [])
 
   const fetchStatus = async () => {
-    const res = await fetch(`${API_BASE}/status`)
+    const res = await fetch(`${apiBase}/status`)
     const j = await res.json()
     setS(j)
-    // cache counts for later comparison and toast on increase
-    try {
-      const byKind = j?.counts_by_kind ?? j?.counts ?? {}
-      const total = Object.values(byKind).reduce((a:any,b:any)=>a+(typeof b==='number'?b:0),0) as number
-      if (lastCounts && total > lastCounts.total) {
-        setShowToast(true)
-        setTimeout(() => setShowToast(false), 2000)
-      }
-      setLastCounts({ total, byKind })
-    } catch {}
   }
 
   async function doSearch(q: string, kind: string) {
     const k = 5;
     try {
-      const url = `${API_BASE}/search?q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&k=${k}`;
+      const url = `${apiBase}/search?q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&k=${k}`;
       const r = await fetch(url, { method: "GET" });
       if (r.ok) return await r.json();
       // fallback to POST body if GET not supported
-      const r2 = await fetch(`${API_BASE}/search`, {
+      const r2 = await fetch(`${apiBase}/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ q, kind, k }),
@@ -62,38 +83,22 @@ function App() {
     setRes(resp.results ?? []);
   }
 
-  const doUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]
-    if (!f) return
-    const fd = new FormData()
-    fd.append('file', f)
-    const before = lastCounts
+  async function onUploadChange(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!e.target.files?.length) return
+    const file = e.target.files[0]
     setUploadBusy(true)
-    setMsg('')
     try {
-      const r = await fetch(`${API_BASE}/upload`, { method: 'POST', body: fd })
-      // swallow worker JSON; we rely on status polling
-      try { await r.json() } catch {}
-      // poll status for ~30s or until counts increase
-      const started = Date.now()
-      const maxMs = 30000
-      let seenIncrease = false
-      while (Date.now() - started < maxMs) {
-        await new Promise(r => setTimeout(r, 3000))
-        const sres = await fetch(`${API_BASE}/status`)
-        const sj = await sres.json()
-        setS(sj)
-        const byKind = sj?.counts_by_kind ?? sj?.counts ?? {}
-        const total = Object.values(byKind).reduce((a:any,b:any)=>a+(typeof b==='number'?b:0),0) as number
-        if (before && total > before.total) { seenIncrease = true; break; }
-      }
-      // final refresh
-      await fetchStatus()
-      setMsg(seenIncrease ? 'Uploaded & processed' : 'Uploaded (processing...)')
-    } catch {
-      setMsg('Failed')
+      const s0 = await fetch(`${apiBase}/status`).then(r => r.json()).catch(() => ({counts:{total:0}}))
+      const baseTotal = s0?.counts?.total ?? 0
+      await uploadFile(file)
+      const done = await waitForProcessed(baseTotal, 20000)
+      showToast(done.ok ? "Processed ✓" : "Uploaded (pending…)") // non-blocking fallback
+      // optional: trigger a refresh of search results here
+    } catch (err:any) {
+      showToast(`Upload failed: ${err?.message || err}`)
     } finally {
       setUploadBusy(false)
+      e.target.value = "" // reset input
     }
   }
 
@@ -113,13 +118,10 @@ function App() {
           </div>
         </div>
       )}
-      <div style={{ marginTop: 24 }}>
-        <div style={{ marginBottom: 8, opacity: .7 }}>Upload to drop‑zone</div>
-        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-          <input type="file" onChange={doUpload} disabled={busy} />
-          {uploadBusy && <span>ingesting…</span>}
-        </div>
-        {msg && <div style={{ marginTop: 6, fontSize: 12, opacity: .8 }}>{msg}</div>}
+      <div className="mb-4 flex items-center gap-3">
+        <input type="file" onChange={onUploadChange} disabled={uploadBusy} />
+        {uploadBusy && <span className="text-sm opacity-70">Uploading…</span>}
+        {toast && <span className="text-sm text-green-600">{toast}</span>}
       </div>
       <div style={{ marginTop: 24 }}>
         <h2 style={{ fontSize: 18, marginBottom: 8 }}>Ask</h2>
@@ -131,7 +133,7 @@ function App() {
             style={{ flex: 1, padding: 12, borderRadius: 8, border: '1px solid #ddd' }}
           />
           <button onClick={async () => {
-            const r = await fetch(`${API_BASE}/ask`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: askQ, k: 6 }) })
+            const r = await fetch(`${apiBase}/ask`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: askQ, k: 6 }) })
             const j: AskResp = await r.json()
             setAns(j)
           }} style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid #ddd' }}>Ask</button>
@@ -185,16 +187,21 @@ function App() {
                 {h.kind === "image" ? "images" : "chunks"} • idx: {h.idx}
               </div>
               <div className="mt-1">{h.caption || h.text || '(no text)'}</div>
+              {h.document_id && (
+                <div className="mt-1">
+                  <button
+                    className="text-xs underline opacity-70 hover:opacity-100"
+                    onClick={() => downloadJson((h as any).document_id, h.kind)}
+                  >
+                    Download JSON
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>
       )}
-      {showToast && (
-        <div style={{ position: 'fixed', bottom: 20, right: 20, background: 'rgba(0,0,0,0.8)', color: '#fff', padding: '8px 12px', borderRadius: 999, fontSize: 12 }}>
-          Processed ✓
-        </div>
-      )}
-      <div style={{ marginTop: 16, opacity: .7, fontSize: 12 }}>API: {API_BASE}</div>
+      <div style={{ marginTop: 16, opacity: .7, fontSize: 12 }}>API: {apiBase}</div>
     </div>
   )
 }

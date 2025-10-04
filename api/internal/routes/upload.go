@@ -19,6 +19,31 @@ import (
 	"github.com/google/uuid"
 )
 
+// inferKindByExt determines the processing kind based on file extension
+func inferKindByExt(name string) string {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.HasSuffix(lower, ".pdf"):
+		return "pdf"
+	case strings.HasSuffix(lower, ".png"),
+		strings.HasSuffix(lower, ".jpg"),
+		strings.HasSuffix(lower, ".jpeg"),
+		strings.HasSuffix(lower, ".webp"),
+		strings.HasSuffix(lower, ".bmp"),
+		strings.HasSuffix(lower, ".gif"):
+		return "image"
+	case strings.HasSuffix(lower, ".mp3"),
+		strings.HasSuffix(lower, ".wav"),
+		strings.HasSuffix(lower, ".m4a"),
+		strings.HasSuffix(lower, ".flac"),
+		strings.HasSuffix(lower, ".ogg"):
+		return "audio"
+	default:
+		// txt, md, csv, docx, html, etc. go through text pipeline (auto-detects)
+		return "text"
+	}
+}
+
 // UploadHandler forwards incoming multipart data directly to the worker /upload endpoint.
 // No local filesystem writes, no DB writes. The worker ingests from its dropzone.
 type UploadHandler struct{}
@@ -130,38 +155,12 @@ func (h *UploadHandler) Post(c *gin.Context) {
 		return // nothing to process
 	}
 
-	// Infer kind from extension
+	// Infer kind from extension using the helper function
 	name := wu.Filename
 	if name == "" {
 		name = filepath.Base(wu.Path)
 	}
-	ext := strings.ToLower(filepath.Ext(name))
-	kind := ""
-	switch ext {
-	case ".txt", ".md", ".csv", ".json":
-		kind = "text"
-	case ".pdf":
-		kind = "pdf"
-	case ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif":
-		kind = "image"
-	case ".wav", ".mp3", ".m4a", ".flac", ".ogg":
-		kind = "audio"
-	default:
-		// fallback on MIME if available
-		if strings.HasPrefix(wu.MIME, "text/") {
-			kind = "text"
-		} else if wu.MIME == "application/pdf" {
-			kind = "pdf"
-		} else if strings.HasPrefix(wu.MIME, "image/") {
-			kind = "image"
-		} else if strings.HasPrefix(wu.MIME, "audio/") {
-			kind = "audio"
-		}
-	}
-	if kind == "" {
-		log.Printf("[api] upload: unknown kind for %q (mime=%q); skipping process trigger", name, wu.MIME)
-		return
-	}
+	kind := inferKindByExt(name)
 
 	// POST to worker /process/<kind> with {"path": wu.Path}
 	processURL := fmt.Sprintf("%s/process/%s", workerBase, kind)

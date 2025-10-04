@@ -8,6 +8,7 @@ from worker.app.routers import search as search_router
 from worker.app.routers import upload as upload_router
 from worker.app.routers import ask as ask_router
 from worker.app.routers import process as process_router
+from worker.app.routers import export as export_router
 from worker.app.config import settings as C
 from worker.app.qdrant_init import ensure_collections
 
@@ -38,6 +39,7 @@ app.include_router(search_router.router)
 app.include_router(upload_router.router)
 app.include_router(ask_router.router)
 app.include_router(process_router.router)
+app.include_router(export_router.router)
 
 
 @app.on_event("startup")

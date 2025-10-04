@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net/http"
 
-	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
 	"jsonify2ai/api/internal/config"
@@ -35,19 +35,6 @@ func main() {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
-	// CORS middleware
-	r.Use(cors.New(cors.Config{
-		AllowOrigins: []string{
-			"http://localhost:5173",
-			"http://127.0.0.1:5173",
-			"http://localhost:5174",
-			"http://127.0.0.1:5174",
-		},
-		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
-		AllowHeaders:     []string{"*"},
-		AllowCredentials: true,
-	}))
-
 	// Do not trust any upstream proxies by default.
 	// This silences the "You trusted all proxies" warning and is safer for dev.
 	if err := r.SetTrustedProxies(nil); err != nil {
@@ -68,9 +55,7 @@ func main() {
 	log.Printf("[api] starting on %s (PG=%s Qdrant=%s Ollama=%s DocsDir=%s Worker=%s)",
 		addr, nz(cfg.PostgresDSN), nz(cfg.QdrantURL), nz(cfg.OllamaURL), nz(cfg.DocsDir), nz(cfg.WorkerBase))
 
-	if err := r.Run(addr); err != nil {
-		log.Fatal(err)
-	}
+	log.Fatal(http.ListenAndServe(addr, routes.WithCORS(r)))
 }
 
 func nz(s string) string {
