@@ -36,6 +36,32 @@ jobs:
         run: |
           docker compose build worker api
 
+      - name: Create .env file
+        run: |
+          cat > .env << 'EOF'
+          # External services
+          QDRANT_URL=http://localhost:6333
+          OLLAMA_URL=http://localhost:11434
+          POSTGRES_DSN=
+
+          # Collections / Embeddings
+          QDRANT_COLLECTION=jsonify2ai_chunks_768
+          QDRANT_COLLECTION_IMAGES=jsonify2ai_images_768
+          EMBEDDINGS_MODEL=nomic-embed-text:latest
+          EMBEDDING_DIM=768
+
+          # LLM Ask Settings
+          ASK_MODE=llm
+          ASK_MODEL=qwen2.5:3b-instruct-q4_K_M
+
+          # Dev Toggles (safe defaults)
+          EMBED_DEV_MODE=0
+          AUDIO_DEV_MODE=1
+          STT_MODEL=tiny
+          HF_HUB_ENABLE_HF_TRANSFER=0
+          HF_HUB_DISABLE_SYMLINKS_WARNING=1
+          EOF
+
       - name: Start worker & api
         run: |
           docker compose up -d worker api
