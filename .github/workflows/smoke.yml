@@ -122,10 +122,96 @@ jobs:
           "
           fi
 
+          if [ -f "data/dropzone/smoke_golden/sample.pdf" ]; then
+            echo "✓ sample.pdf found in repo"
+          else
+            echo "✗ sample.pdf missing from repo, creating sample..."
+            # Create a simple PDF with some text content
+            python3 -c "
+          from reportlab.pdfgen import canvas
+          from reportlab.lib.pagesizes import letter
+          import os
+
+          # Create output directory if it doesn't exist
+          os.makedirs('data/dropzone/smoke_golden', exist_ok=True)
+
+          # Create a simple PDF
+          c = canvas.Canvas('data/dropzone/smoke_golden/sample.pdf', pagesize=letter)
+          c.drawString(100, 750, 'Sample PDF for Smoke Testing')
+          c.drawString(100, 730, 'This is a test document for CI/CD validation.')
+          c.drawString(100, 710, 'Pallet handling and logistics operations.')
+          c.drawString(100, 690, 'End-to-end testing with golden samples.')
+          c.save()
+          print('Created sample.pdf')
+          " || echo "Failed to create PDF with reportlab, trying alternative method..."
+
+          # Fallback: create a minimal PDF using a different approach
+          if [ ! -f "data/dropzone/smoke_golden/sample.pdf" ]; then
+            echo "Creating minimal PDF using alternative method..."
+            python3 -c "
+          import struct
+          # Create a minimal PDF with basic structure
+          pdf_content = b'''%PDF-1.4
+          1 0 obj
+          <<
+          /Type /Catalog
+          /Pages 2 0 R
+          >>
+          endobj
+          2 0 obj
+          <<
+          /Type /Pages
+          /Kids [3 0 R]
+          /Count 1
+          >>
+          endobj
+          3 0 obj
+          <<
+          /Type /Page
+          /Parent 2 0 R
+          /MediaBox [0 0 612 792]
+          /Contents 4 0 R
+          >>
+          endobj
+          4 0 obj
+          <<
+          /Length 44
+          >>
+          stream
+          BT
+          /F1 12 Tf
+          100 700 Td
+          (Sample PDF for testing) Tj
+          ET
+          endstream
+          endobj
+          xref
+          0 5
+          0000000000 65535 f
+          0000000009 00000 n
+          0000000058 00000 n
+          0000000115 00000 n
+          0000000204 00000 n
+          trailer
+          <<
+          /Size 5
+          /Root 1 0 R
+          >>
+          startxref
+          297
+          %%EOF'''
+
+          with open('data/dropzone/smoke_golden/sample.pdf', 'wb') as f:
+              f.write(pdf_content)
+          print('Created minimal sample.pdf')
+          "
+          fi
+          fi
+
           echo "Final verification:"
           ls -la data/dropzone/smoke_golden/
           test -f data/dropzone/smoke_golden/text_sample.md && echo "✓ text_sample.md exists" || echo "✗ text_sample.md missing"
-          test -f data/dropzone/Mauricio-A-Ventura-FlowCV-Resume-20250805-3.pdf && echo "✓ PDF exists" || echo "✗ PDF missing"
+          test -f data/dropzone/smoke_golden/sample.pdf && echo "✓ sample.pdf exists" || echo "✗ sample.pdf missing"
           test -f data/dropzone/smoke_golden/test.png && echo "✓ test.png exists" || echo "✗ test.png missing"
 
       - name: Run smoke

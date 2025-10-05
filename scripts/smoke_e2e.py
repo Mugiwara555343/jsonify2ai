@@ -13,7 +13,7 @@ WORKER = os.getenv("WORKER_URL", "http://localhost:8090")
 
 # Golden sample paths (relative to repo root; worker expects data/dropzone/<rel>)
 TEXT_PATH = "data/dropzone/smoke_golden/text_sample.md"
-PDF_PATH = "data/dropzone/Mauricio-A-Ventura-FlowCV-Resume-20250805-3.pdf"
+PDF_PATH = "data/dropzone/smoke_golden/sample.pdf"
 IMAGE_PATH = "data/dropzone/smoke_golden/test.png"
 
 
