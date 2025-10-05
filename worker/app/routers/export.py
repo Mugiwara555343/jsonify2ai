@@ -64,4 +64,6 @@ def export_get(
     data = _export_doc(client, coll, document_id)
     if not data:
         raise HTTPException(status_code=404, detail="no points for document_id")
-    return data
+    fname = f'export_{document_id}_{ "images" if coll == settings.QDRANT_COLLECTION_IMAGES else "chunks" }.jsonl'
+    headers = {"Content-Disposition": f'attachment; filename="{fname}"'}
+    return PlainTextResponse(content=data, headers=headers)

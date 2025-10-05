@@ -524,6 +524,18 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines, or just open an issue/PR.
   - everything else → `/process/text` (auto-detected downstream)
 - After a successful upload, the UI polls `/status` and shows **Processed ✓** when `counts.total` increases.
 
+The `/upload` endpoint responds with the worker processing summary:
+```json
+{
+  "ok": true,
+  "document_id": "...",
+  "chunks": 6,
+  "upserted": 6,
+  "collection": "jsonify2ai_chunks_768"
+}
+```
+The web UI shows "Processed ✓" after `/status.total` increases and offers a "Download JSON" link for the last upload.
+
 ## License
 
 MIT — use, hack, extend.

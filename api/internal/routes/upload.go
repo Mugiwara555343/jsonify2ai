@@ -135,11 +135,7 @@ func (h *UploadHandler) Post(c *gin.Context) {
 		return
 	}
 
-	// Relay the worker's JSON response
-	c.Status(resp.StatusCode)
-	_, _ = io.Copy(c.Writer, bytes.NewReader(buf.Bytes()))
-
-	// Best-effort: parse worker JSON and trigger processing in the background
+	// Parse worker upload response to get path for processing
 	type workerUpload struct {
 		Ok       bool   `json:"ok"`
 		Path     string `json:"path"`
@@ -149,10 +145,16 @@ func (h *UploadHandler) Post(c *gin.Context) {
 	var wu workerUpload
 	if err := json.Unmarshal(buf.Bytes(), &wu); err != nil {
 		log.Printf("[api] upload: worker JSON parse failed: %v", err)
+		// Relay the worker's JSON response even if parsing fails
+		c.Status(resp.StatusCode)
+		_, _ = io.Copy(c.Writer, bytes.NewReader(buf.Bytes()))
 		return
 	}
 	if wu.Path == "" && wu.Filename == "" {
-		return // nothing to process
+		// Relay the worker's JSON response
+		c.Status(resp.StatusCode)
+		_, _ = io.Copy(c.Writer, bytes.NewReader(buf.Bytes()))
+		return
 	}
 
 	// Infer kind from extension using the helper function
@@ -162,23 +164,31 @@ func (h *UploadHandler) Post(c *gin.Context) {
 	}
 	kind := inferKindByExt(name)
 
-	// POST to worker /process/<kind> with {"path": wu.Path}
+	// POST to worker /process/<kind> with {"path": wu.Path} and return the result
 	processURL := fmt.Sprintf("%s/process/%s", workerBase, kind)
-	bodyJSON, _ := json.Marshal(map[string]string{"path": wu.Path})
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-		req2, err := http.NewRequestWithContext(ctx, http.MethodPost, processURL, bytes.NewReader(bodyJSON))
-		if err != nil {
-			log.Printf("[api] process build failed: %v", err)
-			return
-		}
-		req2.Header.Set("Content-Type", "application/json")
-		if resp2, err := client.Do(req2); err != nil {
-			log.Printf("[api] process call failed: %v", err)
-		} else {
-			_ = resp2.Body.Close()
-			log.Printf("[api] process %s triggered for %s (status=%d)", kind, name, resp2.StatusCode)
-		}
-	}()
+	payload := map[string]any{
+		"path": wu.Path,
+	}
+	bodyJSON, _ := json.Marshal(payload)
+
+	req2, err := http.NewRequestWithContext(context.Background(), http.MethodPost, processURL, bytes.NewReader(bodyJSON))
+	if err != nil {
+		log.Printf("[api] process build failed: %v", err)
+		http.Error(c.Writer, "worker process failed", http.StatusBadGateway)
+		return
+	}
+	req2.Header.Set("Content-Type", "application/json")
+
+	resp2, err := client.Do(req2)
+	if err != nil {
+		log.Printf("[api] process %s failed: %v", kind, err)
+		http.Error(c.Writer, "worker process failed", http.StatusBadGateway)
+		return
+	}
+	defer resp2.Body.Close()
+
+	// Pass through worker status + body to the client
+	c.Header("Content-Type", "application/json")
+	c.Status(resp2.StatusCode)
+	io.Copy(c.Writer, resp2.Body)
 }

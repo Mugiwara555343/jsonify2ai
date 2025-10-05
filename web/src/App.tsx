@@ -16,13 +16,22 @@ async function uploadFile(file: File): Promise<any> {
   return data; // expect {"ok":true, ...}
 }
 
-async function waitForProcessed(oldTotal: number, timeoutMs = 15000) {
+function sleep(ms: number) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+function visible(): boolean {
+  return typeof document !== "undefined" ? document.visibilityState === "visible" : true;
+}
+
+async function waitForProcessed(oldTotal: number, timeoutMs = 20000, intervalMs = 4000) {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
-    const s = await fetch(`${apiBase}/status`).then(r => r.json());
+    if (!visible()) { await sleep(500); continue; }
+    const s = await fetch(`${apiBase}/status`).then(r => r.json()).catch(() => null);
     const total = s?.counts?.total ?? 0;
     if (total > oldTotal) return { ok: true, total };
-    await new Promise(r => setTimeout(r, 1000));
+    await sleep(intervalMs);
   }
   return { ok: false };
 }
@@ -44,6 +53,7 @@ function App() {
   const [ans, setAns] = useState<AskResp | null>(null)
   const [uploadBusy, setUploadBusy] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+  const [lastDoc, setLastDoc] = useState<{id:string, kind:string} | null>(null)
 
   function showToast(msg: string) {
     setToast(msg);
@@ -90,10 +100,21 @@ function App() {
     try {
       const s0 = await fetch(`${apiBase}/status`).then(r => r.json()).catch(() => ({counts:{total:0}}))
       const baseTotal = s0?.counts?.total ?? 0
-      await uploadFile(file)
-      const done = await waitForProcessed(baseTotal, 20000)
-      showToast(done.ok ? "Processed ✓" : "Uploaded (pending…)") // non-blocking fallback
-      // optional: trigger a refresh of search results here
+
+      const fd = new FormData();
+      fd.append("file", file, file.name);
+      const res = await fetch(`${apiBase}/upload`, { method: "POST", body: fd });
+      const data = await res.json();
+
+      // if API returns worker JSON, we'll have document_id and collection
+      const docId = data?.document_id as string | undefined;
+      const coll  = (data?.collection || "") as string;
+      const kind  = coll.includes("images") ? "image" : "text"; // images vs chunks
+
+      if (docId) setLastDoc({ id: docId, kind });
+
+      const done = await waitForProcessed(baseTotal, 20000, 4000);
+      showToast(done.ok ? "Processed ✓" : "Uploaded (pending…)");
     } catch (err:any) {
       showToast(`Upload failed: ${err?.message || err}`)
     } finally {
@@ -122,6 +143,14 @@ function App() {
         <input type="file" onChange={onUploadChange} disabled={uploadBusy} />
         {uploadBusy && <span className="text-sm opacity-70">Uploading…</span>}
         {toast && <span className="text-sm text-green-600">{toast}</span>}
+        {lastDoc && (
+          <button
+            className="text-xs underline opacity-70 hover:opacity-100"
+            onClick={() => downloadJson(lastDoc.id, lastDoc.kind)}
+          >
+            Download JSON (last upload)
+          </button>
+        )}
       </div>
       <div style={{ marginTop: 24 }}>
         <h2 style={{ fontSize: 18, marginBottom: 8 }}>Ask</h2>
