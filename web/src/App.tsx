@@ -3,6 +3,7 @@ import './App.css'
 
 type Status = { ok: boolean; counts: { chunks: number; images: number; total?: number } }
 type Hit = { id: string; score: number; text?: string; caption?: string; path?: string; idx?: number; kind?: string; document_id?: string }
+type Document = { document_id: string; kinds: string[]; paths: string[]; counts: Record<string, number> }
 const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8082"
 type AskResp = { ok: boolean; mode: 'search' | 'llm'; model?: string; answer: string; sources: Hit[] }
 
@@ -42,6 +43,24 @@ function downloadJson(documentId: string, kind: string | undefined) {
   window.open(url, '_blank')
 }
 
+function collectionForDoc(d: Document) {
+  return (d.kinds || []).includes("image") ? "jsonify2ai_images_768" : "jsonify2ai_chunks_768";
+}
+
+function copyToClipboard(text: string) {
+  navigator.clipboard.writeText(text).then(() => {
+    // Toast will be shown by caller
+  }).catch(() => {
+    // Fallback for older browsers
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    document.body.appendChild(textArea);
+    textArea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textArea);
+  });
+}
+
 function App() {
   const [s, setS] = useState<Status | null>(null)
   const [q, setQ] = useState('')
@@ -54,6 +73,7 @@ function App() {
   const [uploadBusy, setUploadBusy] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [lastDoc, setLastDoc] = useState<{id:string, kind:string} | null>(null)
+  const [docs, setDocs] = useState<Document[]>([])
 
   function showToast(msg: string) {
     setToast(msg);
@@ -62,12 +82,23 @@ function App() {
 
   useEffect(() => {
     fetchStatus()
+    fetchDocuments()
   }, [])
 
   const fetchStatus = async () => {
     const res = await fetch(`${apiBase}/status`)
     const j = await res.json()
     setS(j)
+  }
+
+  const fetchDocuments = async () => {
+    try {
+      const res = await fetch(`${apiBase}/documents`)
+      const j = await res.json()
+      setDocs(j)
+    } catch (err) {
+      console.error('Failed to fetch documents:', err)
+    }
   }
 
   async function doSearch(q: string, kind: string) {
@@ -230,6 +261,76 @@ function App() {
           ))}
         </div>
       )}
+      <div style={{ marginTop: 24 }}>
+        <h2 style={{ fontSize: 18, marginBottom: 8 }}>Documents</h2>
+        <div style={{ marginBottom: 12 }}>
+          <button
+            onClick={fetchDocuments}
+            style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14 }}
+          >
+            Refresh documents
+          </button>
+        </div>
+        {docs.length > 0 && (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {docs.map((doc, i) => (
+              <div key={i} style={{ padding: 12, border: '1px solid #eee', borderRadius: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <code style={{ fontSize: 12, fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
+                    {doc.document_id}
+                  </code>
+                  <button
+                    onClick={() => {
+                      copyToClipboard(doc.document_id);
+                      showToast('Document ID copied');
+                    }}
+                    style={{ fontSize: 12, color: '#666', textDecoration: 'underline' }}
+                  >
+                    Copy ID
+                  </button>
+                </div>
+                <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
+                  {doc.kinds.map((kind, j) => (
+                    <span key={j} style={{ fontSize: 12, background: '#e3f2fd', color: '#1976d2', padding: '2px 6px', borderRadius: 12 }}>
+                      {kind}
+                    </span>
+                  ))}
+                </div>
+                <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
+                  {doc.paths[0] && <div>Path: {doc.paths[0]}</div>}
+                  <div>Counts: {Object.entries(doc.counts).map(([k, v]) => `${k}: ${v}`).join(', ')}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => {
+                      const collection = collectionForDoc(doc);
+                      const url = `${apiBase}/export?document_id=${encodeURIComponent(doc.document_id)}&collection=${collection}`;
+                      window.open(url, '_blank');
+                    }}
+                    style={{ fontSize: 12, color: '#1976d2', textDecoration: 'underline' }}
+                  >
+                    Export JSON
+                  </button>
+                  <button
+                    onClick={() => {
+                      const collection = collectionForDoc(doc);
+                      const cmd = `Invoke-WebRequest "http://localhost:8082/export?document_id=${doc.document_id}&collection=${collection}" -OutFile "export_${doc.document_id}.jsonl"`;
+                      copyToClipboard(cmd);
+                      showToast('Export command copied');
+                    }}
+                    style={{ fontSize: 12, color: '#1976d2', textDecoration: 'underline' }}
+                  >
+                    Copy export cmd
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {docs.length === 0 && (
+          <div style={{ color: '#666', fontSize: 14 }}>No documents found. Upload some files to see them here.</div>
+        )}
+      </div>
       <div style={{ marginTop: 16, opacity: .7, fontSize: 12 }}>API: {apiBase}</div>
     </div>
   )

@@ -180,6 +180,23 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 		forwardResp(c, resp)
 	})
 
+	// ----------------------------- /documents -----------------------------
+	// GET /documents → forward to worker /documents
+	r.GET("/documents", func(c *gin.Context) {
+		target := getWorkerBase() + "/documents"
+		req, err := http.NewRequestWithContext(c.Request.Context(), "GET", target, nil)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
+			return
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
+			return
+		}
+		forwardResp(c, resp)
+	})
+
 	// ------------------------------- /ask -------------------------------
 	// POST /ask → forward JSON body to worker /ask
 	r.POST("/ask", func(c *gin.Context) {

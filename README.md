@@ -212,13 +212,49 @@ cd web && npm run dev
 - `POST /upload` - File upload and processing
 - `GET /search` - Forwarded search
 - `POST /ask` - Forwarded ask
+- `GET /documents` - List all documents with metadata
 
-### Export JSONL for a document
-Download all chunks for a document as JSONL:
+### Listing & Exporting Documents
 
+**List all documents:**
 ```
-GET /export?document_id=...&collection=chunks  # text/pdf/csv/docx/html
-GET /export?document_id=...&collection=images  # image captions
+GET /documents
+```
+Returns recent document IDs with kinds, paths, and counts.
+
+**Export document data:**
+```
+GET /export?document_id=<DOC>&collection=<COLL>  # specific collection
+GET /export?document_id=<DOC>                   # auto-detect collection
+```
+
+If collection is omitted, the worker will attempt both collections automatically.
+
+**Examples:**
+```bash
+# List documents
+curl "http://localhost:8082/documents"
+
+# Export specific document
+curl "http://localhost:8082/export?document_id=abc123&collection=chunks" -o export.jsonl
+
+# Auto-detect collection
+curl "http://localhost:8082/export?document_id=abc123" -o export.jsonl
+```
+
+### Saving exports
+
+We recommend saving JSONL exports to a local `exports/` folder (which is .gitignored):
+
+```powershell
+# Windows PowerShell
+.\scripts\export_doc.ps1 -DocId <DOCID> -Collection jsonify2ai_chunks_768
+.\scripts\export_doc.ps1 -DocId <DOCID> -Collection jsonify2ai_images_768
+```
+
+```bash
+# curl
+curl "http://localhost:8082/export?document_id=<DOCID>&collection=<COLL>" -o exports/export_<DOCID>.jsonl
 ```
 
 The JSONL rows include: `id, document_id, path, kind, idx, text, meta`.

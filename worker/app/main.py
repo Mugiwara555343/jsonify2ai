@@ -9,6 +9,7 @@ from worker.app.routers import upload as upload_router
 from worker.app.routers import ask as ask_router
 from worker.app.routers import process as process_router
 from worker.app.routers import export as export_router
+from worker.app.routers import documents as documents_router
 from worker.app.config import settings as C
 from worker.app.qdrant_init import ensure_collections
 
@@ -40,6 +41,7 @@ app.include_router(upload_router.router)
 app.include_router(ask_router.router)
 app.include_router(process_router.router)
 app.include_router(export_router.router)
+app.include_router(documents_router.router)
 
 
 @app.on_event("startup")
@@ -57,7 +59,9 @@ async def _startup_log():
             )
     except Exception as e:
         logging.warning(f"[worker] ensure_collections skipped due to error: {e}")
-    logging.info("[worker] Routes: /health /status /search /upload /ask /process")
+    logging.info(
+        "[worker] Routes: /health /status /search /upload /ask /process /export /documents"
+    )
 
 
 @app.get("/")

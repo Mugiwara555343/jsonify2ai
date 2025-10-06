@@ -90,3 +90,8 @@ _snapshots/
 copilot-instructions.md
 Day_to_Day.md
 STATE.md
+
+# === Local export artifacts (kept out of VCS) ===
+/export_*.jsonl
+/export_*.json
+/exports/
