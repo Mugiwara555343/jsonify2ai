@@ -49,13 +49,13 @@ func main() {
 	})
 
 	// Register all routes
-	routes.RegisterRoutes(r, dbConn, cfg.DocsDir, cfg.WorkerBase)
+	routes.RegisterRoutes(r, dbConn, cfg.DocsDir, cfg.WorkerBase, cfg)
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
 	log.Printf("[api] starting on %s (PG=%s Qdrant=%s Ollama=%s DocsDir=%s Worker=%s)",
 		addr, nz(cfg.PostgresDSN), nz(cfg.QdrantURL), nz(cfg.OllamaURL), nz(cfg.DocsDir), nz(cfg.WorkerBase))
 
-	log.Fatal(http.ListenAndServe(addr, routes.WithCORS(r)))
+	log.Fatal(http.ListenAndServe(addr, routes.WithCORS(r, cfg)))
 }
 
 func nz(s string) string {

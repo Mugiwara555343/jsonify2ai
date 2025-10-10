@@ -7,7 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"time"
+
+	"jsonify2ai/api/internal/config"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,7 +24,7 @@ func workerURL(base string) string {
 	return "http://worker:8090"
 }
 
-func addAskSearchRoutes(r *gin.Engine, base string) {
+func addAskSearchRoutes(r *gin.Engine, base string, cfg *config.Config) {
 	w := workerURL(base)
 
 	// GET /search?q=...&k=...
@@ -31,7 +32,7 @@ func addAskSearchRoutes(r *gin.Engine, base string) {
 
 		q := c.Query("q")
 		if q == "" {
-			c.String(http.StatusBadRequest, "missing q")
+			c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": "missing q"})
 			return
 		}
 		k := c.DefaultQuery("k", "5")
@@ -48,13 +49,13 @@ func addAskSearchRoutes(r *gin.Engine, base string) {
 		}
 		u := w + "/search?" + params.Encode()
 
-		ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(c.Request.Context(), cfg.GetSearchTimeout())
 		defer cancel()
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			c.String(http.StatusBadGateway, err.Error())
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
 			return
 		}
 		defer resp.Body.Close()
@@ -69,14 +70,14 @@ func addAskSearchRoutes(r *gin.Engine, base string) {
 		body, _ := io.ReadAll(c.Request.Body)
 		_ = c.Request.Body.Close()
 
-		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(c.Request.Context(), cfg.GetAskTimeout())
 		defer cancel()
 		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, w+"/ask", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			c.String(http.StatusBadGateway, err.Error())
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
 			return
 		}
 		defer resp.Body.Close()

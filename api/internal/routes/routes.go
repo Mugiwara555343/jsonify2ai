@@ -1,8 +1,6 @@
 package routes
 
 import (
-	"bytes"
-	"context"
 	"database/sql"
 	"encoding/json"
 	"io"
@@ -10,20 +8,27 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"time"
+	"strings"
+
+	"jsonify2ai/api/internal/config"
 
 	"github.com/gin-gonic/gin"
 )
 
-func withCORS(next http.Handler) http.Handler {
+func withCORS(next http.Handler, cfg *config.Config) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		// allow localhost dev ports; keep it simple
-		allowed := map[string]bool{
-			"http://localhost:5173": true,
-			"http://127.0.0.1:5173": true,
+
+		// Parse allowed origins from config
+		allowedOrigins := make(map[string]bool)
+		if cfg.CORSOrigins != "" {
+			origins := strings.Split(cfg.CORSOrigins, ",")
+			for _, o := range origins {
+				allowedOrigins[strings.TrimSpace(o)] = true
+			}
 		}
-		if allowed[origin] {
+
+		if allowedOrigins[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
@@ -39,17 +44,17 @@ func withCORS(next http.Handler) http.Handler {
 }
 
 // WithCORS wraps a Gin engine with CORS middleware
-func WithCORS(ginEngine *gin.Engine) http.Handler {
-	return withCORS(ginEngine)
+func WithCORS(ginEngine *gin.Engine, cfg *config.Config) http.Handler {
+	return withCORS(ginEngine, cfg)
 }
 
 // RegisterRoutes registers all routes with the given gin engine
-func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string) {
+func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string, cfg *config.Config) {
 	// Basic API-only health (liveness)
 	RegisterHealth(r)
 
 	// Upload endpoint - now forwards directly to worker
-	r.POST("/upload", (&UploadHandler{}).Post)
+	r.POST("/upload", (&UploadHandler{Config: cfg}).Post)
 	log.Printf("[routes] registered upload endpoint with docsDir=%s", docsDir)
 
 	// Resolve worker base URL (env WORKER_URL takes precedence; default to http://worker:8090)
@@ -63,8 +68,8 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 		return "http://worker:8090"
 	}
 
-	// Shared HTTP client with sane timeout
-	httpClient := &http.Client{Timeout: 15 * time.Second}
+	// Shared HTTP client with configurable timeout
+	httpClient := &http.Client{Timeout: cfg.GetHTTPTimeout()}
 
 	// Helper: forward an HTTP response back to Gin
 	forwardResp := func(c *gin.Context, resp *http.Response) {
@@ -180,6 +185,25 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 		forwardResp(c, resp)
 	})
 
+	// ------------------------- /export/archive -------------------------
+	// GET /export/archive?document_id=...&collection=...
+	r.GET("/export/archive", func(c *gin.Context) {
+		// proxy GET /export/archive preserving raw query
+		target := getWorkerBase() + "/export/archive?" + c.Request.URL.RawQuery
+		req, err := http.NewRequestWithContext(c.Request.Context(), "GET", target, nil)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
+			return
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
+			return
+		}
+		// forward content-type (application/zip) and body
+		forwardResp(c, resp)
+	})
+
 	// ----------------------------- /documents -----------------------------
 	// GET /documents → forward to worker /documents
 	r.GET("/documents", func(c *gin.Context) {
@@ -197,28 +221,6 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 		forwardResp(c, resp)
 	})
 
-	// ------------------------------- /ask -------------------------------
-	// POST /ask → forward JSON body to worker /ask
-	r.POST("/ask", func(c *gin.Context) {
-		body, err := io.ReadAll(c.Request.Body)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": "invalid body"})
-			return
-		}
-		target := getWorkerBase() + "/ask"
-		req, err := http.NewRequestWithContext(context.Background(), "POST", target, bytes.NewReader(body))
-		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
-			return
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "application/json")
-
-		resp, err := httpClient.Do(req)
-		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
-			return
-		}
-		forwardResp(c, resp)
-	})
+	// Add ask/search routes with config
+	addAskSearchRoutes(r, getWorkerBase(), cfg)
 }

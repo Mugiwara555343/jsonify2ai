@@ -74,10 +74,12 @@ function App() {
   const [toast, setToast] = useState<string | null>(null)
   const [lastDoc, setLastDoc] = useState<{id:string, kind:string} | null>(null)
   const [docs, setDocs] = useState<Document[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [askLoading, setAskLoading] = useState(false)
 
-  function showToast(msg: string) {
+  function showToast(msg: string, isError = false) {
     setToast(msg);
-    setTimeout(() => setToast(null), 3000);
+    setTimeout(() => setToast(null), isError ? 5000 : 3000);
   }
 
   useEffect(() => {
@@ -120,8 +122,29 @@ function App() {
   }
 
   const handleSearch = async () => {
-    const resp = await doSearch(q, kind);
-    setRes(resp.results ?? []);
+    if (!q.trim()) {
+      showToast("Please enter a search query", true);
+      return;
+    }
+
+    setSearchLoading(true);
+    try {
+      const resp = await doSearch(q, kind);
+      if (resp.ok === false) {
+        showToast(`Search failed: ${resp.error || 'Unknown error'}`, true);
+        setRes([]);
+      } else {
+        setRes(resp.results ?? []);
+        if ((resp.results ?? []).length === 0) {
+          showToast("No results found. Try different keywords or check if documents are processed.");
+        }
+      }
+    } catch (err: any) {
+      showToast(`Search error: ${err?.message || err}`, true);
+      setRes([]);
+    } finally {
+      setSearchLoading(false);
+    }
   }
 
   async function onUploadChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -135,6 +158,12 @@ function App() {
       const fd = new FormData();
       fd.append("file", file, file.name);
       const res = await fetch(`${apiBase}/upload`, { method: "POST", body: fd });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData?.error || errorData?.detail || `Upload failed (${res.status})`);
+      }
+
       const data = await res.json();
 
       // if API returns worker JSON, we'll have document_id and collection
@@ -147,7 +176,7 @@ function App() {
       const done = await waitForProcessed(baseTotal, 20000, 4000);
       showToast(done.ok ? "Processed ✓" : "Uploaded (pending…)");
     } catch (err:any) {
-      showToast(`Upload failed: ${err?.message || err}`)
+      showToast(`Upload failed: ${err?.message || err}`, true)
     } finally {
       setUploadBusy(false)
       e.target.value = "" // reset input
@@ -173,7 +202,16 @@ function App() {
       <div className="mb-4 flex items-center gap-3">
         <input type="file" onChange={onUploadChange} disabled={uploadBusy} />
         {uploadBusy && <span className="text-sm opacity-70">Uploading…</span>}
-        {toast && <span className="text-sm text-green-600">{toast}</span>}
+        {toast && (
+          <span
+            className="text-sm"
+            style={{
+              color: toast.includes('failed') || toast.includes('error') || toast.includes('Error') ? '#dc2626' : '#16a34a'
+            }}
+          >
+            {toast}
+          </span>
+        )}
         {lastDoc && (
           <button
             className="text-xs underline opacity-70 hover:opacity-100"
@@ -192,11 +230,51 @@ function App() {
             placeholder="ask your data…"
             style={{ flex: 1, padding: 12, borderRadius: 8, border: '1px solid #ddd' }}
           />
-          <button onClick={async () => {
-            const r = await fetch(`${apiBase}/ask`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: askQ, k: 6 }) })
-            const j: AskResp = await r.json()
-            setAns(j)
-          }} style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid #ddd' }}>Ask</button>
+          <button
+            onClick={async () => {
+              if (!askQ.trim()) {
+                showToast("Please enter a question", true);
+                return;
+              }
+
+              setAskLoading(true);
+              try {
+                const r = await fetch(`${apiBase}/ask`, {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ query: askQ, k: 6 })
+                });
+
+                if (!r.ok) {
+                  const errorData = await r.json().catch(() => ({}));
+                  throw new Error(errorData?.error || errorData?.detail || `Ask failed (${r.status})`);
+                }
+
+                const j: AskResp = await r.json();
+                if (j.ok === false) {
+                  showToast(`Ask failed: ${j.error || 'Unknown error'}`, true);
+                  setAns(null);
+                } else {
+                  setAns(j);
+                }
+              } catch (err: any) {
+                showToast(`Ask error: ${err?.message || err}`, true);
+                setAns(null);
+              } finally {
+                setAskLoading(false);
+              }
+            }}
+            disabled={askLoading}
+            style={{
+              padding: '12px 16px',
+              borderRadius: 8,
+              border: '1px solid #ddd',
+              opacity: askLoading ? 0.6 : 1,
+              cursor: askLoading ? 'not-allowed' : 'pointer'
+            }}
+          >
+            {askLoading ? 'Asking...' : 'Ask'}
+          </button>
         </div>
         {ans && (
           <div style={{ marginTop: 12, padding: 12, border: '1px solid #eee', borderRadius: 10 }}>
@@ -229,9 +307,16 @@ function App() {
         </select>
         <button
           onClick={handleSearch}
-          style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid #ddd' }}
+          disabled={searchLoading}
+          style={{
+            padding: '12px 16px',
+            borderRadius: 8,
+            border: '1px solid #ddd',
+            opacity: searchLoading ? 0.6 : 1,
+            cursor: searchLoading ? 'not-allowed' : 'pointer'
+          }}
         >
-          Search
+          {searchLoading ? 'Searching...' : 'Search'}
         </button>
       </div>
       {res.length > 0 && (

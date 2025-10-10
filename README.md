@@ -228,6 +228,41 @@ GET /export?document_id=<DOC>&collection=<COLL>  # specific collection
 GET /export?document_id=<DOC>                   # auto-detect collection
 ```
 
+### Export ZIP
+
+Bundle JSONL rows and the original source file (if present) into a single ZIP.
+
+```
+GET /export/archive?document_id=<DOC>&collection=<COLL>
+GET /export/archive?document_id=<DOC>  # auto-detects: chunks first, then images
+```
+
+Examples:
+
+```bash
+# curl (Linux/macOS/Git Bash)
+DOC="<DOC>"
+curl -L "http://localhost:8082/export/archive?document_id=$DOC&collection=jsonify2ai_chunks_768" \
+     -o exports/export_${DOC}.zip
+
+# auto-detect collection
+curl -L "http://localhost:8082/export/archive?document_id=$DOC" \
+     -o exports/export_${DOC}.zip
+```
+
+```powershell
+# PowerShell (Windows)
+$DOC = "<DOC>"
+Invoke-WebRequest "http://localhost:8082/export/archive?document_id=$DOC&collection=jsonify2ai_chunks_768" `
+  -OutFile "exports\export_$DOC.zip"
+
+# auto-detect collection
+Invoke-WebRequest "http://localhost:8082/export/archive?document_id=$DOC" `
+  -OutFile "exports\export_$DOC.zip"
+```
+
+Note: the `collection` parameter is optional; auto-detection tries chunks then images. The response sets `Content-Type: application/zip` and includes header `X-Collection-Used`.
+
 If collection is omitted, the worker will attempt both collections automatically.
 
 **Examples:**
@@ -324,6 +359,40 @@ IMAGES_CAPTION_MODEL=Salesforce/blip-image-captioning-base  # Caption model
 API_URL=http://localhost:8082
 WORKER_URL=http://localhost:8090
 ```
+
+#### Complete Environment Variables Reference
+
+| Variable | Default | Description | Required |
+|----------|---------|-------------|----------|
+| **Core Services** |
+| `QDRANT_URL` | `http://host.docker.internal:6333` | Qdrant vector database URL | Yes |
+| `OLLAMA_URL` | `http://host.docker.internal:11434` | Ollama LLM service URL | No |
+| `WORKER_URL` | `http://worker:8090` | Worker service URL (API → Worker) | No |
+| **API Service** |
+| `PORT_API` | `8082` | API service port | No |
+| `GIN_MODE` | `release` | Gin framework mode (debug/release) | No |
+| `DOCS_DIR` | `./data/documents` | Documents directory path | No |
+| `POSTGRES_DSN` | - | PostgreSQL connection string (optional) | No |
+| **Worker Service** |
+| `QDRANT_COLLECTION` | `jsonify2ai_chunks` | Text chunks collection name | No |
+| `QDRANT_COLLECTION_IMAGES` | `jsonify2ai_images_768` | Images collection name | No |
+| `EMBEDDING_DIM` | `768` | Vector embedding dimension | No |
+| `CHUNK_SIZE` | `800` | Text chunk size in characters | No |
+| `CHUNK_OVERLAP` | `100` | Text chunk overlap in characters | No |
+| **HTTP Timeouts (seconds)** |
+| `HTTP_TIMEOUT_SECONDS` | `15` | General HTTP client timeout | No |
+| `UPLOAD_TIMEOUT_SECONDS` | `60` | File upload timeout | No |
+| `SEARCH_TIMEOUT_SECONDS` | `15` | Search request timeout | No |
+| `ASK_TIMEOUT_SECONDS` | `30` | Ask/LLM request timeout | No |
+| **CORS Configuration** |
+| `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Allowed CORS origins (comma-separated) | No |
+| **Development Modes** |
+| `EMBED_DEV_MODE` | `0` | Skip real embeddings (use dummy vectors) | No |
+| `AUDIO_DEV_MODE` | `0` | Skip audio transcription | No |
+| `IMAGES_CAPTION` | `0` | Enable image captioning | No |
+| `IMAGES_CAPTION_MODEL` | `Salesforce/blip-image-captioning-base` | Image captioning model | No |
+| **Web Interface** |
+| `VITE_API_URL` | `http://localhost:8082` | API URL for web interface | No |
 
 ### Setup Instructions
 

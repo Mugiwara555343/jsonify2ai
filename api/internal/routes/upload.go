@@ -13,7 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
+
+	"jsonify2ai/api/internal/config"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -46,7 +47,9 @@ func inferKindByExt(name string) string {
 
 // UploadHandler forwards incoming multipart data directly to the worker /upload endpoint.
 // No local filesystem writes, no DB writes. The worker ingests from its dropzone.
-type UploadHandler struct{}
+type UploadHandler struct {
+	Config *config.Config
+}
 
 func (h *UploadHandler) Post(c *gin.Context) {
 	// Resolve worker base URL (env WORKER_URL takes precedence; default to http://worker:8090)
@@ -120,7 +123,7 @@ func (h *UploadHandler) Post(c *gin.Context) {
 	// Tag a request id for traceability
 	req.Header.Set("X-Request-Id", uuid.New().String())
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := &http.Client{Timeout: h.Config.GetUploadTimeout()}
 	resp, err := client.Do(req)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "worker unreachable", "detail": err.Error()})
@@ -174,7 +177,7 @@ func (h *UploadHandler) Post(c *gin.Context) {
 	req2, err := http.NewRequestWithContext(context.Background(), http.MethodPost, processURL, bytes.NewReader(bodyJSON))
 	if err != nil {
 		log.Printf("[api] process build failed: %v", err)
-		http.Error(c.Writer, "worker process failed", http.StatusBadGateway)
+		c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "worker process failed", "detail": err.Error()})
 		return
 	}
 	req2.Header.Set("Content-Type", "application/json")
@@ -182,7 +185,7 @@ func (h *UploadHandler) Post(c *gin.Context) {
 	resp2, err := client.Do(req2)
 	if err != nil {
 		log.Printf("[api] process %s failed: %v", kind, err)
-		http.Error(c.Writer, "worker process failed", http.StatusBadGateway)
+		c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "worker process failed", "detail": err.Error()})
 		return
 	}
 	defer resp2.Body.Close()
