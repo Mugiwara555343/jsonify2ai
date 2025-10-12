@@ -95,3 +95,4 @@ STATE.md
 /export_*.jsonl
 /export_*.json
 /exports/
+docs/env.md

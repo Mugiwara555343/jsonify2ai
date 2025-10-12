@@ -120,8 +120,12 @@ func (h *UploadHandler) Post(c *gin.Context) {
 		return
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	// Tag a request id for traceability
-	req.Header.Set("X-Request-Id", uuid.New().String())
+	// Use existing Request-ID or generate new one
+	requestID := c.GetString("request_id")
+	if requestID == "" {
+		requestID = uuid.New().String()
+	}
+	req.Header.Set("X-Request-Id", requestID)
 
 	client := &http.Client{Timeout: h.Config.GetUploadTimeout()}
 	resp, err := client.Do(req)
@@ -181,6 +185,8 @@ func (h *UploadHandler) Post(c *gin.Context) {
 		return
 	}
 	req2.Header.Set("Content-Type", "application/json")
+	// Forward Request-ID to worker
+	req2.Header.Set("X-Request-Id", requestID)
 
 	resp2, err := client.Do(req2)
 	if err != nil {

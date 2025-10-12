@@ -20,6 +20,11 @@ type Config struct {
 	SearchTimeoutSeconds int
 	AskTimeoutSeconds    int
 
+	// API-specific timeouts (in milliseconds)
+	APIReadTimeoutMs  int
+	APIWriteTimeoutMs int
+	APIProxyTimeoutMs int
+
 	// CORS configuration
 	CORSOrigins string
 
@@ -48,6 +53,11 @@ func Load() *Config {
 		UploadTimeoutSeconds: 60,
 		SearchTimeoutSeconds: 15,
 		AskTimeoutSeconds:    30,
+
+		// Default API timeouts (in milliseconds)
+		APIReadTimeoutMs:  15000,
+		APIWriteTimeoutMs: 15000,
+		APIProxyTimeoutMs: 60000,
 
 		// Default CORS origins
 		CORSOrigins: "http://localhost:5173,http://127.0.0.1:5173",
@@ -81,7 +91,28 @@ func Load() *Config {
 		}
 	}
 
-	if v := os.Getenv("CORS_ORIGINS"); v != "" {
+	// Override API timeouts from environment
+	if v := os.Getenv("API_READ_TIMEOUT_MS"); v != "" {
+		if timeout, err := strconv.Atoi(v); err == nil {
+			config.APIReadTimeoutMs = timeout
+		}
+	}
+
+	if v := os.Getenv("API_WRITE_TIMEOUT_MS"); v != "" {
+		if timeout, err := strconv.Atoi(v); err == nil {
+			config.APIWriteTimeoutMs = timeout
+		}
+	}
+
+	if v := os.Getenv("API_PROXY_TIMEOUT_MS"); v != "" {
+		if timeout, err := strconv.Atoi(v); err == nil {
+			config.APIProxyTimeoutMs = timeout
+		}
+	}
+
+	if v := os.Getenv("CORS_ALLOWED_ORIGINS"); v != "" {
+		config.CORSOrigins = v
+	} else if v := os.Getenv("CORS_ORIGINS"); v != "" {
 		config.CORSOrigins = v
 	}
 
@@ -110,4 +141,19 @@ func (c *Config) GetSearchTimeout() time.Duration {
 // GetAskTimeout returns the ask timeout as a time.Duration
 func (c *Config) GetAskTimeout() time.Duration {
 	return time.Duration(c.AskTimeoutSeconds) * time.Second
+}
+
+// GetAPIReadTimeout returns the API read timeout as a time.Duration
+func (c *Config) GetAPIReadTimeout() time.Duration {
+	return time.Duration(c.APIReadTimeoutMs) * time.Millisecond
+}
+
+// GetAPIWriteTimeout returns the API write timeout as a time.Duration
+func (c *Config) GetAPIWriteTimeout() time.Duration {
+	return time.Duration(c.APIWriteTimeoutMs) * time.Millisecond
+}
+
+// GetAPIProxyTimeout returns the API proxy timeout as a time.Duration
+func (c *Config) GetAPIProxyTimeout() time.Duration {
+	return time.Duration(c.APIProxyTimeoutMs) * time.Millisecond
 }

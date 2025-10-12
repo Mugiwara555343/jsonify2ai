@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"jsonify2ai/api/internal/config"
 	"jsonify2ai/api/internal/db"
@@ -41,11 +42,24 @@ func main() {
 		log.Printf("trusted proxies config error: %v", err)
 	}
 
+	// Request-ID middleware
+	r.Use(func(c *gin.Context) {
+		// Generate or use existing Request-ID
+		requestID := c.GetHeader("X-Request-Id")
+		if requestID == "" {
+			requestID = uuid.New().String()
+		}
+		c.Header("X-Request-Id", requestID)
+		c.Set("request_id", requestID)
+		c.Next()
+	})
+
 	// simple request log (tiny)
 	r.Use(func(c *gin.Context) {
 		c.Next()
 		status := c.Writer.Status()
-		log.Printf("%s %s -> %d", c.Request.Method, c.Request.URL.Path, status)
+		requestID := c.GetString("request_id")
+		log.Printf("[api] %s %s -> %d (req-id: %s)", c.Request.Method, c.Request.URL.Path, status, requestID)
 	})
 
 	// Register all routes
@@ -55,7 +69,15 @@ func main() {
 	log.Printf("[api] starting on %s (PG=%s Qdrant=%s Ollama=%s DocsDir=%s Worker=%s)",
 		addr, nz(cfg.PostgresDSN), nz(cfg.QdrantURL), nz(cfg.OllamaURL), nz(cfg.DocsDir), nz(cfg.WorkerBase))
 
-	log.Fatal(http.ListenAndServe(addr, routes.WithCORS(r, cfg)))
+	// Configure server with timeouts
+	server := &http.Server{
+		Addr:         addr,
+		Handler:      routes.WithCORS(r, cfg),
+		ReadTimeout:  cfg.GetAPIReadTimeout(),
+		WriteTimeout: cfg.GetAPIWriteTimeout(),
+	}
+
+	log.Fatal(server.ListenAndServe())
 }
 
 func nz(s string) string {

@@ -16,12 +16,20 @@ from worker.app.qdrant_init import ensure_collections
 app = FastAPI(title="jsonify2ai-worker")
 
 # CORS origins from environment variable or default
-
 cors_origins_env = os.getenv(
-    "CORS_ORIGINS",
-    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:3000,http://127.0.0.1:3000",
+    "WORKER_CORS_ALLOWED_ORIGINS",
+    os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:3000,http://127.0.0.1:3000",
+    ),
 )
-origins = [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()]
+# Support wildcard (*) for all origins
+if cors_origins_env.strip() == "*":
+    origins = ["*"]
+else:
+    origins = [
+        origin.strip() for origin in cors_origins_env.split(",") if origin.strip()
+    ]
 
 app.add_middleware(
     CORSMiddleware,

@@ -69,7 +69,7 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 	}
 
 	// Shared HTTP client with configurable timeout
-	httpClient := &http.Client{Timeout: cfg.GetHTTPTimeout()}
+	httpClient := &http.Client{Timeout: cfg.GetAPIProxyTimeout()}
 
 	// Helper: forward an HTTP response back to Gin
 	forwardResp := func(c *gin.Context, resp *http.Response) {
@@ -117,12 +117,16 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 		target := getWorkerBase() + "/status"
 		req, err := http.NewRequestWithContext(c.Request.Context(), "GET", target, nil)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "request build failed", "detail": err.Error()})
 			return
+		}
+		// Forward Request-ID to worker
+		if requestID := c.GetString("request_id"); requestID != "" {
+			req.Header.Set("X-Request-Id", requestID)
 		}
 		resp, err := httpClient.Do(req)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "worker unreachable", "detail": err.Error()})
 			return
 		}
 		forwardResp(c, resp)
@@ -156,12 +160,16 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 		target := getWorkerBase() + "/search?" + qb.Encode()
 		req, err := http.NewRequestWithContext(c.Request.Context(), "GET", target, nil)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "request build failed", "detail": err.Error()})
 			return
+		}
+		// Forward Request-ID to worker
+		if requestID := c.GetString("request_id"); requestID != "" {
+			req.Header.Set("X-Request-Id", requestID)
 		}
 		resp, err := httpClient.Do(req)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "worker unreachable", "detail": err.Error()})
 			return
 		}
 		forwardResp(c, resp)
@@ -174,12 +182,16 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 		target := getWorkerBase() + "/export?" + c.Request.URL.RawQuery
 		req, err := http.NewRequestWithContext(c.Request.Context(), "GET", target, nil)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "request build failed", "detail": err.Error()})
 			return
+		}
+		// Forward Request-ID to worker
+		if requestID := c.GetString("request_id"); requestID != "" {
+			req.Header.Set("X-Request-Id", requestID)
 		}
 		resp, err := httpClient.Do(req)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "worker unreachable", "detail": err.Error()})
 			return
 		}
 		forwardResp(c, resp)
@@ -192,12 +204,16 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 		target := getWorkerBase() + "/export/archive?" + c.Request.URL.RawQuery
 		req, err := http.NewRequestWithContext(c.Request.Context(), "GET", target, nil)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "request build failed", "detail": err.Error()})
 			return
+		}
+		// Forward Request-ID to worker
+		if requestID := c.GetString("request_id"); requestID != "" {
+			req.Header.Set("X-Request-Id", requestID)
 		}
 		resp, err := httpClient.Do(req)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "worker unreachable", "detail": err.Error()})
 			return
 		}
 		// forward content-type (application/zip) and body
@@ -210,12 +226,16 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 		target := getWorkerBase() + "/documents"
 		req, err := http.NewRequestWithContext(c.Request.Context(), "GET", target, nil)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "request build failed", "detail": err.Error()})
 			return
+		}
+		// Forward Request-ID to worker
+		if requestID := c.GetString("request_id"); requestID != "" {
+			req.Header.Set("X-Request-Id", requestID)
 		}
 		resp, err := httpClient.Do(req)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "worker unreachable", "detail": err.Error()})
 			return
 		}
 		forwardResp(c, resp)

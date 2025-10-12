@@ -43,6 +43,12 @@ function downloadJson(documentId: string, kind: string | undefined) {
   window.open(url, '_blank')
 }
 
+function downloadZip(documentId: string, kind: string | undefined) {
+  const collection = kind === 'image' ? 'images' : 'chunks'
+  const url = `${apiBase}/export/archive?document_id=${encodeURIComponent(documentId)}&collection=${collection}`
+  window.open(url, '_blank')
+}
+
 function collectionForDoc(d: Document) {
   return (d.kinds || []).includes("image") ? "jsonify2ai_images_768" : "jsonify2ai_chunks_768";
 }
@@ -213,12 +219,20 @@ function App() {
           </span>
         )}
         {lastDoc && (
-          <button
-            className="text-xs underline opacity-70 hover:opacity-100"
-            onClick={() => downloadJson(lastDoc.id, lastDoc.kind)}
-          >
-            Download JSON (last upload)
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              className="text-xs underline opacity-70 hover:opacity-100"
+              onClick={() => downloadJson(lastDoc.id, lastDoc.kind)}
+            >
+              Download JSON
+            </button>
+            <button
+              className="text-xs underline opacity-70 hover:opacity-100"
+              onClick={() => downloadZip(lastDoc.id, lastDoc.kind)}
+            >
+              Download ZIP
+            </button>
+          </div>
         )}
       </div>
       <div style={{ marginTop: 24 }}>
@@ -385,7 +399,7 @@ function App() {
                   {doc.paths[0] && <div>Path: {doc.paths[0]}</div>}
                   <div>Counts: {Object.entries(doc.counts).map(([k, v]) => `${k}: ${v}`).join(', ')}</div>
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <button
                     onClick={() => {
                       const collection = collectionForDoc(doc);
@@ -395,6 +409,16 @@ function App() {
                     style={{ fontSize: 12, color: '#1976d2', textDecoration: 'underline' }}
                   >
                     Export JSON
+                  </button>
+                  <button
+                    onClick={() => {
+                      const collection = collectionForDoc(doc);
+                      const url = `${apiBase}/export/archive?document_id=${encodeURIComponent(doc.document_id)}&collection=${collection}`;
+                      window.open(url, '_blank');
+                    }}
+                    style={{ fontSize: 12, color: '#1976d2', textDecoration: 'underline' }}
+                  >
+                    Export ZIP
                   </button>
                   <button
                     onClick={() => {
