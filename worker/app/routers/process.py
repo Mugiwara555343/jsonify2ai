@@ -29,9 +29,73 @@ from worker.app.services.file_router import extract_text_auto
 from worker.app.services.chunker import chunk_text
 from worker.app.services.images import generate_caption
 from worker.app.services.parse_audio import transcribe_audio
+from worker.app.telemetry import telemetry
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/process", tags=["process"])
+
+
+def _instrument_process_request(
+    request: Request, kind: str, docid: str
+) -> tuple[str, float]:
+    """Helper to instrument process requests with telemetry."""
+    import uuid
+    import time
+
+    request_id = str(uuid.uuid4())
+    start_time = time.time()
+
+    # Check for watcher header
+    from_watcher = request.headers.get("X-From-Watcher") == "1"
+    if from_watcher:
+        telemetry.increment("watcher_triggers_total")
+
+    # Log request start
+    telemetry.log_json(
+        "process_start",
+        level="info",
+        request_id=request_id,
+        kind=kind,
+        document_id=docid,
+        from_watcher=from_watcher,
+    )
+
+    return request_id, start_time
+
+
+def _log_process_completion(
+    request_id: str,
+    kind: str,
+    docid: str,
+    success: bool,
+    duration_ms: int,
+    error: str = None,
+):
+    """Helper to log process completion."""
+    if success:
+        telemetry.increment("ingest_total")
+        telemetry.log_json(
+            "process_success",
+            level="info",
+            request_id=request_id,
+            kind=kind,
+            document_id=docid,
+            duration_ms=duration_ms,
+            status="success",
+        )
+    else:
+        telemetry.increment("ingest_failed")
+        telemetry.set_error(error or "Unknown error")
+        telemetry.log_json(
+            "process_failure",
+            level="error",
+            request_id=request_id,
+            kind=kind,
+            document_id=docid,
+            duration_ms=duration_ms,
+            status="error",
+            error=error,
+        )
 
 
 # New unified payload model for all process endpoints
@@ -95,314 +159,370 @@ async def process_text(request: Request):
     • Chunk using config sizes, embed, upsert to Qdrant collection
     • Return precise summary with real counts
     """
+    import time
+
     payload = ProcessPayload(**(await request.json()))
     try:
         docid = payload.require_docid()
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=422)
 
-    # Normalize rel_path (same as CLI)
-    rel_path = payload.path.replace("\\", "/")
-    if rel_path.startswith("data/dropzone/"):
-        rel_path = rel_path[len("data/dropzone/") :]
+    # Instrument request
+    request_id, start_time = _instrument_process_request(request, "text", docid)
 
-    # Create absolute path for canonicalize_relpath
-    abs_dropzone = Path("data/dropzone").resolve()
-    abs_file_path = (abs_dropzone / rel_path).resolve()
-    rel_path = canonicalize_relpath(abs_file_path, abs_dropzone)
-
-    # Compute document_id if missing (same as CLI)
-    docid = payload.document_id or str(document_id_for_relpath(rel_path))
-
-    # Parse file using same parser as CLI
-    abs_path = f"data/dropzone/{rel_path}"
     try:
-        raw_text = extract_text_auto(abs_path)
-    except Exception as e:
-        log.warning("[process/text] parse failed: %s", e)
-        raise HTTPException(status_code=400, detail=f"failed to parse file: {e}")
+        # Normalize rel_path (same as CLI)
+        rel_path = payload.path.replace("\\", "/")
+        if rel_path.startswith("data/dropzone/"):
+            rel_path = rel_path[len("data/dropzone/") :]
 
-    if not raw_text.strip():
-        raise HTTPException(status_code=400, detail="no content to process")
+        # Create absolute path for canonicalize_relpath
+        abs_dropzone = Path("data/dropzone").resolve()
+        abs_file_path = (abs_dropzone / rel_path).resolve()
+        rel_path = canonicalize_relpath(abs_file_path, abs_dropzone)
 
-    # Ensure collection (same as CLI)
-    client = get_qdrant_client()
-    ensure_collection(
-        client=client,
-        name=settings.QDRANT_COLLECTION,
-        dim=settings.EMBEDDING_DIM,
-    )
+        # Compute document_id if missing (same as CLI)
+        docid = payload.document_id or str(document_id_for_relpath(rel_path))
 
-    # Delete existing points for this document (idempotent re-ingest)
-    try:
-        delete_by_document_id(docid, client=client)
-        log.info("[process/text] cleared existing points for doc=%s", docid)
-    except Exception as e:
-        log.warning(
-            "[process/text] delete_by_document_id failed doc=%s err=%s", docid, e
+        # Parse file using same parser as CLI
+        abs_path = f"data/dropzone/{rel_path}"
+        try:
+            raw_text = extract_text_auto(abs_path)
+        except Exception as e:
+            log.warning("[process/text] parse failed: %s", e)
+            raise HTTPException(status_code=400, detail=f"failed to parse file: {e}")
+
+        if not raw_text.strip():
+            raise HTTPException(status_code=400, detail="no content to process")
+
+        # Ensure collection (same as CLI)
+        client = get_qdrant_client()
+        ensure_collection(
+            client=client,
+            name=settings.QDRANT_COLLECTION,
+            dim=settings.EMBEDDING_DIM,
         )
 
-    # Chunk using config defaults (same as CLI)
-    chunks = chunk_text(
-        raw_text,
-        size=int(settings.CHUNK_SIZE),
-        overlap=int(settings.CHUNK_OVERLAP),
-    )
-    if not chunks:
-        raise HTTPException(status_code=400, detail="no content to process")
+        # Delete existing points for this document (idempotent re-ingest)
+        try:
+            delete_by_document_id(docid, client=client)
+            log.info("[process/text] cleared existing points for doc=%s", docid)
+        except Exception as e:
+            log.warning(
+                "[process/text] delete_by_document_id failed doc=%s err=%s", docid, e
+            )
 
-    # Embed (same as CLI)
-    vectors = embed_texts(chunks)
+        # Chunk using config defaults (same as CLI)
+        chunks = chunk_text(
+            raw_text,
+            size=int(settings.CHUNK_SIZE),
+            overlap=int(settings.CHUNK_OVERLAP),
+        )
+        if not chunks:
+            raise HTTPException(status_code=400, detail="no content to process")
 
-    # Build items with deterministic IDs (same as CLI)
-    items = []
-    for idx, (text_chunk, vec) in enumerate(zip(chunks, vectors)):
-        point_id = str(uuid.uuid4())  # Use same ID scheme as CLI
-        payload_data = {
-            "document_id": docid,
-            "path": rel_path,
-            "kind": "text",
-            "idx": idx,
-            "text": text_chunk,
-            "meta": {
-                "source_ext": Path(abs_path).suffix.lower(),
-                "content_sig": "",  # Could add file hash if needed
-                "bytes": len(raw_text.encode("utf-8")),
-            },
-        }
-        items.append((point_id, vec, payload_data))
+        # Embed (same as CLI)
+        vectors = embed_texts(chunks)
 
-    # Upsert to collection (same as CLI)
-    upserted = upsert_points(
-        items,
-        collection_name=settings.QDRANT_COLLECTION,
-        client=client,
-        ensure=False,
-    )
+        # Build items with deterministic IDs (same as CLI)
+        items = []
+        for idx, (text_chunk, vec) in enumerate(zip(chunks, vectors)):
+            point_id = str(uuid.uuid4())  # Use same ID scheme as CLI
+            payload_data = {
+                "document_id": docid,
+                "path": rel_path,
+                "kind": "text",
+                "idx": idx,
+                "text": text_chunk,
+                "meta": {
+                    "source_ext": Path(abs_path).suffix.lower(),
+                    "content_sig": "",  # Could add file hash if needed
+                    "bytes": len(raw_text.encode("utf-8")),
+                },
+            }
+            items.append((point_id, vec, payload_data))
 
-    # Record status summary
-    try:
-        record_ingest_summary(document_id=docid, chunks_upserted=upserted)
+        # Upsert to collection (same as CLI)
+        upserted = upsert_points(
+            items,
+            collection_name=settings.QDRANT_COLLECTION,
+            client=client,
+            ensure=False,
+        )
+
+        # Record status summary
+        try:
+            record_ingest_summary(document_id=docid, chunks_upserted=upserted)
+        except Exception as e:
+            log.debug("[process/text] record_ingest_summary failed: %s", e)
+
+        # Log success
+        duration_ms = int((time.time() - start_time) * 1000)
+        _log_process_completion(request_id, "text", docid, True, duration_ms)
+
+        return ProcessTextResponse(
+            ok=True,
+            document_id=docid,
+            chunks=len(chunks),
+            embedded=len(vectors),
+            upserted=upserted,
+            collection=settings.QDRANT_COLLECTION,
+        )
+
     except Exception as e:
-        log.debug("[process/text] record_ingest_summary failed: %s", e)
-
-    return ProcessTextResponse(
-        ok=True,
-        document_id=docid,
-        chunks=len(chunks),
-        embedded=len(vectors),
-        upserted=upserted,
-        collection=settings.QDRANT_COLLECTION,
-    )
+        # Log failure
+        duration_ms = int((time.time() - start_time) * 1000)
+        _log_process_completion(request_id, "text", docid, False, duration_ms, str(e))
+        raise
 
 
 @router.post("/pdf", response_model=ProcessTextResponse)
 async def process_pdf(request: Request):
     """Process PDF files using the same pipeline as text."""
+    import time
+
     payload = ProcessPayload(**(await request.json()))
     try:
         docid = payload.require_docid()
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=422)
 
-    # Normalize rel_path (same as text)
-    rel_path = payload.path.replace("\\", "/")
-    if rel_path.startswith("data/dropzone/"):
-        rel_path = rel_path[len("data/dropzone/") :]
+    # Instrument request
+    request_id, start_time = _instrument_process_request(request, "pdf", docid)
 
-    # Create absolute path for canonicalize_relpath
-    abs_dropzone = Path("data/dropzone").resolve()
-    abs_file_path = (abs_dropzone / rel_path).resolve()
-    rel_path = canonicalize_relpath(abs_file_path, abs_dropzone)
-
-    # Compute document_id if missing
-    docid = payload.document_id or str(document_id_for_relpath(rel_path))
-
-    # Parse PDF using same parser as CLI
-    abs_path = f"data/dropzone/{rel_path}"
     try:
-        raw_text = extract_text_auto(abs_path)
-    except Exception as e:
-        log.warning("[process/pdf] parse failed: %s", e)
-        raise HTTPException(status_code=400, detail=f"failed to parse PDF: {e}")
+        # Normalize rel_path (same as text)
+        rel_path = payload.path.replace("\\", "/")
+        if rel_path.startswith("data/dropzone/"):
+            rel_path = rel_path[len("data/dropzone/") :]
 
-    if not raw_text.strip():
-        raise HTTPException(status_code=400, detail="no content to process")
+        # Create absolute path for canonicalize_relpath
+        abs_dropzone = Path("data/dropzone").resolve()
+        abs_file_path = (abs_dropzone / rel_path).resolve()
+        rel_path = canonicalize_relpath(abs_file_path, abs_dropzone)
 
-    # Ensure collection (same as text)
-    client = get_qdrant_client()
-    ensure_collection(
-        client=client,
-        name=settings.QDRANT_COLLECTION,
-        dim=settings.EMBEDDING_DIM,
-    )
+        # Compute document_id if missing
+        docid = payload.document_id or str(document_id_for_relpath(rel_path))
 
-    # Delete existing points for this document
-    try:
-        delete_by_document_id(docid, client=client)
-        log.info("[process/pdf] cleared existing points for doc=%s", docid)
-    except Exception as e:
-        log.warning(
-            "[process/pdf] delete_by_document_id failed doc=%s err=%s", docid, e
+        # Parse PDF using same parser as CLI
+        abs_path = f"data/dropzone/{rel_path}"
+        try:
+            raw_text = extract_text_auto(abs_path)
+        except Exception as e:
+            log.warning("[process/pdf] parse failed: %s", e)
+            raise HTTPException(status_code=400, detail=f"failed to parse PDF: {e}")
+
+        if not raw_text.strip():
+            raise HTTPException(status_code=400, detail="no content to process")
+
+        # Ensure collection (same as text)
+        client = get_qdrant_client()
+        ensure_collection(
+            client=client,
+            name=settings.QDRANT_COLLECTION,
+            dim=settings.EMBEDDING_DIM,
         )
 
-    # Chunk using config defaults
-    chunks = chunk_text(
-        raw_text,
-        size=int(settings.CHUNK_SIZE),
-        overlap=int(settings.CHUNK_OVERLAP),
-    )
-    if not chunks:
-        raise HTTPException(status_code=400, detail="no content to process")
+        # Delete existing points for this document
+        try:
+            delete_by_document_id(docid, client=client)
+            log.info("[process/pdf] cleared existing points for doc=%s", docid)
+        except Exception as e:
+            log.warning(
+                "[process/pdf] delete_by_document_id failed doc=%s err=%s", docid, e
+            )
 
-    # Embed
-    vectors = embed_texts(chunks)
+        # Chunk using config defaults
+        chunks = chunk_text(
+            raw_text,
+            size=int(settings.CHUNK_SIZE),
+            overlap=int(settings.CHUNK_OVERLAP),
+        )
+        if not chunks:
+            raise HTTPException(status_code=400, detail="no content to process")
 
-    # Build items with deterministic IDs
-    items = []
-    for idx, (text_chunk, vec) in enumerate(zip(chunks, vectors)):
-        point_id = str(uuid.uuid4())
-        payload_data = {
-            "document_id": docid,
-            "path": rel_path,
-            "kind": "pdf",
-            "idx": idx,
-            "text": text_chunk,
-            "meta": {
-                "source_ext": Path(abs_path).suffix.lower(),
-                "content_sig": "",
-                "bytes": len(raw_text.encode("utf-8")),
-            },
-        }
-        items.append((point_id, vec, payload_data))
+        # Embed
+        vectors = embed_texts(chunks)
 
-    # Upsert to collection
-    upserted = upsert_points(
-        items,
-        collection_name=settings.QDRANT_COLLECTION,
-        client=client,
-        ensure=False,
-    )
+        # Build items with deterministic IDs
+        items = []
+        for idx, (text_chunk, vec) in enumerate(zip(chunks, vectors)):
+            point_id = str(uuid.uuid4())
+            payload_data = {
+                "document_id": docid,
+                "path": rel_path,
+                "kind": "pdf",
+                "idx": idx,
+                "text": text_chunk,
+                "meta": {
+                    "source_ext": Path(abs_path).suffix.lower(),
+                    "content_sig": "",
+                    "bytes": len(raw_text.encode("utf-8")),
+                },
+            }
+            items.append((point_id, vec, payload_data))
 
-    # Record status summary
-    try:
-        record_ingest_summary(document_id=docid, chunks_upserted=upserted)
+        # Upsert to collection
+        upserted = upsert_points(
+            items,
+            collection_name=settings.QDRANT_COLLECTION,
+            client=client,
+            ensure=False,
+        )
+
+        # Record status summary
+        try:
+            record_ingest_summary(document_id=docid, chunks_upserted=upserted)
+        except Exception as e:
+            log.debug("[process/pdf] record_ingest_summary failed: %s", e)
+
+        # Log success
+        duration_ms = int((time.time() - start_time) * 1000)
+        _log_process_completion(request_id, "pdf", docid, True, duration_ms)
+
+        return ProcessTextResponse(
+            ok=True,
+            document_id=docid,
+            chunks=len(chunks),
+            embedded=len(vectors),
+            upserted=upserted,
+            collection=settings.QDRANT_COLLECTION,
+        )
+
     except Exception as e:
-        log.debug("[process/pdf] record_ingest_summary failed: %s", e)
-
-    return ProcessTextResponse(
-        ok=True,
-        document_id=docid,
-        chunks=len(chunks),
-        embedded=len(vectors),
-        upserted=upserted,
-        collection=settings.QDRANT_COLLECTION,
-    )
+        # Log failure
+        duration_ms = int((time.time() - start_time) * 1000)
+        _log_process_completion(request_id, "pdf", docid, False, duration_ms, str(e))
+        raise
 
 
 @router.post("/image", response_model=ProcessTextResponse)
 async def process_image(request: Request):
     """Process image files using image captioning."""
+    import time
+
     payload = ProcessPayload(**(await request.json()))
     try:
         docid = payload.require_docid()
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=422)
 
-    # Normalize rel_path
-    rel_path = payload.path.replace("\\", "/")
-    if rel_path.startswith("data/dropzone/"):
-        rel_path = rel_path[len("data/dropzone/") :]
+    # Instrument request
+    request_id, start_time = _instrument_process_request(request, "image", docid)
 
-    # Create absolute path for canonicalize_relpath
-    abs_dropzone = Path("data/dropzone").resolve()
-    abs_file_path = (abs_dropzone / rel_path).resolve()
-    rel_path = canonicalize_relpath(abs_file_path, abs_dropzone)
-
-    # Compute document_id if missing
-    docid = payload.document_id or str(document_id_for_relpath(rel_path))
-
-    # Get image caption
-    abs_path = f"data/dropzone/{rel_path}"
-    caption = generate_caption(str(abs_path))
-    text = caption if caption else f"image: {rel_path}"
-
-    # Ensure images collection
-    client = get_qdrant_client()
-    ensure_collection(
-        client=client,
-        name=settings.QDRANT_COLLECTION_IMAGES,
-        dim=settings.EMBEDDING_DIM,
-    )
-
-    # Delete existing points for this document
     try:
-        delete_by_document_id(
-            docid, collection_name=settings.QDRANT_COLLECTION_IMAGES, client=client
-        )
-        log.info("[process/image] cleared existing points for doc=%s", docid)
-    except Exception as e:
-        log.warning(
-            "[process/image] delete_by_document_id failed doc=%s err=%s", docid, e
+        # Normalize rel_path
+        rel_path = payload.path.replace("\\", "/")
+        if rel_path.startswith("data/dropzone/"):
+            rel_path = rel_path[len("data/dropzone/") :]
+
+        # Create absolute path for canonicalize_relpath
+        abs_dropzone = Path("data/dropzone").resolve()
+        abs_file_path = (abs_dropzone / rel_path).resolve()
+        rel_path = canonicalize_relpath(abs_file_path, abs_dropzone)
+
+        # Compute document_id if missing
+        docid = payload.document_id or str(document_id_for_relpath(rel_path))
+
+        # Get image caption
+        abs_path = f"data/dropzone/{rel_path}"
+        caption = generate_caption(str(abs_path))
+        text = caption if caption else f"image: {rel_path}"
+
+        # Ensure images collection
+        client = get_qdrant_client()
+        ensure_collection(
+            client=client,
+            name=settings.QDRANT_COLLECTION_IMAGES,
+            dim=settings.EMBEDDING_DIM,
         )
 
-    # Create single chunk from caption
-    chunks = [text]
-    vectors = embed_texts(chunks)
+        # Delete existing points for this document
+        try:
+            delete_by_document_id(
+                docid, collection_name=settings.QDRANT_COLLECTION_IMAGES, client=client
+            )
+            log.info("[process/image] cleared existing points for doc=%s", docid)
+        except Exception as e:
+            log.warning(
+                "[process/image] delete_by_document_id failed doc=%s err=%s", docid, e
+            )
 
-    # Build items with deterministic IDs
-    items = []
-    for idx, (text_chunk, vec) in enumerate(zip(chunks, vectors)):
-        point_id = str(chunk_id_for(uuid.UUID(docid), idx))
-        payload_data = {
-            "document_id": docid,
-            "path": rel_path,
-            "kind": "image",
-            "idx": idx,
-            "text": text_chunk,
-            "meta": {
-                "source_ext": Path(abs_path).suffix.lower(),
-                "content_sig": "",
-                "bytes": 0,  # Images don't have text bytes
-            },
-        }
-        items.append((point_id, vec, payload_data))
+        # Create single chunk from caption
+        chunks = [text]
+        vectors = embed_texts(chunks)
 
-    # Upsert to images collection
-    upserted = upsert_points(
-        items,
-        collection_name=settings.QDRANT_COLLECTION_IMAGES,
-        client=client,
-        ensure=False,
-    )
+        # Build items with deterministic IDs
+        items = []
+        for idx, (text_chunk, vec) in enumerate(zip(chunks, vectors)):
+            point_id = str(chunk_id_for(uuid.UUID(docid), idx))
+            payload_data = {
+                "document_id": docid,
+                "path": rel_path,
+                "kind": "image",
+                "idx": idx,
+                "text": text_chunk,
+                "meta": {
+                    "source_ext": Path(abs_path).suffix.lower(),
+                    "content_sig": "",
+                    "bytes": 0,  # Images don't have text bytes
+                },
+            }
+            items.append((point_id, vec, payload_data))
 
-    # Record status summary
-    try:
-        record_ingest_summary(document_id=docid, chunks_upserted=upserted)
+        # Upsert to images collection
+        upserted = upsert_points(
+            items,
+            collection_name=settings.QDRANT_COLLECTION_IMAGES,
+            client=client,
+            ensure=False,
+        )
+
+        # Record status summary
+        try:
+            record_ingest_summary(document_id=docid, chunks_upserted=upserted)
+        except Exception as e:
+            log.debug("[process/image] record_ingest_summary failed: %s", e)
+
+        # Log success
+        duration_ms = int((time.time() - start_time) * 1000)
+        _log_process_completion(request_id, "image", docid, True, duration_ms)
+
+        return ProcessTextResponse(
+            ok=True,
+            document_id=docid,
+            chunks=len(chunks),
+            embedded=len(vectors),
+            upserted=upserted,
+            collection=settings.QDRANT_COLLECTION_IMAGES,
+        )
+
     except Exception as e:
-        log.debug("[process/image] record_ingest_summary failed: %s", e)
-
-    return ProcessTextResponse(
-        ok=True,
-        document_id=docid,
-        chunks=len(chunks),
-        embedded=len(vectors),
-        upserted=upserted,
-        collection=settings.QDRANT_COLLECTION_IMAGES,
-    )
+        # Log failure
+        duration_ms = int((time.time() - start_time) * 1000)
+        _log_process_completion(request_id, "image", docid, False, duration_ms, str(e))
+        raise
 
 
 @router.post("/audio", response_model=ProcessTextResponse)
 async def process_audio(request: Request):
     """Process audio files using transcription."""
+    import time
+
     payload = ProcessPayload(**(await request.json()))
     try:
         docid = payload.require_docid()
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=422)
 
+    # Instrument request
+    request_id, start_time = _instrument_process_request(request, "audio", docid)
+
     # Check for dev mode short-circuit
     if getattr(settings, "AUDIO_DEV_MODE", 0) == 1:
+        # Log success for dev mode
+        duration_ms = int((time.time() - start_time) * 1000)
+        _log_process_completion(request_id, "audio", docid, True, duration_ms)
         return ProcessTextResponse(
             ok=True,
             document_id=docid,
@@ -412,95 +532,108 @@ async def process_audio(request: Request):
             collection=settings.QDRANT_COLLECTION,
         )
 
-    # Normalize rel_path
-    rel_path = payload.path.replace("\\", "/")
-    if rel_path.startswith("data/dropzone/"):
-        rel_path = rel_path[len("data/dropzone/") :]
-
-    # Create absolute path for canonicalize_relpath
-    abs_dropzone = Path("data/dropzone").resolve()
-    abs_file_path = (abs_dropzone / rel_path).resolve()
-    rel_path = canonicalize_relpath(abs_file_path, abs_dropzone)
-
-    # Compute document_id if missing
-    docid = payload.document_id or str(document_id_for_relpath(rel_path))
-
-    # Transcribe audio
-    abs_path = f"data/dropzone/{rel_path}"
     try:
-        transcript = transcribe_audio(abs_path)
-        if not transcript.strip():
-            raise HTTPException(status_code=400, detail="no content to process")
-    except Exception as e:
-        log.warning("[process/audio] transcription failed: %s", e)
-        raise HTTPException(status_code=400, detail=f"failed to transcribe audio: {e}")
+        # Normalize rel_path
+        rel_path = payload.path.replace("\\", "/")
+        if rel_path.startswith("data/dropzone/"):
+            rel_path = rel_path[len("data/dropzone/") :]
 
-    # Ensure collection (same as text)
-    client = get_qdrant_client()
-    ensure_collection(
-        client=client,
-        name=settings.QDRANT_COLLECTION,
-        dim=settings.EMBEDDING_DIM,
-    )
+        # Create absolute path for canonicalize_relpath
+        abs_dropzone = Path("data/dropzone").resolve()
+        abs_file_path = (abs_dropzone / rel_path).resolve()
+        rel_path = canonicalize_relpath(abs_file_path, abs_dropzone)
 
-    # Delete existing points for this document
-    try:
-        delete_by_document_id(docid, client=client)
-        log.info("[process/audio] cleared existing points for doc=%s", docid)
-    except Exception as e:
-        log.warning(
-            "[process/audio] delete_by_document_id failed doc=%s err=%s", docid, e
+        # Compute document_id if missing
+        docid = payload.document_id or str(document_id_for_relpath(rel_path))
+
+        # Transcribe audio
+        abs_path = f"data/dropzone/{rel_path}"
+        try:
+            transcript = transcribe_audio(abs_path)
+            if not transcript.strip():
+                raise HTTPException(status_code=400, detail="no content to process")
+        except Exception as e:
+            log.warning("[process/audio] transcription failed: %s", e)
+            raise HTTPException(
+                status_code=400, detail=f"failed to transcribe audio: {e}"
+            )
+
+        # Ensure collection (same as text)
+        client = get_qdrant_client()
+        ensure_collection(
+            client=client,
+            name=settings.QDRANT_COLLECTION,
+            dim=settings.EMBEDDING_DIM,
         )
 
-    # Chunk transcript using config defaults
-    chunks = chunk_text(
-        transcript,
-        size=int(settings.CHUNK_SIZE),
-        overlap=int(settings.CHUNK_OVERLAP),
-    )
-    if not chunks:
-        raise HTTPException(status_code=400, detail="no content to process")
+        # Delete existing points for this document
+        try:
+            delete_by_document_id(docid, client=client)
+            log.info("[process/audio] cleared existing points for doc=%s", docid)
+        except Exception as e:
+            log.warning(
+                "[process/audio] delete_by_document_id failed doc=%s err=%s", docid, e
+            )
 
-    # Embed
-    vectors = embed_texts(chunks)
+        # Chunk transcript using config defaults
+        chunks = chunk_text(
+            transcript,
+            size=int(settings.CHUNK_SIZE),
+            overlap=int(settings.CHUNK_OVERLAP),
+        )
+        if not chunks:
+            raise HTTPException(status_code=400, detail="no content to process")
 
-    # Build items with deterministic IDs
-    items = []
-    for idx, (text_chunk, vec) in enumerate(zip(chunks, vectors)):
-        point_id = str(chunk_id_for(uuid.UUID(docid), idx))
-        payload_data = {
-            "document_id": docid,
-            "path": rel_path,
-            "kind": "audio",
-            "idx": idx,
-            "text": text_chunk,
-            "meta": {
-                "source_ext": Path(abs_path).suffix.lower(),
-                "content_sig": "",
-                "bytes": len(transcript.encode("utf-8")),
-            },
-        }
-        items.append((point_id, vec, payload_data))
+        # Embed
+        vectors = embed_texts(chunks)
 
-    # Upsert to collection
-    upserted = upsert_points(
-        items,
-        collection_name=settings.QDRANT_COLLECTION,
-        client=client,
-        ensure=False,
-    )
+        # Build items with deterministic IDs
+        items = []
+        for idx, (text_chunk, vec) in enumerate(zip(chunks, vectors)):
+            point_id = str(chunk_id_for(uuid.UUID(docid), idx))
+            payload_data = {
+                "document_id": docid,
+                "path": rel_path,
+                "kind": "audio",
+                "idx": idx,
+                "text": text_chunk,
+                "meta": {
+                    "source_ext": Path(abs_path).suffix.lower(),
+                    "content_sig": "",
+                    "bytes": len(transcript.encode("utf-8")),
+                },
+            }
+            items.append((point_id, vec, payload_data))
 
-    # Record status summary
-    try:
-        record_ingest_summary(document_id=docid, chunks_upserted=upserted)
+        # Upsert to collection
+        upserted = upsert_points(
+            items,
+            collection_name=settings.QDRANT_COLLECTION,
+            client=client,
+            ensure=False,
+        )
+
+        # Record status summary
+        try:
+            record_ingest_summary(document_id=docid, chunks_upserted=upserted)
+        except Exception as e:
+            log.debug("[process/audio] record_ingest_summary failed: %s", e)
+
+        # Log success
+        duration_ms = int((time.time() - start_time) * 1000)
+        _log_process_completion(request_id, "audio", docid, True, duration_ms)
+
+        return ProcessTextResponse(
+            ok=True,
+            document_id=docid,
+            chunks=len(chunks),
+            embedded=len(vectors),
+            upserted=upserted,
+            collection=settings.QDRANT_COLLECTION,
+        )
+
     except Exception as e:
-        log.debug("[process/audio] record_ingest_summary failed: %s", e)
-
-    return ProcessTextResponse(
-        ok=True,
-        document_id=docid,
-        chunks=len(chunks),
-        embedded=len(vectors),
-        upserted=upserted,
-        collection=settings.QDRANT_COLLECTION,
-    )
+        # Log failure
+        duration_ms = int((time.time() - start_time) * 1000)
+        _log_process_completion(request_id, "audio", docid, False, duration_ms, str(e))
+        raise

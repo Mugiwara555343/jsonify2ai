@@ -12,6 +12,7 @@ from worker.app.services.qdrant_client import (
     count_total,
     count_match,
 )
+from worker.app.telemetry import telemetry
 
 # Keep router path exactly as-is for compatibility
 router = APIRouter()
@@ -84,6 +85,9 @@ async def status():
 
     last_ingest_summary = _ingest_state.summary()
 
+    # Get telemetry stats
+    telemetry_stats = telemetry.get_stats()
+
     data = {
         "ok": True,
         "qdrant_url": settings.QDRANT_URL,
@@ -97,5 +101,12 @@ async def status():
         },
         "counts_by_kind": counts_by_kind,
         "last_ingest_summary": last_ingest_summary,
+        # Add telemetry fields
+        "uptime_s": telemetry_stats["uptime_s"],
+        "ingest_total": telemetry_stats["ingest_total"],
+        "ingest_failed": telemetry_stats["ingest_failed"],
+        "watcher_triggers_total": telemetry_stats["watcher_triggers_total"],
+        "export_total": telemetry_stats["export_total"],
+        "last_error": telemetry_stats["last_error"],
     }
     return JSONResponse(data)

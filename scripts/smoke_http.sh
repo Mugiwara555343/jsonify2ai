@@ -20,6 +20,19 @@ if [ "$STATUS_CODE" = "200" ]; then
     else
         echo "⚠ /status response missing 'ok' field"
     fi
+
+    # Check for new telemetry fields
+    if grep -q '"uptime_s"' /tmp/status_response.json; then
+        echo "✓ /status response has 'uptime_s' field"
+    else
+        echo "⚠ /status response missing 'uptime_s' field"
+    fi
+
+    if grep -q '"ingest_total"' /tmp/status_response.json; then
+        echo "✓ /status response has 'ingest_total' field"
+    else
+        echo "⚠ /status response missing 'ingest_total' field"
+    fi
 else
     echo "✗ /status returned $STATUS_CODE"
 fi

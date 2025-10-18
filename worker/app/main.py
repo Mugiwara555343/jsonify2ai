@@ -12,6 +12,7 @@ from worker.app.routers import export as export_router
 from worker.app.routers import documents as documents_router
 from worker.app.config import settings as C
 from worker.app.qdrant_init import ensure_collections
+from worker.app.telemetry import telemetry
 
 app = FastAPI(title="jsonify2ai-worker")
 
@@ -68,6 +69,12 @@ async def _startup_log():
     logging.info(
         "[worker] Routes: /health /status /search /upload /ask /process /export /documents"
     )
+
+    # Log startup event to telemetry
+    try:
+        telemetry.log_json("worker_startup", level="info")
+    except Exception as e:
+        logging.debug(f"Telemetry startup log failed: {e}")
 
 
 @app.get("/")

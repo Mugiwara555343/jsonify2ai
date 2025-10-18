@@ -5,11 +5,14 @@ from fastapi.responses import PlainTextResponse, StreamingResponse
 from qdrant_client import QdrantClient
 from worker.app.config import settings
 from worker.app.services.qdrant_client import get_qdrant_client
+from worker.app.telemetry import telemetry
 import logging
 import io
 import os
 import os.path
 import zipfile
+import time
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -141,113 +144,133 @@ def export_archive_get(
     - If collection is omitted, try chunks first, then images.
     - Do everything in-memory; no disk writes.
     """
-    client = get_qdrant_client()
+    # Instrument request
+    request_id = str(uuid.uuid4())
+    start_time = time.time()
 
-    # Normalize requested collection: accept full names or simple hints
-    def normalize_collection(value: str | None) -> str:
-        if not value or value.strip() == "":
-            return settings.QDRANT_COLLECTION
-        v = value.lower()
-        if "image" in v:
-            return settings.QDRANT_COLLECTION_IMAGES
-        if "chunk" in v:
-            return settings.QDRANT_COLLECTION
-        # fallback: if matches exactly either collection, honor it
-        if value == settings.QDRANT_COLLECTION_IMAGES:
-            return settings.QDRANT_COLLECTION_IMAGES
-        if value == settings.QDRANT_COLLECTION:
-            return settings.QDRANT_COLLECTION
-        # default to chunks
-        return settings.QDRANT_COLLECTION
-
-    primary = normalize_collection(collection)
-
-    # Try primary collection
-    points = _scroll_by_docid(client, primary, document_id)
-    used_collection = primary
-
-    # If none and no strong collection provided, try the other one
-    if not points and (not collection or collection.strip() == ""):
-        alt = (
-            settings.QDRANT_COLLECTION_IMAGES
-            if primary == settings.QDRANT_COLLECTION
-            else settings.QDRANT_COLLECTION
-        )
-        alt_points = _scroll_by_docid(client, alt, document_id)
-        if alt_points:
-            points = alt_points
-            used_collection = alt
-
-    if not points:
-        raise HTTPException(status_code=404, detail="no points for document_id")
-
-    # Accumulate JSONL rows and discover a source file if available
-    jsonl_buf = io.StringIO()
-    source_path: str | None = None
-
-    for p in points:
-        pl = p.payload or {}
-        row = {
-            "id": str(p.id),
-            "document_id": pl.get("document_id"),
-            "path": pl.get("path"),
-            "kind": pl.get("kind"),
-            "idx": pl.get("idx"),
-            "text": pl.get("text"),
-            "meta": pl.get("meta", {}),
-        }
-        import json as _json
-
-        jsonl_buf.write(_json.dumps(row, ensure_ascii=False))
-        jsonl_buf.write("\n")
-
-        # Determine source file to include (first existing path under data/)
-        if not source_path:
-            candidate = pl.get("path")
-            if isinstance(candidate, str) and candidate:
-                # Normalize and gate to data/ to avoid traversal
-                abs_candidate = os.path.abspath(candidate)
-                data_root = os.path.abspath(os.path.join(os.getcwd(), "data"))
-                if abs_candidate.startswith(data_root) and os.path.exists(
-                    abs_candidate
-                ):
-                    source_path = abs_candidate
-
-    # Determine collection type for metadata
-    collection_type = (
-        "images" if used_collection == settings.QDRANT_COLLECTION_IMAGES else "chunks"
+    # Log request start
+    telemetry.log_json(
+        "export_archive_start",
+        level="info",
+        request_id=request_id,
+        document_id=document_id,
+        collection=collection,
     )
 
-    # Build ZIP in-memory
-    zip_bytes = io.BytesIO()
-    with zipfile.ZipFile(zip_bytes, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-        jsonl_name = (
-            "images.jsonl"
+    try:
+        client = get_qdrant_client()
+
+        # Normalize requested collection: accept full names or simple hints
+        def normalize_collection(value: str | None) -> str:
+            if not value or value.strip() == "":
+                return settings.QDRANT_COLLECTION
+            v = value.lower()
+            if "image" in v:
+                return settings.QDRANT_COLLECTION_IMAGES
+            if "chunk" in v:
+                return settings.QDRANT_COLLECTION
+            # fallback: if matches exactly either collection, honor it
+            if value == settings.QDRANT_COLLECTION_IMAGES:
+                return settings.QDRANT_COLLECTION_IMAGES
+            if value == settings.QDRANT_COLLECTION:
+                return settings.QDRANT_COLLECTION
+            # default to chunks
+            return settings.QDRANT_COLLECTION
+
+        primary = normalize_collection(collection)
+
+        # Try primary collection
+        points = _scroll_by_docid(client, primary, document_id)
+        used_collection = primary
+
+        # If none and no strong collection provided, try the other one
+        if not points and (not collection or collection.strip() == ""):
+            alt = (
+                settings.QDRANT_COLLECTION_IMAGES
+                if primary == settings.QDRANT_COLLECTION
+                else settings.QDRANT_COLLECTION
+            )
+            alt_points = _scroll_by_docid(client, alt, document_id)
+            if alt_points:
+                points = alt_points
+                used_collection = alt
+
+        if not points:
+            raise HTTPException(status_code=404, detail="no points for document_id")
+
+        # Accumulate JSONL rows and discover a source file if available
+        jsonl_buf = io.StringIO()
+        source_path: str | None = None
+
+        for p in points:
+            pl = p.payload or {}
+            row = {
+                "id": str(p.id),
+                "document_id": pl.get("document_id"),
+                "path": pl.get("path"),
+                "kind": pl.get("kind"),
+                "idx": pl.get("idx"),
+                "text": pl.get("text"),
+                "meta": pl.get("meta", {}),
+            }
+            import json as _json
+
+            jsonl_buf.write(_json.dumps(row, ensure_ascii=False))
+            jsonl_buf.write("\n")
+
+            # Determine source file to include (first existing path under data/)
+            if not source_path:
+                candidate = pl.get("path")
+                if isinstance(candidate, str) and candidate:
+                    # Normalize and gate to data/ to avoid traversal
+                    abs_candidate = os.path.abspath(candidate)
+                    data_root = os.path.abspath(os.path.join(os.getcwd(), "data"))
+                    if abs_candidate.startswith(data_root) and os.path.exists(
+                        abs_candidate
+                    ):
+                        source_path = abs_candidate
+
+        # Determine collection type for metadata
+        collection_type = (
+            "images"
             if used_collection == settings.QDRANT_COLLECTION_IMAGES
-            else "chunks.jsonl"
+            else "chunks"
         )
-        zf.writestr(jsonl_name, jsonl_buf.getvalue().encode("utf-8"))
 
-        # Add manifest.json with metadata
-        import datetime
-        import json as _json
+        # Build ZIP in-memory
+        zip_bytes = io.BytesIO()
+        with zipfile.ZipFile(
+            zip_bytes, mode="w", compression=zipfile.ZIP_DEFLATED
+        ) as zf:
+            jsonl_name = (
+                "images.jsonl"
+                if used_collection == settings.QDRANT_COLLECTION_IMAGES
+                else "chunks.jsonl"
+            )
+            zf.writestr(jsonl_name, jsonl_buf.getvalue().encode("utf-8"))
 
-        manifest = {
-            "collection": used_collection,
-            "document_id": document_id,
-            "count": len(points),
-            "generated_at": datetime.datetime.now().isoformat(),
-            "collection_type": collection_type,
-            "files": [jsonl_name],
-        }
+            # Add manifest.json with metadata
+            import datetime
+            import json as _json
 
-        if source_path and os.path.exists(source_path):
-            manifest["files"].append(f"source/{os.path.basename(source_path)}")
+            manifest = {
+                "collection": used_collection,
+                "document_id": document_id,
+                "count": len(points),
+                "generated_at": datetime.datetime.now().isoformat(),
+                "collection_type": collection_type,
+                "files": [jsonl_name],
+            }
 
-        zf.writestr("manifest.json", _json.dumps(manifest, indent=2).encode("utf-8"))
+            if source_path and os.path.exists(source_path):
+                manifest["files"].append(f"source/{os.path.basename(source_path)}")
 
-        # Add README.txt with metadata
-        readme_content = f"""jsonify2ai Export Archive
+            zf.writestr(
+                "manifest.json", _json.dumps(manifest, indent=2).encode("utf-8")
+            )
+
+            # Add README.txt with metadata
+            readme_content = f"""jsonify2ai Export Archive
 ========================
 
 Document ID: {document_id}
@@ -264,28 +287,60 @@ Files in this archive:
 This archive was generated by jsonify2ai export functionality.
 For more information, visit: https://github.com/Mugiwara555343/jsonify2ai
 """
-        zf.writestr("README.txt", readme_content.encode("utf-8"))
+            zf.writestr("README.txt", readme_content.encode("utf-8"))
 
-        if source_path and os.path.exists(source_path):
-            # Store under source/<basename>
-            arcname = os.path.join("source", os.path.basename(source_path))
-            zf.write(source_path, arcname=arcname)
+            if source_path and os.path.exists(source_path):
+                # Store under source/<basename>
+                arcname = os.path.join("source", os.path.basename(source_path))
+                zf.write(source_path, arcname=arcname)
 
-    zip_bytes.seek(0)
+        zip_bytes.seek(0)
 
-    # Create a more descriptive filename: export_<document_id>_<collection>.zip
-    # Fallback to export_<document_id>.zip if collection unknown
-    if collection_type in ["chunks", "images"]:
-        filename = f"export_{document_id}_{collection_type}.zip"
-    else:
-        filename = f"export_{document_id}.zip"
+        # Create a more descriptive filename: export_<document_id>_<collection>.zip
+        # Fallback to export_<document_id>.zip if collection unknown
+        if collection_type in ["chunks", "images"]:
+            filename = f"export_{document_id}_{collection_type}.zip"
+        else:
+            filename = f"export_{document_id}.zip"
 
-    headers = {
-        "Content-Disposition": f'attachment; filename="{filename}"',
-        "X-Collection-Used": used_collection,
-    }
+        headers = {
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Collection-Used": used_collection,
+        }
 
-    logger.info(
-        f"Export ZIP: streamed {len(points)} points for document {document_id} from collection {used_collection}"
-    )
-    return StreamingResponse(zip_bytes, media_type="application/zip", headers=headers)
+        logger.info(
+            f"Export ZIP: streamed {len(points)} points for document {document_id} from collection {used_collection}"
+        )
+
+        # Log success and increment counter
+        duration_ms = int((time.time() - start_time) * 1000)
+        telemetry.increment("export_total")
+        telemetry.log_json(
+            "export_archive_success",
+            level="info",
+            request_id=request_id,
+            document_id=document_id,
+            collection=used_collection,
+            duration_ms=duration_ms,
+            points_count=len(points),
+            status="success",
+        )
+
+        return StreamingResponse(
+            zip_bytes, media_type="application/zip", headers=headers
+        )
+
+    except Exception as e:
+        # Log failure
+        duration_ms = int((time.time() - start_time) * 1000)
+        telemetry.log_json(
+            "export_archive_failure",
+            level="error",
+            request_id=request_id,
+            document_id=document_id,
+            collection=collection,
+            duration_ms=duration_ms,
+            status="error",
+            error=str(e),
+        )
+        raise
