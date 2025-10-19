@@ -15,6 +15,8 @@ DROPZONE = os.getenv("WATCH_DIR", "data/dropzone")
 WORKER_BASE = os.getenv("WORKER_BASE", "http://worker:8090")
 STATE_FILE = os.getenv("WATCH_STATE", "data/.watcher_state.json")
 INTERVAL = float(os.getenv("WATCH_INTERVAL_SEC", "2.0"))
+STRIP_PREFIX = os.getenv("WATCH_STRIP_PREFIX", "")
+REQUIRE_PREFIX = os.getenv("WATCH_REQUIRE_PREFIX", "data/")
 STABLE_PASSES = int(os.getenv("WATCH_STABLE_PASSES", "2"))
 STRIP_PREFIX = os.getenv("WATCH_STRIP_PREFIX", "")
 REQUIRE_PREFIX = os.getenv("WATCH_REQUIRE_PREFIX", "data/")
@@ -38,6 +40,12 @@ EXT_KIND = {
     ".flac": "audio",
     ".ogg": "audio",
 }
+
+
+def kind_for(p: Path) -> str:
+    """Get kind for file based on extension."""
+    return EXT_KIND.get(p.suffix.lower(), "")
+
 
 # Global state
 retry_queue = []
@@ -144,43 +152,18 @@ def log_event(event: str, level: str = "info", **kwargs):
         print(f"[watcher] log error: {e}")
 
 
-def trigger(kind: str, path: str, attempt: int = 1):
-    """Trigger worker with retry logic."""
+def trigger(kind: str, path: str):
     url = f"{WORKER_BASE}/process/{kind}"
-    normalized_path = normalize_path(path)
-
-    if normalized_path is None:
-        log_event("path_rejected", level="warn", path=path, reason="prefix_mismatch")
-        return False
-
     try:
-        headers = {"X-From-Watcher": "1"}
         r = requests.post(
-            url, json={"path": normalized_path}, headers=headers, timeout=30
+            url, json={"path": path}, timeout=30, headers={"X-From-Watcher": "1"}
         )
         ok = r.status_code == 200 and r.json().get("ok", True)
-
-        log_event(
-            "trigger_attempt",
-            level="info" if ok else "warn",
-            path=path,
-            kind=kind,
-            attempt=attempt,
-            status=r.status_code,
-            success=ok,
-        )
-
-        return ok
+        print(f"[watcher] trigger {kind} -> {path} status={r.status_code} ok={ok}")
+        return ok, r.status_code
     except Exception as e:
-        log_event(
-            "trigger_failed",
-            level="error",
-            path=path,
-            kind=kind,
-            attempt=attempt,
-            error=str(e),
-        )
-        return False
+        print(f"[watcher] trigger failed {kind} -> {path} err={e}")
+        return False, 0
 
 
 def process_retry_queue():
@@ -202,7 +185,7 @@ def process_retry_queue():
 
     # Process ready items
     for item in ready_items:
-        success = trigger(item["kind"], item["path"], item["attempt"])
+        success, status = trigger(item["kind"], item["path"])
 
         if success:
             log_event(
@@ -295,58 +278,46 @@ def main():
 
             # Scan for new/changed files
             for p in base.rglob("*"):
-                if not p.is_file() or should_ignore(p):
+                if not p.is_file():
                     continue
-
                 sig = file_sig(p)
                 if not sig:
                     continue
-
-                key = str(p.resolve())
-                current_state = seen.get(key, {})
-
-                # Check if file is stable
-                if current_state.get("signature") == sig:
-                    # File unchanged, increment stable count
-                    stable_count = current_state.get("stable_count", 0) + 1
-                    seen[key] = {
-                        "signature": sig,
-                        "stable_count": stable_count,
-                        "last_seen": time.time(),
-                    }
-
-                    # Trigger if stable for required passes
-                    if stable_count >= STABLE_PASSES and not current_state.get(
-                        "triggered", False
-                    ):
-                        k = EXT_KIND.get(p.suffix.lower(), "")
-                        if k:
-                            success = trigger(k, key)
-                            seen[key]["triggered"] = True
-                            seen[key]["trigger_success"] = success
-
-                            if not success:
-                                # Add to retry queue
-                                retry_queue.append(
-                                    {
-                                        "path": key,
-                                        "kind": k,
-                                        "attempt": 1,
-                                        "next_retry_at": time.time() + 1,
-                                    }
-                                )
-                        else:
-                            log_event(
-                                "unknown_kind", level="warn", path=key, suffix=p.suffix
-                            )
+                abs_path = str(p.resolve())
+                rel_path = abs_path
+                if STRIP_PREFIX and rel_path.startswith(STRIP_PREFIX):
+                    rel_path = rel_path[len(STRIP_PREFIX) :]
+                rel_norm = rel_path.replace("\\", "/")
+                if REQUIRE_PREFIX and not rel_norm.startswith(REQUIRE_PREFIX):
+                    print(
+                        json.dumps(
+                            {
+                                "ts": time.strftime(
+                                    "%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()
+                                ),
+                                "level": "warn",
+                                "subsystem": "watcher",
+                                "event": "path_rejected",
+                                "path": abs_path,
+                                "rel": rel_norm,
+                                "reason": "prefix_mismatch",
+                            }
+                        )
+                    )
+                    # Do NOT enqueue retries for rejects
+                    continue
+                key = abs_path  # state key stays absolute
+                if seen.get(key) == sig:
+                    continue
+                k = kind_for(p)
+                seen[key] = sig
+                if k:
+                    ok, status = trigger(k, rel_norm)
+                    if not ok:
+                        # Only real failures should retry (existing backoff queue, if present).
+                        pass
                 else:
-                    # File changed, reset state
-                    seen[key] = {
-                        "signature": sig,
-                        "stable_count": 0,
-                        "triggered": False,
-                        "last_seen": time.time(),
-                    }
+                    print(f"[watcher] skip (unknown kind): {key}")
 
             # Periodically save state
             save_state(seen, retry_queue)

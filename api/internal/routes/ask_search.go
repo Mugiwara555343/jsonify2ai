@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"jsonify2ai/api/internal/config"
+	"jsonify2ai/api/internal/middleware"
 
 	"github.com/gin-gonic/gin"
 )
@@ -27,8 +28,8 @@ func workerURL(base string) string {
 func addAskSearchRoutes(r *gin.Engine, base string, cfg *config.Config) {
 	w := workerURL(base)
 
-	// GET /search?q=...&k=...
-	r.GET("/search", func(c *gin.Context) {
+	// GET /search?q=...&k=... (protected)
+	r.GET("/search", middleware.AuthMiddleware(cfg), func(c *gin.Context) {
 
 		q := c.Query("q")
 		if q == "" {
@@ -69,8 +70,8 @@ func addAskSearchRoutes(r *gin.Engine, base string, cfg *config.Config) {
 		_, _ = io.Copy(c.Writer, resp.Body)
 	})
 
-	// POST /ask  (json body forwarded as-is)
-	r.POST("/ask", func(c *gin.Context) {
+	// POST /ask  (json body forwarded as-is) (protected)
+	r.POST("/ask", middleware.AuthMiddleware(cfg), func(c *gin.Context) {
 		body, _ := io.ReadAll(c.Request.Body)
 		_ = c.Request.Body.Close()
 

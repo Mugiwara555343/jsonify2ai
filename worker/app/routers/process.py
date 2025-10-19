@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 
@@ -30,6 +30,7 @@ from worker.app.services.chunker import chunk_text
 from worker.app.services.images import generate_caption
 from worker.app.services.parse_audio import transcribe_audio
 from worker.app.telemetry import telemetry
+from worker.app.dependencies.auth import require_auth
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/process", tags=["process"])
@@ -151,7 +152,7 @@ TextPayload = ProcessTextRequest
 
 
 @router.post("/text", response_model=ProcessTextResponse)
-async def process_text(request: Request):
+async def process_text(request: Request, _: bool = Depends(require_auth)):
     """
     Ingest a text file using the same pipeline as scripts/ingest_dropzone.py.
 
@@ -277,7 +278,7 @@ async def process_text(request: Request):
 
 
 @router.post("/pdf", response_model=ProcessTextResponse)
-async def process_pdf(request: Request):
+async def process_pdf(request: Request, _: bool = Depends(require_auth)):
     """Process PDF files using the same pipeline as text."""
     import time
 
@@ -397,7 +398,7 @@ async def process_pdf(request: Request):
 
 
 @router.post("/image", response_model=ProcessTextResponse)
-async def process_image(request: Request):
+async def process_image(request: Request, _: bool = Depends(require_auth)):
     """Process image files using image captioning."""
     import time
 
@@ -505,7 +506,7 @@ async def process_image(request: Request):
 
 
 @router.post("/audio", response_model=ProcessTextResponse)
-async def process_audio(request: Request):
+async def process_audio(request: Request, _: bool = Depends(require_auth)):
     """Process audio files using transcription."""
     import time
 

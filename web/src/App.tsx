@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import './App.css'
+import { uploadFile, doSearch, askQuestion, fetchStatus, fetchDocuments, downloadJson } from './api'
 
 type Status = { ok: boolean; counts: { chunks: number; images: number; total?: number } }
 type Hit = { id: string; score: number; text?: string; caption?: string; path?: string; idx?: number; kind?: string; document_id?: string }
@@ -7,15 +8,6 @@ type Document = { document_id: string; kinds: string[]; paths: string[]; counts:
 const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8082"
 type AskResp = { ok: boolean; mode: 'search' | 'llm'; model?: string; answer: string; sources: Hit[] }
 
-async function uploadFile(file: File): Promise<any> {
-  const fd = new FormData();
-  fd.append("file", file, file.name);
-  const res = await fetch(`${apiBase}/upload`, { method: "POST", body: fd });
-  // API proxies worker response; assume JSON
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.detail || `Upload failed (${res.status})`);
-  return data; // expect {"ok":true, ...}
-}
 
 function sleep(ms: number) {
   return new Promise(r => setTimeout(r, ms));
@@ -37,11 +29,6 @@ async function waitForProcessed(oldTotal: number, timeoutMs = 20000, intervalMs 
   return { ok: false };
 }
 
-function downloadJson(documentId: string, kind: string | undefined) {
-  const collection = kind === 'image' ? 'images' : 'chunks'
-  const url = `${apiBase}/export?document_id=${encodeURIComponent(documentId)}&collection=${collection}`
-  window.open(url, '_blank')
-}
 
 function downloadZip(documentId: string, kind: string | undefined) {
   const collection = kind === 'image' ? 'images' : 'chunks'
@@ -89,42 +76,26 @@ function App() {
   }
 
   useEffect(() => {
-    fetchStatus()
-    fetchDocuments()
+    loadStatus()
+    loadDocuments()
   }, [])
 
-  const fetchStatus = async () => {
-    const res = await fetch(`${apiBase}/status`)
-    const j = await res.json()
+  const loadStatus = async () => {
+    const j = await fetchStatus()
     setS(j)
   }
 
-  const fetchDocuments = async () => {
+  const loadDocuments = async () => {
     try {
-      const res = await fetch(`${apiBase}/documents`)
-      const j = await res.json()
+      const j = await fetchDocuments()
       setDocs(j)
     } catch (err) {
       console.error('Failed to fetch documents:', err)
     }
   }
 
-  async function doSearch(q: string, kind: string) {
-    const k = 5;
-    try {
-      const url = `${apiBase}/search?q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&k=${k}`;
-      const r = await fetch(url, { method: "GET" });
-      if (r.ok) return await r.json();
-      // fallback to POST body if GET not supported
-      const r2 = await fetch(`${apiBase}/search`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ q, kind, k }),
-      });
-      return await r2.json();
-    } catch (e) {
-      return { ok: false, error: String(e) };
-    }
+  async function performSearch(q: string, kind: string) {
+    return await doSearch(q, kind);
   }
 
   const handleSearch = async () => {
@@ -135,7 +106,7 @@ function App() {
 
     setSearchLoading(true);
     try {
-      const resp = await doSearch(q, kind);
+      const resp = await performSearch(q, kind);
       if (resp.ok === false) {
         showToast(`Search failed: ${resp.error || 'Unknown error'}`, true);
         setRes([]);
@@ -222,7 +193,7 @@ function App() {
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               className="text-xs underline opacity-70 hover:opacity-100"
-              onClick={() => downloadJson(lastDoc.id, lastDoc.kind)}
+              onClick={() => downloadJson(lastDoc.id, lastDoc.kind === 'image' ? 'images' : 'chunks')}
             >
               Download JSON
             </button>
@@ -253,18 +224,7 @@ function App() {
 
               setAskLoading(true);
               try {
-                const r = await fetch(`${apiBase}/ask`, {
-                  method: 'POST',
-                  headers: { 'content-type': 'application/json' },
-                  body: JSON.stringify({ query: askQ, k: 6 })
-                });
-
-                if (!r.ok) {
-                  const errorData = await r.json().catch(() => ({}));
-                  throw new Error(errorData?.error || errorData?.detail || `Ask failed (${r.status})`);
-                }
-
-                const j: AskResp = await r.json();
+                const j: AskResp = await askQuestion(askQ, 6);
                 if (j.ok === false) {
                   showToast(`Ask failed: ${j.error || 'Unknown error'}`, true);
                   setAns(null);
@@ -350,7 +310,7 @@ function App() {
                 <div className="mt-1">
                   <button
                     className="text-xs underline opacity-70 hover:opacity-100"
-                    onClick={() => downloadJson((h as any).document_id, h.kind)}
+                    onClick={() => downloadJson((h as any).document_id, h.kind === 'image' ? 'images' : 'chunks')}
                   >
                     Download JSON
                   </button>

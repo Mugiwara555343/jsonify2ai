@@ -90,6 +90,8 @@ services:
       - WATCH_DIR=data/dropzone
       - WORKER_BASE=http://worker:8090
       - WATCH_INTERVAL_SEC=2.0
+      - WATCH_STRIP_PREFIX=/app/
+      - WATCH_REQUIRE_PREFIX=data/dropzone/
     depends_on:
       - worker
     restart: unless-stopped

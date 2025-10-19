@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from qdrant_client import QdrantClient
 from worker.app.config import settings
 from worker.app.services.qdrant_client import get_qdrant_client
 from worker.app.telemetry import telemetry
+from worker.app.dependencies.auth import require_auth
 import logging
 import io
 import os
@@ -72,6 +73,7 @@ def export_get(
     collection: str | None = Query(
         None, description="Override collection: chunks or images"
     ),
+    _: bool = Depends(require_auth),
 ):
     client = get_qdrant_client()
 
@@ -138,6 +140,7 @@ def export_archive_get(
         None,
         description="Optional collection name: jsonify2ai_chunks_768 or jsonify2ai_images_768",
     ),
+    _: bool = Depends(require_auth),
 ):
     """Stream a ZIP containing JSONL rows and the original source file if present.
 

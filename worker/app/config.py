@@ -92,6 +92,9 @@ class Settings(BaseSettings):
     # --- Sanity/filters -------------------------------------------------------
     IGNORE_GLOBS: str = "*.tmp,*.part,~$*,.DS_Store,__pycache__"
 
+    # --- Authentication -------------------------------------------------------
+    WORKER_AUTH_TOKEN: str = ""
+
     # Convenience: expose a UUID object from NAMESPACE_SEED (validated by pydantic)
     @property
     def NAMESPACE_UUID(self) -> UUID:

@@ -30,6 +30,9 @@ type Config struct {
 
 	// Server configuration
 	GinMode string
+
+	// Authentication
+	APIAuthToken string
 }
 
 func getenv(k, def string) string {
@@ -64,6 +67,9 @@ func Load() *Config {
 
 		// Default server config
 		GinMode: "release",
+
+		// Authentication (optional)
+		APIAuthToken: "",
 	}
 
 	// Override with environment variables if present
@@ -118,6 +124,10 @@ func Load() *Config {
 
 	if v := os.Getenv("GIN_MODE"); v != "" {
 		config.GinMode = v
+	}
+
+	if v := os.Getenv("API_AUTH_TOKEN"); v != "" {
+		config.APIAuthToken = v
 	}
 
 	return config

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"jsonify2ai/api/internal/config"
+	"jsonify2ai/api/internal/middleware"
 
 	"github.com/gin-gonic/gin"
 )
@@ -53,8 +54,8 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 	// Basic API-only health (liveness)
 	RegisterHealth(r)
 
-	// Upload endpoint - now forwards directly to worker
-	r.POST("/upload", (&UploadHandler{Config: cfg}).Post)
+	// Upload endpoint - now forwards directly to worker (protected)
+	r.POST("/upload", middleware.AuthMiddleware(cfg), (&UploadHandler{Config: cfg}).Post)
 	log.Printf("[routes] registered upload endpoint with docsDir=%s", docsDir)
 
 	// Resolve worker base URL (env WORKER_URL takes precedence; default to http://worker:8090)
@@ -133,8 +134,8 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 	})
 
 	// ----------------------------- /search -----------------------------
-	// GET /search?q=...&k=...&document_id=...&kind=...&path=...
-	r.GET("/search", func(c *gin.Context) {
+	// GET /search?q=...&k=...&document_id=...&kind=...&path=... (protected)
+	r.GET("/search", middleware.AuthMiddleware(cfg), func(c *gin.Context) {
 		q := c.Query("q")
 		if q == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": "missing q"})
@@ -176,8 +177,8 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 	})
 
 	// ----------------------------- /export -----------------------------
-	// GET /export?document_id=...&collection=...
-	r.GET("/export", func(c *gin.Context) {
+	// GET /export?document_id=...&collection=... (protected)
+	r.GET("/export", middleware.AuthMiddleware(cfg), func(c *gin.Context) {
 		// proxy GET /export preserving raw query
 		target := getWorkerBase() + "/export?" + c.Request.URL.RawQuery
 		req, err := http.NewRequestWithContext(c.Request.Context(), "GET", target, nil)
@@ -198,8 +199,8 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 	})
 
 	// ------------------------- /export/archive -------------------------
-	// GET /export/archive?document_id=...&collection=...
-	r.GET("/export/archive", func(c *gin.Context) {
+	// GET /export/archive?document_id=...&collection=... (protected)
+	r.GET("/export/archive", middleware.AuthMiddleware(cfg), func(c *gin.Context) {
 		// proxy GET /export/archive preserving raw query
 		target := getWorkerBase() + "/export/archive?" + c.Request.URL.RawQuery
 		req, err := http.NewRequestWithContext(c.Request.Context(), "GET", target, nil)
