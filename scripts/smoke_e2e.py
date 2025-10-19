@@ -40,7 +40,21 @@ def api_status() -> Dict[str, Any]:
 
 
 def worker_process(kind: str, path: str) -> Dict[str, Any]:
-    return post_json(f"{WORKER}/process/{kind}", {"path": path})
+    try:
+        return post_json(f"{WORKER}/process/{kind}", {"path": path})
+    except Exception as e:
+        print(f"[error] Worker process {kind} failed: {e}")
+        # Try to get more details about the error
+        try:
+            r = requests.post(
+                f"{WORKER}/process/{kind}", json={"path": path}, timeout=30
+            )
+            print(f"[debug] Worker response status: {r.status_code}")
+            print(f"[debug] Worker response headers: {dict(r.headers)}")
+            print(f"[debug] Worker response body: {r.text}")
+        except Exception as debug_e:
+            print(f"[debug] Failed to get debug info: {debug_e}")
+        raise
 
 
 def api_search(q: str, kind: str, k: int = 5) -> Dict[str, Any]:
@@ -144,9 +158,22 @@ def run() -> int:
 
     print(f"[cfg] API={API} WORKER={WORKER}")
 
-    status0 = api_status()
-    counts0 = status0.get("counts", {})
-    jprint("[status0]", status0)
+    # Test API status first
+    try:
+        status0 = api_status()
+        counts0 = status0.get("counts", {})
+        jprint("[status0]", status0)
+    except Exception as e:
+        print(f"[error] API status failed: {e}")
+        raise
+
+    # Test Worker status
+    try:
+        worker_status = get_json(f"{WORKER}/status")
+        jprint("[worker_status]", worker_status)
+    except Exception as e:
+        print(f"[error] Worker status failed: {e}")
+        raise
 
     # Text
     t = worker_process("text", args.text)
