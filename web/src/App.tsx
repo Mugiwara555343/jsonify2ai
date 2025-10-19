@@ -2,7 +2,16 @@ import { useEffect, useState } from 'react'
 import './App.css'
 import { uploadFile, doSearch, askQuestion, fetchStatus, fetchDocuments, downloadJson } from './api'
 
-type Status = { ok: boolean; counts: { chunks: number; images: number; total?: number } }
+type Status = {
+  ok: boolean;
+  counts: { chunks: number; images: number; total?: number };
+  // Telemetry fields (optional)
+  uptime_s?: number;
+  ingest_total?: number;
+  ingest_failed?: number;
+  watcher_triggers_total?: number;
+  export_total?: number;
+}
 type Hit = { id: string; score: number; text?: string; caption?: string; path?: string; idx?: number; kind?: string; document_id?: string }
 type Document = { document_id: string; kinds: string[]; paths: string[]; counts: Record<string, number> }
 const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8082"
@@ -67,6 +76,7 @@ function App() {
   const [toast, setToast] = useState<string | null>(null)
   const [lastDoc, setLastDoc] = useState<{id:string, kind:string} | null>(null)
   const [docs, setDocs] = useState<Document[]>([])
+  const [recentDocs, setRecentDocs] = useState<Hit[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [askLoading, setAskLoading] = useState(false)
 
@@ -78,6 +88,7 @@ function App() {
   useEffect(() => {
     loadStatus()
     loadDocuments()
+    loadRecentDocuments()
   }, [])
 
   const loadStatus = async () => {
@@ -91,6 +102,25 @@ function App() {
       setDocs(j)
     } catch (err) {
       console.error('Failed to fetch documents:', err)
+    }
+  }
+
+  const loadRecentDocuments = async () => {
+    try {
+      // Use search with empty query to get recent documents
+      const resp = await doSearch('', 'text')
+      if (resp.ok && resp.results) {
+        // Group by document_id and take the first hit from each document
+        const seen = new Set<string>()
+        const recent = resp.results.filter(hit => {
+          if (!hit.document_id || seen.has(hit.document_id)) return false
+          seen.add(hit.document_id)
+          return true
+        }).slice(0, 5) // Limit to 5
+        setRecentDocs(recent)
+      }
+    } catch (err) {
+      console.error('Failed to fetch recent documents:', err)
     }
   }
 
@@ -173,6 +203,82 @@ function App() {
           <div style={{ padding: 16, borderRadius: 12, boxShadow: '0 1px 4px rgba(0,0,0,.08)' }}>
             <div style={{ opacity: .6, marginBottom: 6 }}>Images</div>
             <div style={{ fontSize: 28, fontWeight: 700 }}>{s.counts.images}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Telemetry Chips */}
+      {s && (s.uptime_s !== undefined || s.ingest_total !== undefined || s.ingest_failed !== undefined || s.watcher_triggers_total !== undefined || s.export_total !== undefined) && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontSize: 14, opacity: .6, marginBottom: 8 }}>Telemetry</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {s.uptime_s !== undefined && (
+              <div style={{ fontSize: 12, background: '#f0f9ff', color: '#0369a1', padding: '4px 8px', borderRadius: 12, border: '1px solid #bae6fd' }}>
+                Uptime: {Math.floor(s.uptime_s / 3600)}h {Math.floor((s.uptime_s % 3600) / 60)}m
+              </div>
+            )}
+            {s.ingest_total !== undefined && (
+              <div style={{ fontSize: 12, background: '#f0fdf4', color: '#166534', padding: '4px 8px', borderRadius: 12, border: '1px solid #bbf7d0' }}>
+                Ingested: {s.ingest_total}
+              </div>
+            )}
+            {s.ingest_failed !== undefined && s.ingest_failed > 0 && (
+              <div style={{ fontSize: 12, background: '#fef2f2', color: '#dc2626', padding: '4px 8px', borderRadius: 12, border: '1px solid #fecaca' }}>
+                Failed: {s.ingest_failed}
+              </div>
+            )}
+            {s.watcher_triggers_total !== undefined && (
+              <div style={{ fontSize: 12, background: '#fefce8', color: '#a16207', padding: '4px 8px', borderRadius: 12, border: '1px solid #fde68a' }}>
+                Watcher: {s.watcher_triggers_total}
+              </div>
+            )}
+            {s.export_total !== undefined && (
+              <div style={{ fontSize: 12, background: '#f3e8ff', color: '#7c3aed', padding: '4px 8px', borderRadius: 12, border: '1px solid #d8b4fe' }}>
+                Exported: {s.export_total}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Recent Documents Panel */}
+      {recentDocs.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontSize: 14, opacity: .6, marginBottom: 8 }}>Recent Documents</div>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {recentDocs.map((doc, i) => (
+              <div key={i} style={{ padding: 12, border: '1px solid #eee', borderRadius: 8, background: '#fafafa' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <code style={{ fontSize: 11, fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
+                    {doc.document_id?.substring(0, 8)}...
+                  </code>
+                  {doc.path && (
+                    <span style={{ fontSize: 12, opacity: .7, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {doc.path.split('/').pop()}
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <span style={{ fontSize: 11, opacity: .6 }}>
+                    {doc.kind === 'image' ? 'images' : 'chunks'}
+                  </span>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button
+                      onClick={() => downloadJson(doc.document_id!, doc.kind === 'image' ? 'images' : 'chunks')}
+                      style={{ fontSize: 11, color: '#1976d2', textDecoration: 'underline', padding: '2px 4px' }}
+                    >
+                      Export JSON
+                    </button>
+                    <button
+                      onClick={() => downloadZip(doc.document_id!, doc.kind)}
+                      style={{ fontSize: 11, color: '#1976d2', textDecoration: 'underline', padding: '2px 4px' }}
+                    >
+                      Export ZIP
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
