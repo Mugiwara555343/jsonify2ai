@@ -1,7 +1,7 @@
 # worker/app/dependencies/auth.py
 from fastapi import HTTPException, Request
 from fastapi.security import HTTPBearer
-from app.config import settings
+from ..config import settings
 
 security = HTTPBearer(auto_error=False)
 
