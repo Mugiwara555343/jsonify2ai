@@ -1,40 +1,38 @@
 # worker/app/dependencies/auth.py
-from fastapi import HTTPException, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from worker.app.config import settings
+from fastapi import HTTPException, Request
+from fastapi.security import HTTPBearer
+from app.config import settings
 
 security = HTTPBearer(auto_error=False)
 
 
-async def verify_token(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> bool:
+def require_auth(request: Request) -> bool:
     """
-    Verify bearer token authentication.
+    Dependency that requires authentication for protected routes.
     If WORKER_AUTH_TOKEN is not set, authentication is disabled.
     """
-    # If no auth token is configured, skip authentication
+    # If no auth token is configured, skip authentication entirely
     if not settings.WORKER_AUTH_TOKEN:
         return True
 
-    # If no credentials provided, deny access
-    if not credentials:
+    # Get the Authorization header manually
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        raise HTTPException(
+            status_code=401, detail={"ok": False, "error": "unauthorized"}
+        )
+
+    # Check if it's a Bearer token
+    parts = auth_header.split(" ", 1)
+    if len(parts) != 2 or parts[0] != "Bearer":
         raise HTTPException(
             status_code=401, detail={"ok": False, "error": "unauthorized"}
         )
 
     # Verify the token
-    if credentials.credentials != settings.WORKER_AUTH_TOKEN:
+    if parts[1] != settings.WORKER_AUTH_TOKEN:
         raise HTTPException(
             status_code=401, detail={"ok": False, "error": "unauthorized"}
         )
 
     return True
-
-
-# Dependency that can be used in route handlers
-def require_auth(credentials: HTTPAuthorizationCredentials = Depends(security)) -> bool:
-    """
-    Dependency that requires authentication for protected routes.
-    """
-    return verify_token(credentials)
