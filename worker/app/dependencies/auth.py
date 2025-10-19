@@ -11,8 +11,14 @@ def require_auth(request: Request) -> bool:
     Dependency that requires authentication for protected routes.
     If WORKER_AUTH_TOKEN is not set, authentication is disabled.
     """
+    # Debug logging
+    print(f"[auth_debug] WORKER_AUTH_TOKEN='{settings.WORKER_AUTH_TOKEN}'")
+    print(f"[auth_debug] Token length: {len(settings.WORKER_AUTH_TOKEN)}")
+    print(f"[auth_debug] Token stripped: '{settings.WORKER_AUTH_TOKEN.strip()}'")
+
     # If no auth token is configured, skip authentication entirely
-    if not settings.WORKER_AUTH_TOKEN:
+    if not settings.WORKER_AUTH_TOKEN or settings.WORKER_AUTH_TOKEN.strip() == "":
+        print("[auth_debug] No auth token configured, skipping authentication")
         return True
 
     # Get the Authorization header manually
