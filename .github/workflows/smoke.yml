@@ -23,15 +23,6 @@ jobs:
         with:
           node-version: '20'
 
-      # Bring up Qdrant on the host so containers can reach http://host.docker.internal:6333
-      - name: Start Qdrant
-        run: |
-          docker run -d --name qdrant -p 6333:6333 qdrant/qdrant:latest
-          # wait for Qdrant
-          for i in {1..30}; do
-            curl -sf http://localhost:6333/collections && break || sleep 2
-          done
-
       - name: Build worker & api
         run: |
           docker compose build worker api
@@ -62,9 +53,14 @@ jobs:
           HF_HUB_DISABLE_SYMLINKS_WARNING=1
           EOF
 
-      - name: Start worker & api
+      - name: Start services
         run: |
-          docker compose up -d worker api
+          # Start all services including Qdrant
+          docker compose up -d qdrant worker api
+          # wait for Qdrant to be ready
+          for i in {1..30}; do
+            curl -sf http://localhost:6333/collections && break || sleep 2
+          done
           # wait for API to be healthy (it forwards /status)
           for i in {1..30}; do
             curl -sf http://localhost:8082/status && break || sleep 2
