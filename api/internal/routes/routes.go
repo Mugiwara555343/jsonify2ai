@@ -243,5 +243,5 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 	})
 
 	// Add ask/search routes with config
-	addAskSearchRoutes(r, getWorkerBase(), cfg)
+	// addAskSearchRoutes(r, getWorkerBase(), cfg) // Commented out due to duplicate /search route
 }

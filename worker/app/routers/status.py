@@ -74,7 +74,11 @@ async def status():
     images_coll = settings.QDRANT_COLLECTION_IMAGES
 
     chunks_total = count_total(chunks_coll)
-    images_total = count_total(images_coll)
+    try:
+        images_total = count_total(images_coll)
+    except Exception as e:
+        images_total = 0
+        telemetry.set_error(f"images_count: {e}")
 
     counts_by_kind = {
         "text": count_match(chunks_coll, "kind", "text"),

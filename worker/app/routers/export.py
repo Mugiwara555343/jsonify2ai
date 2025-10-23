@@ -21,29 +21,40 @@ router = APIRouter()
 
 
 def _scroll_by_docid(client: QdrantClient, collection: str, document_id: str) -> list:
-    """Scroll through points for a document_id in a collection"""
+    """Scroll through points for a document_id in a collection.
+    Returns empty list if collection doesn't exist (404).
+    """
     from qdrant_client.models import Filter, FieldCondition, MatchValue
+    from qdrant_client.http.exceptions import UnexpectedResponse
 
-    filt = Filter(
-        must=[FieldCondition(key="document_id", match=MatchValue(value=document_id))]
-    )
-    all_points = []
-    next_page = None
-    while True:
-        points, next_page = client.scroll(
-            collection_name=collection,
-            scroll_filter=filt,
-            with_payload=True,
-            with_vectors=False,
-            limit=8192,
-            offset=next_page,
+    try:
+        filt = Filter(
+            must=[
+                FieldCondition(key="document_id", match=MatchValue(value=document_id))
+            ]
         )
-        if not points:
-            break
-        all_points.extend(points)
-        if next_page is None:
-            break
-    return all_points
+        all_points = []
+        next_page = None
+        while True:
+            points, next_page = client.scroll(
+                collection_name=collection,
+                scroll_filter=filt,
+                with_payload=True,
+                with_vectors=False,
+                limit=8192,
+                offset=next_page,
+            )
+            if not points:
+                break
+            all_points.extend(points)
+            if next_page is None:
+                break
+        return all_points
+    except UnexpectedResponse as e:
+        if e.status_code == 404:
+            # Collection doesn't exist, return empty list
+            return []
+        raise
 
 
 def _export_doc(client: QdrantClient, collection: str, document_id: str) -> str:

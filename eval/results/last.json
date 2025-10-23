@@ -1,0 +1,34 @@
+{
+  "ts": 1761181641.3215446,
+  "api": "http://localhost:8082",
+  "n": 3,
+  "hits": 0,
+  "latencies_ms": [
+    7.5266000003466615,
+    2.76780000058352,
+    2.7031999998143874
+  ],
+  "cases": [
+    {
+      "i": 1,
+      "ms": 7.5,
+      "ok": false,
+      "hit": false,
+      "question": "What is Qdrant used for in this repo?"
+    },
+    {
+      "i": 2,
+      "ms": 2.8,
+      "ok": false,
+      "hit": false,
+      "question": "Where do exported ZIPs include a manifest?"
+    },
+    {
+      "i": 3,
+      "ms": 2.7,
+      "ok": false,
+      "hit": false,
+      "question": "Which env toggles enable dev modes?"
+    }
+  ]
+}

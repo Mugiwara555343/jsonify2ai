@@ -19,6 +19,7 @@ from __future__ import annotations
 import requests
 import sys
 from typing import Iterable, List, Dict, Any, Tuple, Optional
+from requests.exceptions import HTTPError
 
 from qdrant_client import QdrantClient, models
 from qdrant_client.models import VectorParams
@@ -535,22 +536,38 @@ def _batched(seq: List[Any], n: int) -> Iterable[List[Any]]:
 
 
 def count_total(collection: str) -> int:
-    """Count total points in a collection using Qdrant's count endpoint."""
+    """
+    Count total points in a collection using Qdrant's count endpoint.
+    If the collection doesn't exist yet (404), return 0 instead of raising.
+    """
     url = f"{settings.QDRANT_URL}/collections/{collection}/points/count"
-    r = requests.post(url, json={"exact": True}, timeout=5)
-    r.raise_for_status()
-    j = r.json()
-    return int(j.get("result", {}).get("count", 0))
+    try:
+        r = requests.post(url, json={"exact": True}, timeout=5)
+        r.raise_for_status()
+        j = r.json()
+        return int(j.get("result", {}).get("count", 0))
+    except HTTPError as e:
+        if getattr(e, "response", None) is not None and e.response.status_code == 404:
+            return 0
+        raise
 
 
 def count_match(collection: str, key: str, value: str) -> int:
-    """Count points matching a specific key-value filter using Qdrant's count endpoint."""
+    """
+    Count points matching a specific key-value filter using Qdrant's count endpoint.
+    If the collection doesn't exist yet (404), return 0 instead of raising.
+    """
     url = f"{settings.QDRANT_URL}/collections/{collection}/points/count"
     body = {
         "exact": True,
         "filter": {"must": [{"key": key, "match": {"value": value}}]},
     }
-    r = requests.post(url, json=body, timeout=5)
-    r.raise_for_status()
-    j = r.json()
-    return int(j.get("result", {}).get("count", 0))
+    try:
+        r = requests.post(url, json=body, timeout=5)
+        r.raise_for_status()
+        j = r.json()
+        return int(j.get("result", {}).get("count", 0))
+    except HTTPError as e:
+        if getattr(e, "response", None) is not None and e.response.status_code == 404:
+            return 0
+        raise

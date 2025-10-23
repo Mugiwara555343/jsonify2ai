@@ -1,0 +1,3 @@
+{"question":"What is Qdrant used for in this repo?","answer_contains":"vector","doc_hint":"README or docs"}
+{"question":"Where do exported ZIPs include a manifest?","answer_contains":"manifest.json","doc_hint":"export"}
+{"question":"Which env toggles enable dev modes?","answer_contains":"EMBED_DEV_MODE","doc_hint":"docs/env.md"}
