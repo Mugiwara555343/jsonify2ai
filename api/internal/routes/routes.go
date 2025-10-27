@@ -244,4 +244,8 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 
 	// Add ask/search routes with config
 	// addAskSearchRoutes(r, getWorkerBase(), cfg) // Commented out due to duplicate /search route
+
+	// ----------------------------- /ask -----------------------------
+	// POST /ask (protected)
+	r.POST("/ask", middleware.AuthMiddleware(cfg), (&AskHandler{Config: cfg}).Post)
 }

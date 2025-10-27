@@ -1,3 +1,8 @@
 {"question":"What is Qdrant used for in this repo?","answer_contains":"vector","doc_hint":"README or docs"}
 {"question":"Where do exported ZIPs include a manifest?","answer_contains":"manifest.json","doc_hint":"export"}
 {"question":"Which env toggles enable dev modes?","answer_contains":"EMBED_DEV_MODE","doc_hint":"docs/env.md"}
+{"question":"How do I export a ZIP?", "answer_contains":"export/archive", "doc_hint":"web UI or API routes"}
+{"question":"What file includes watcher settings?", "answer_contains":"scripts/filewatcher.py", "doc_hint":"scripts"}
+{"question":"Which env controls CORS for worker?", "answer_contains":"WORKER_CORS_ALLOWED_ORIGINS", "doc_hint":"docs/env.md"}
+{"question":"What does manifest.json include?", "answer_contains":"generated_at", "doc_hint":"export manifest"}
+{"question":"What’s the vector dimension?", "answer_contains":"768", "doc_hint":"qdrant.info.json or docs/env.md"}
