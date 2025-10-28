@@ -111,6 +111,7 @@ async def status():
         "ingest_failed": telemetry_stats["ingest_failed"],
         "watcher_triggers_total": telemetry_stats["watcher_triggers_total"],
         "export_total": telemetry_stats["export_total"],
+        "ask_synth_total": telemetry_stats["ask_synth_total"],
         "last_error": telemetry_stats["last_error"],
     }
     return JSONResponse(data)

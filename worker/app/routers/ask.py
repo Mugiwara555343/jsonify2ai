@@ -2,9 +2,11 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List
 import requests
+import time
 from qdrant_client import QdrantClient
 from worker.app.config import settings
 from worker.app.services.embed_ollama import embed_texts
+from worker.app.telemetry import telemetry
 
 router = APIRouter()
 
@@ -112,7 +114,13 @@ def ask(body: AskBody):
             if s:
                 snippets.append(s[:220])
         summary = " • ".join(snippets) or "(no matching snippets)"
-        return {"ok": True, "mode": "search", "answer": summary, "sources": sources}
+        result = {"ok": True, "mode": "search", "answer": summary, "sources": sources}
+
+        # Optional LLM synthesis if enabled
+        if settings.LLM_PROVIDER == "ollama" and snippets:
+            result = _try_llm_synthesis(body.query, result, log)
+
+        return result
     else:
         # LLM path
         log.info(f"[ask] running in llm mode for query: {body.query[:50]}...")
@@ -134,4 +142,131 @@ def ask(body: AskBody):
             if s:
                 snippets.append(s[:220])
         summary = " • ".join(snippets) or "(no matching snippets)"
-        return {"ok": True, "mode": "search", "answer": summary, "sources": sources}
+        result = {"ok": True, "mode": "search", "answer": summary, "sources": sources}
+
+        # Optional LLM synthesis if enabled
+        if settings.LLM_PROVIDER == "ollama" and snippets:
+            result = _try_llm_synthesis(body.query, result, log)
+
+        return result
+
+
+def _truncate(s: str, limit: int) -> str:
+    """Truncate string with ellipsis."""
+    if len(s) <= limit:
+        return s
+    return s[:limit] + "…"
+
+
+def _build_prompt(question: str, snippets: list[str]) -> str:
+    """Build concise, grounded prompt for small models."""
+    joined = "\n".join(f"{i+1}) {snip}" for i, snip in enumerate(snippets))
+    return (
+        "You are a concise assistant. Answer using ONLY the snippets below.\n"
+        'If information is missing, reply: "Not enough information."\n\n'
+        f"Question: {question}\n\n"
+        "Snippets:\n"
+        f"{joined}\n\n"
+        "Requirements:\n"
+        "- 3–6 sentences maximum.\n"
+        "- Be factual and avoid speculation.\n"
+        "- If helpful, mention filenames or document_id present in snippets.\n"
+    )
+
+
+def _select_snippets(
+    results: list[dict],
+    max_keep: int = 5,
+    min_score: float = 0.2,
+    per_snippet_chars: int = 2000,
+    total_chars: int = 8000,
+) -> list[str]:
+    """
+    Filter and cap retrieval results.
+
+    Args:
+        results: List of {"text":..., "score":..., "path":..., "document_id":...}
+        max_keep: Maximum number of snippets to keep
+        min_score: Minimum score threshold
+        per_snippet_chars: Max chars per snippet
+        total_chars: Max total chars across all snippets
+
+    Returns:
+        List of filtered snippet strings with metadata
+    """
+    # Take top-10, drop low scores
+    pool = results[:10]
+    pool = [r for r in pool if (r.get("score") or 0) >= min_score]
+
+    # Build snippets with metadata, obey caps
+    out, acc = [], 0
+    for r in pool:
+        text = str(r.get("text") or "")
+        meta = []
+        if r.get("path"):
+            meta.append(f"[path: {r['path']}]")
+        if r.get("document_id"):
+            meta.append(f"[doc: {r['document_id']}]")
+
+        snip = _truncate(text, per_snippet_chars)
+        if meta:
+            snip = snip + "\n" + " ".join(meta)
+
+        if acc + len(snip) > total_chars:
+            break
+
+        out.append(snip)
+        acc += len(snip)
+
+        if len(out) >= max_keep:
+            break
+
+    return out
+
+
+def _try_llm_synthesis(query: str, result: dict, log) -> dict:
+    """
+    Try optional LLM synthesis using Ollama if enabled and sources exist.
+    Adds 'final' field to result on success.
+    """
+    if settings.LLM_PROVIDER != "ollama":
+        return result
+
+    # Check if we have sources to synthesize
+    sources = result.get("sources", [])
+    if not sources or len(sources) == 0:
+        return result
+
+    try:
+        from worker.providers.llm.ollama import generate as ollama_generate
+
+        # Filter and cap retrieval
+        snippets = _select_snippets(sources)
+        if not snippets:
+            return result
+
+        # Build concise prompt
+        prompt = _build_prompt(query, snippets)
+
+        # Call Ollama generate
+        start_time = time.time()
+        final_answer = ollama_generate(prompt)
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        if final_answer:
+            result["final"] = final_answer
+            log.info(f"[ask] synthesis successful ({duration_ms}ms)")
+        else:
+            log.warning("[ask] synthesis failed, result unchanged")
+
+        # Telemetry
+        telemetry.increment("ask_synth_total")
+        telemetry.log_json(
+            "ask_synthesis", duration_ms=duration_ms, success=bool(final_answer)
+        )
+
+    except Exception as e:
+        log.warning(f"[ask] synthesis error: {e}")
+        # Don't fail the request, just continue without 'final'
+
+    return result

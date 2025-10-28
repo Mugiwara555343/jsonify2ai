@@ -84,6 +84,17 @@ class Settings(BaseSettings):
     ASK_TEMP: float = 0.3
     ASK_TOP_P: float = 0.9
 
+    # --- LLM Provider for synthesis -------------------------------------------
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "none")  # none|ollama
+    OLLAMA_HOST: str = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+    # Generation tuning (Ollama options)
+    LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.2"))
+    LLM_TOP_P: float = float(os.getenv("LLM_TOP_P", "0.9"))
+    LLM_REPEAT_PENALTY: float = float(os.getenv("LLM_REPEAT_PENALTY", "1.1"))
+    LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "256"))
+    LLM_NUM_CTX: int = int(os.getenv("LLM_NUM_CTX", "4096"))
+
     # --- Timeouts / Limits (ms) ----------------------------------------------
     HTTP_TIMEOUT_MS: int = 15000  # outbound calls (ollama/qdrant)
     PARSER_TIMEOUT_MS: int = 120000  # per-file parser max

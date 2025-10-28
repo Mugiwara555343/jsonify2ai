@@ -29,6 +29,7 @@ class Telemetry:
         self._ingest_failed = 0
         self._watcher_triggers_total = 0
         self._export_total = 0
+        self._ask_synth_total = 0
         self._last_error: Optional[str] = None
 
         # Log file configuration
@@ -55,6 +56,8 @@ class Telemetry:
                     self._watcher_triggers_total += 1
                 elif counter_name == "export_total":
                     self._export_total += 1
+                elif counter_name == "ask_synth_total":
+                    self._ask_synth_total += 1
         except Exception as e:
             log.debug(f"Telemetry increment failed for {counter_name}: {e}")
 
@@ -118,6 +121,7 @@ class Telemetry:
                     "ingest_failed": self._ingest_failed,
                     "watcher_triggers_total": self._watcher_triggers_total,
                     "export_total": self._export_total,
+                    "ask_synth_total": self._ask_synth_total,
                     "last_error": self._last_error,
                 }
         except Exception as e:
@@ -128,6 +132,7 @@ class Telemetry:
                 "ingest_failed": 0,
                 "watcher_triggers_total": 0,
                 "export_total": 0,
+                "ask_synth_total": 0,
                 "last_error": None,
             }
 
