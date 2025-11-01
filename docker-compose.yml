@@ -52,7 +52,11 @@ services:
     environment:
       QDRANT_URL: "http://host.docker.internal:6333"
       OLLAMA_URL: "http://host.docker.internal:11434"
+      OLLAMA_HOST: "http://host.docker.internal:11434"
       EMBED_DEV_MODE: "0"
+      EMBEDDINGS_MODEL: "nomic-embed-text"
+      LLM_PROVIDER: "ollama"
+      OLLAMA_MODEL: "qwen2.5:3b-instruct-q4_K_M"
       IMAGES_CAPTION: ${IMAGES_CAPTION:-0}
       ASK_MODE: ${ASK_MODE}
       ASK_MODEL: ${ASK_MODEL}

@@ -1,71 +1,71 @@
 {
-  "ts": 1761529873.4635844,
+  "ts": 1761736602.7374103,
   "api": "http://localhost:8082",
   "n": 8,
   "hits": 0,
   "latencies_ms": [
-    7250.501799979247,
-    798.0555999965873,
-    369.4427000009455,
-    1115.209599985974,
-    339.22110000276007,
-    539.3930000136606,
-    783.1141999922693,
-    321.7995000013616
+    4284.939499993925,
+    995.607500000915,
+    311.1449999996694,
+    1395.254199996998,
+    315.66210000164574,
+    471.0731000013766,
+    692.9921999981161,
+    378.5261000011815
   ],
   "cases": [
     {
       "i": 1,
-      "ms": 7250.5,
+      "ms": 4284.9,
       "ok": true,
       "hit": false,
       "question": "What is Qdrant used for in this repo?"
     },
     {
       "i": 2,
-      "ms": 798.1,
+      "ms": 995.6,
       "ok": true,
       "hit": false,
       "question": "Where do exported ZIPs include a manifest?"
     },
     {
       "i": 3,
-      "ms": 369.4,
+      "ms": 311.1,
       "ok": true,
       "hit": false,
       "question": "Which env toggles enable dev modes?"
     },
     {
       "i": 4,
-      "ms": 1115.2,
+      "ms": 1395.3,
       "ok": true,
       "hit": false,
       "question": "How do I export a ZIP?"
     },
     {
       "i": 5,
-      "ms": 339.2,
+      "ms": 315.7,
       "ok": true,
       "hit": false,
       "question": "What file includes watcher settings?"
     },
     {
       "i": 6,
-      "ms": 539.4,
+      "ms": 471.1,
       "ok": true,
       "hit": false,
       "question": "Which env controls CORS for worker?"
     },
     {
       "i": 7,
-      "ms": 783.1,
+      "ms": 693.0,
       "ok": true,
       "hit": false,
       "question": "What does manifest.json include?"
     },
     {
       "i": 8,
-      "ms": 321.8,
+      "ms": 378.5,
       "ok": true,
       "hit": false,
       "question": "What’s the vector dimension?"
