@@ -15,7 +15,7 @@ type Status = {
 type Hit = { id: string; score: number; text?: string; caption?: string; path?: string; idx?: number; kind?: string; document_id?: string }
 type Document = { document_id: string; kinds: string[]; paths: string[]; counts: Record<string, number> }
 const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8082"
-type AskResp = { ok: boolean; mode: 'search' | 'llm'; model?: string; answer: string; sources: Hit[] }
+type AskResp = { ok: boolean; mode: 'search' | 'llm'; model?: string; answer?: string; final?: string; sources?: Hit[]; answers?: Hit[]; error?: string }
 
 
 function sleep(ms: number) {
@@ -112,7 +112,7 @@ function App() {
       if (resp.ok && resp.results) {
         // Group by document_id and take the first hit from each document
         const seen = new Set<string>()
-        const recent = resp.results.filter(hit => {
+        const recent = resp.results.filter((hit: Hit) => {
           if (!hit.document_id || seen.has(hit.document_id)) return false
           seen.add(hit.document_id)
           return true
@@ -359,11 +359,30 @@ function App() {
         {ans && (
           <div style={{ marginTop: 12, padding: 12, border: '1px solid #eee', borderRadius: 10 }}>
             <div style={{ fontSize: 12, opacity: .6, marginBottom: 6 }}>mode: {ans.mode}{ans.model ? ` (${ans.model})` : ''}</div>
-            <div style={{ whiteSpace: 'pre-wrap' }}>{ans.answer}</div>
-            {ans.sources?.length > 0 && (
-              <div style={{ marginTop: 10, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {ans.sources.map((h, i) => (<span key={i} style={{ fontSize: 12, opacity: .75, border: '1px solid #eee', padding: '2px 6px', borderRadius: 999 }}>{h.path?.split('/').pop() || h.id}</span>))}
+            {ans.final && ans.final.trim() && (
+              <div style={{ marginBottom: 12, padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fafafa' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <div style={{ fontWeight: 600 }}>Answer</div>
+                  <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 999, background: '#eef2ff', color: '#3730a3' }}>local (ollama)</span>
+                </div>
+                <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.4 }}>{ans.final}</div>
               </div>
+            )}
+            {(ans.answer || ans.sources || ans.answers) && (
+              <>
+                {ans.answer && ans.answer.trim() && (
+                  <div style={{ whiteSpace: 'pre-wrap', marginBottom: ans.sources?.length || ans.answers?.length ? 10 : 0 }}>{ans.answer}</div>
+                )}
+                {(ans.sources && ans.sources.length > 0) || (ans.answers && ans.answers.length > 0) ? (
+                  <div style={{ marginTop: 10, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {(ans.sources || ans.answers || []).map((h, i) => (
+                      <span key={i} style={{ fontSize: 12, opacity: .75, border: '1px solid #eee', padding: '2px 6px', borderRadius: 999 }}>{h.path?.split('/').pop() || h.id}</span>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ color: '#666', fontSize: 13, marginTop: 8 }}>No matching snippets.</div>
+                )}
+              </>
             )}
           </div>
         )}
