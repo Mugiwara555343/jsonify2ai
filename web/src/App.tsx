@@ -11,6 +11,7 @@ type Status = {
   ingest_failed?: number;
   watcher_triggers_total?: number;
   export_total?: number;
+  ask_synth_total?: number;
 }
 type Hit = { id: string; score: number; text?: string; caption?: string; path?: string; idx?: number; kind?: string; document_id?: string }
 type Document = { document_id: string; kinds: string[]; paths: string[]; counts: Record<string, number> }
@@ -138,7 +139,11 @@ function App() {
     try {
       const resp = await performSearch(q, kind);
       if (resp.ok === false) {
-        showToast(`Search failed: ${resp.error || 'Unknown error'}`, true);
+        if (resp.error === "rate_limited") {
+          showToast("Rate limited — try again in a few seconds.", true);
+        } else {
+          showToast(`Search failed: ${resp.error || 'Unknown error'}`, true);
+        }
         setRes([]);
       } else {
         setRes(resp.results ?? []);
@@ -168,6 +173,10 @@ function App() {
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
+        if (res.status === 429 && errorData?.error === "rate_limited") {
+          showToast("Rate limited — try again in a few seconds.", true);
+          return;
+        }
         throw new Error(errorData?.error || errorData?.detail || `Upload failed (${res.status})`);
       }
 
@@ -208,7 +217,7 @@ function App() {
       )}
 
       {/* Telemetry Chips */}
-      {s && (s.uptime_s !== undefined || s.ingest_total !== undefined || s.ingest_failed !== undefined || s.watcher_triggers_total !== undefined || s.export_total !== undefined) && (
+      {s && (s.uptime_s !== undefined || s.ingest_total !== undefined || s.ingest_failed !== undefined || s.watcher_triggers_total !== undefined || s.export_total !== undefined || s.ask_synth_total !== undefined) && (
         <div style={{ marginTop: 16 }}>
           <div style={{ fontSize: 14, opacity: .6, marginBottom: 8 }}>Telemetry</div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -235,6 +244,11 @@ function App() {
             {s.export_total !== undefined && (
               <div style={{ fontSize: 12, background: '#f3e8ff', color: '#7c3aed', padding: '4px 8px', borderRadius: 12, border: '1px solid #d8b4fe' }}>
                 Exported: {s.export_total}
+              </div>
+            )}
+            {s.ask_synth_total !== undefined && (
+              <div style={{ fontSize: 12, background: '#fef3c7', color: '#92400e', padding: '4px 8px', borderRadius: 12, border: '1px solid #fde68a' }}>
+                Ask Synth: {s.ask_synth_total}
               </div>
             )}
           </div>
@@ -332,13 +346,22 @@ function App() {
               try {
                 const j: AskResp = await askQuestion(askQ, 6);
                 if (j.ok === false) {
-                  showToast(`Ask failed: ${j.error || 'Unknown error'}`, true);
+                  if (j.error === "rate_limited") {
+                    showToast("Rate limited — try again in a few seconds.", true);
+                  } else {
+                    showToast(`Ask failed: ${j.error || 'Unknown error'}`, true);
+                  }
                   setAns(null);
                 } else {
                   setAns(j);
                 }
               } catch (err: any) {
-                showToast(`Ask error: ${err?.message || err}`, true);
+                // Check if it's a 429 rate limit error
+                if (err?.status === 429 || err?.errorData?.error === "rate_limited") {
+                  showToast("Rate limited — try again in a few seconds.", true);
+                } else {
+                  showToast(`Ask error: ${err?.message || err}`, true);
+                }
                 setAns(null);
               } finally {
                 setAskLoading(false);

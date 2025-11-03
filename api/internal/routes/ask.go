@@ -61,11 +61,21 @@ func (h *AskHandler) Post(c *gin.Context) {
 		req.Limit = 3
 	}
 
-	// Primary path: call worker /ask with {query, kind, limit}
+	// Extract optional query params for filters
+	documentID := c.Query("document_id")
+	pathPrefix := c.Query("path_prefix")
+
+	// Primary path: call worker /ask with {query, kind, limit, document_id?, path_prefix?}
 	wreq := map[string]any{
 		"query": req.Q,
 		"kind":  req.Kind,
 		"limit": req.Limit,
+	}
+	if documentID != "" {
+		wreq["document_id"] = documentID
+	}
+	if pathPrefix != "" {
+		wreq["path_prefix"] = pathPrefix
 	}
 	wbody, _ := json.Marshal(wreq)
 	wurl := fmt.Sprintf("%s/ask", h.workerBaseURL())
@@ -90,8 +100,14 @@ func (h *AskHandler) Post(c *gin.Context) {
 	}
 
 	// Fallback: worker /search -> map to answers
-	// GET /search?kind=&q=&limit=
+	// GET /search?kind=&q=&limit=&document_id=&path=
 	sURL := fmt.Sprintf("%s/search?kind=%s&q=%s&limit=%d", h.workerBaseURL(), req.Kind, urlQueryEscape(req.Q), req.Limit)
+	if documentID != "" {
+		sURL += "&document_id=" + urlQueryEscape(documentID)
+	}
+	if pathPrefix != "" {
+		sURL += "&path=" + urlQueryEscape(pathPrefix)
+	}
 	sreq, _ := http.NewRequest(http.MethodGet, sURL, nil)
 	if rid := c.GetHeader("X-Request-Id"); rid != "" {
 		sreq.Header.Set("X-Request-Id", rid)
@@ -133,5 +149,5 @@ func (h *AskHandler) Post(c *gin.Context) {
 // helper for safe query escaping without importing net/url in many places
 func urlQueryEscape(s string) string {
 	// minimal wrapper; ok for typical ASCII questions
-	return (&url.URL{Path: s}).EscapedPath()
+	return url.QueryEscape(s)
 }

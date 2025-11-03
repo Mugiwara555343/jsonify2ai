@@ -15,14 +15,35 @@ class AskBody(BaseModel):
     query: str
     k: int = 6
     mode: str = None
+    document_id: str = None
+    path_prefix: str = None
 
 
-def _search(q: str, k: int):
+def _search(q: str, k: int, document_id: str = None, path_prefix: str = None):
     vec = embed_texts([q])[0]
     qc = QdrantClient(url=settings.QDRANT_URL)
 
+    # Build filter if document_id or path_prefix provided
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+    qf = None
+    if document_id or path_prefix:
+        must = []
+        if document_id:
+            must.append(
+                FieldCondition(key="document_id", match=MatchValue(value=document_id))
+            )
+        if path_prefix:
+            # Use prefix match for path_prefix (if supported) or exact match
+            # For now, use exact match on path field
+            must.append(FieldCondition(key="path", match=MatchValue(value=path_prefix)))
+        if must:
+            qf = Filter(must=must)
+
     def go(col):
-        hits = qc.search(collection_name=col, query_vector=vec, limit=k)
+        hits = qc.search(
+            collection_name=col, query_vector=vec, limit=k, query_filter=qf
+        )
         out = []
         for h in hits:
             p = h.payload or {}
@@ -93,7 +114,9 @@ def _ollama_generate(prompt: str):
 
 @router.post("/ask")
 def ask(body: AskBody):
-    text_hits, img_hits = _search(body.query, body.k)
+    text_hits, img_hits = _search(
+        body.query, body.k, body.document_id, body.path_prefix
+    )
     sources = text_hits[: body.k // 2] + img_hits[: body.k - body.k // 2]
 
     # Normalize requested mode: "retrieval" maps to "search"
