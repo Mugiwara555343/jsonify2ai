@@ -20,7 +20,7 @@ REQUIRE_PREFIX = os.getenv("WATCH_REQUIRE_PREFIX", "data/")
 STABLE_PASSES = int(os.getenv("WATCH_STABLE_PASSES", "2"))
 STRIP_PREFIX = os.getenv("WATCH_STRIP_PREFIX", "")
 REQUIRE_PREFIX = os.getenv("WATCH_REQUIRE_PREFIX", "data/")
-LOG_MAX_MB = int(os.getenv("WATCH_LOG_MAX_MB", "10"))
+LOG_MAX_MB = int(os.getenv("MAX_LOG_MB", os.getenv("WATCH_LOG_MAX_MB", "16")))
 
 EXT_KIND = {
     ".txt": "text",
@@ -127,14 +127,25 @@ def log_event(event: str, level: str = "info", **kwargs):
                 log_dir.mkdir(parents=True, exist_ok=True)
                 log_file = log_dir / "watcher.jsonl"
 
-            # Check if rotation needed
+            # Check if rotation needed (2-deep: .1, .2)
             if log_file.exists() and log_file.stat().st_size > (
                 LOG_MAX_MB * 1024 * 1024
             ):
-                backup_file = log_file.with_suffix(".jsonl.1")
-                if backup_file.exists():
-                    backup_file.unlink()
-                log_file.rename(backup_file)
+                log_file_2 = log_file.with_suffix(".jsonl.2")
+                log_file_1 = log_file.with_suffix(".jsonl.1")
+
+                # If .2 exists, delete it (oldest)
+                if log_file_2.exists():
+                    log_file_2.unlink()
+
+                # If .1 exists, rename to .2
+                if log_file_1.exists():
+                    log_file_1.rename(log_file_2)
+
+                # Rename current to .1
+                log_file.rename(log_file_1)
+
+                # Current file is now gone; next write will create a new one
 
             # Write log entry
             log_entry = {

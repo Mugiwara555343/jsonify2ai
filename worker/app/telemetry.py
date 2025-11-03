@@ -35,7 +35,9 @@ class Telemetry:
         # Log file configuration
         self._log_dir = Path("data/logs")
         self._log_file = self._log_dir / "worker.jsonl"
-        self._max_log_mb = int(os.getenv("WORKER_LOG_MAX_MB", "20"))
+        self._max_log_mb = int(
+            os.getenv("MAX_LOG_MB", os.getenv("WORKER_LOG_MAX_MB", "16"))
+        )
         self._max_log_bytes = self._max_log_mb * 1024 * 1024
 
         # Ensure log directory exists
@@ -97,19 +99,29 @@ class Telemetry:
             log.debug(f"Telemetry log_json failed: {e}")
 
     def _maybe_rotate_log(self) -> None:
-        """Rotate log file if it exceeds size limit."""
+        """Rotate log file if it exceeds size limit (2-deep: .1, .2)."""
         try:
             if (
                 self._log_file.exists()
                 and self._log_file.stat().st_size > self._max_log_bytes
             ):
-                # Simple rotation: rename to .1
-                backup_file = self._log_file.with_suffix(".jsonl.1")
-                if backup_file.exists():
-                    backup_file.unlink()  # Remove old backup
-                self._log_file.rename(backup_file)
+                log_file_2 = self._log_file.with_suffix(".jsonl.2")
+                log_file_1 = self._log_file.with_suffix(".jsonl.1")
+
+                # If .2 exists, delete it (oldest)
+                if log_file_2.exists():
+                    log_file_2.unlink()
+
+                # If .1 exists, rename to .2
+                if log_file_1.exists():
+                    log_file_1.rename(log_file_2)
+
+                # Rename current to .1
+                self._log_file.rename(log_file_1)
+
+                # Current file is now gone; next write will create a new one
         except Exception as e:
-            log.debug(f"Log rotation failed: {e}")
+            log.warning(f"Log rotation failed: {e}")
 
     def get_stats(self) -> Dict[str, Any]:
         """Get current telemetry statistics."""

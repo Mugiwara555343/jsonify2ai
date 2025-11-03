@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"jsonify2ai/api/internal/config"
@@ -54,8 +55,26 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 	// Basic API-only health (liveness)
 	RegisterHealth(r)
 
-	// Upload endpoint - now forwards directly to worker (protected)
-	r.POST("/upload", middleware.AuthMiddleware(cfg), (&UploadHandler{Config: cfg}).Post)
+	// Initialize rate limiter from environment
+	uploadPerMin := 10
+	if v := os.Getenv("RATE_UPLOAD_PER_MIN"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			uploadPerMin = parsed
+		}
+	}
+	askPerMin := 30
+	if v := os.Getenv("RATE_ASK_PER_MIN"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			askPerMin = parsed
+		}
+	}
+	rateLimiter := middleware.NewRateLimiter(uploadPerMin, askPerMin)
+	log.Printf("[routes] rate limiter initialized: upload=%d/min ask=%d/min", uploadPerMin, askPerMin)
+
+	// Upload endpoint - now forwards directly to worker (protected + rate limited)
+	r.POST("/upload",
+		middleware.AuthMiddleware(cfg),
+		rateLimiter.Wrap("upload", (&UploadHandler{Config: cfg}).Post))
 	log.Printf("[routes] registered upload endpoint with docsDir=%s", docsDir)
 
 	// Resolve worker base URL (env WORKER_URL takes precedence; default to http://worker:8090)
@@ -246,6 +265,8 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 	// addAskSearchRoutes(r, getWorkerBase(), cfg) // Commented out due to duplicate /search route
 
 	// ----------------------------- /ask -----------------------------
-	// POST /ask (protected)
-	r.POST("/ask", middleware.AuthMiddleware(cfg), (&AskHandler{Config: cfg}).Post)
+	// POST /ask (protected + rate limited)
+	r.POST("/ask",
+		middleware.AuthMiddleware(cfg),
+		rateLimiter.Wrap("ask", (&AskHandler{Config: cfg}).Post))
 }
