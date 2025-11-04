@@ -2,7 +2,7 @@
 // API utility functions with optional authentication
 
 const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8082";
-const authToken = import.meta.env.VITE_API_AUTH_TOKEN;
+const authToken = import.meta.env.VITE_API_TOKEN;
 
 function getHeaders(includeAuth = true): HeadersInit {
   const headers: HeadersInit = {};

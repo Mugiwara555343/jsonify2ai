@@ -31,7 +31,7 @@ async function waitForProcessed(oldTotal: number, timeoutMs = 20000, intervalMs 
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
     if (!visible()) { await sleep(500); continue; }
-    const s = await fetch(`${apiBase}/status`).then(r => r.json()).catch(() => null);
+    const s = await fetchStatus().catch(() => null);
     const total = s?.counts?.total ?? 0;
     if (total > oldTotal) return { ok: true, total };
     await sleep(intervalMs);
@@ -164,23 +164,10 @@ function App() {
     const file = e.target.files[0]
     setUploadBusy(true)
     try {
-      const s0 = await fetch(`${apiBase}/status`).then(r => r.json()).catch(() => ({counts:{total:0}}))
+      const s0 = await fetchStatus().catch(() => ({counts:{total:0}}))
       const baseTotal = s0?.counts?.total ?? 0
 
-      const fd = new FormData();
-      fd.append("file", file, file.name);
-      const res = await fetch(`${apiBase}/upload`, { method: "POST", body: fd });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        if (res.status === 429 && errorData?.error === "rate_limited") {
-          showToast("Rate limited — try again in a few seconds.", true);
-          return;
-        }
-        throw new Error(errorData?.error || errorData?.detail || `Upload failed (${res.status})`);
-      }
-
-      const data = await res.json();
+      const data = await uploadFile(file);
 
       // if API returns worker JSON, we'll have document_id and collection
       const docId = data?.document_id as string | undefined;
@@ -192,7 +179,11 @@ function App() {
       const done = await waitForProcessed(baseTotal, 20000, 4000);
       showToast(done.ok ? "Processed ✓" : "Uploaded (pending…)");
     } catch (err:any) {
-      showToast(`Upload failed: ${err?.message || err}`, true)
+      if (err?.message?.includes("rate_limited") || err?.message?.includes("429")) {
+        showToast("Rate limited — try again in a few seconds.", true);
+      } else {
+        showToast(`Upload failed: ${err?.message || err}`, true)
+      }
     } finally {
       setUploadBusy(false)
       e.target.value = "" // reset input
