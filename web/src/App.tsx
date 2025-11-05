@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import ThemeControls from "./ThemeControls";
+import { applyTheme, loadTheme } from "./theme";
 import './App.css'
 import { uploadFile, doSearch, askQuestion, fetchStatus, fetchDocuments, downloadJson } from './api'
 
@@ -80,6 +82,9 @@ function App() {
   const [recentDocs, setRecentDocs] = useState<Hit[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [askLoading, setAskLoading] = useState(false)
+
+  // Apply saved theme on mount
+  useEffect(() => { try { applyTheme(loadTheme()); } catch {} }, [])
 
   function showToast(msg: string, isError = false) {
     setToast(msg);
@@ -191,7 +196,7 @@ function App() {
   }
 
   return (
-    <div style={{ fontFamily: 'ui-sans-serif', padding: 24, maxWidth: 720, margin: '0 auto' }}>
+    <div style={{ fontFamily: 'ui-sans-serif', padding: 24, maxWidth: 720, margin: '0 auto', background: 'var(--bg)', color: 'var(--fg)', minHeight: '100vh' }}>
       <h1 style={{ fontSize: 24, marginBottom: 12 }}>jsonify2ai — Status</h1>
       {!s && <div>Loading…</div>}
       {s && (
@@ -206,6 +211,11 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* Theme controls */}
+      <div style={{ marginTop: 10 }}>
+        <ThemeControls />
+      </div>
 
       {/* Telemetry Chips */}
       {s && (s.uptime_s !== undefined || s.ingest_total !== undefined || s.ingest_failed !== undefined || s.watcher_triggers_total !== undefined || s.export_total !== undefined || s.ask_synth_total !== undefined) && (
