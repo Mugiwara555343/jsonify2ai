@@ -67,7 +67,11 @@ export async function askQuestion(query, k = 6) {
     }, true);
     if (!r.ok) {
         const errorData = await r.json().catch(() => ({}));
-        throw new Error(errorData?.error || errorData?.detail || `Ask failed (${r.status})`);
+        // Preserve error data for rate limiting detection
+        const err = new Error(errorData?.error || errorData?.detail || `Ask failed (${r.status})`);
+        err.status = r.status;
+        err.errorData = errorData;
+        throw err;
     }
     return await r.json();
 }
