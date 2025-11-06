@@ -56,15 +56,16 @@ def main():
 
     # 1) API upload (multipart)
     try:
-        files = {"file": (test_path.name, open(test_path, "rb"), "text/markdown")}
-        headers = {"Authorization": f"Bearer {api_token}"} if api_token else {}
-        r = requests.post(
-            f"{api_base}/upload", files=files, headers=headers, timeout=30
-        )
-        if r.status_code in (401, 403):
-            summary["inferred_issue"] = "missing_api_token"
-        r.raise_for_status()
-        summary["api_upload_ok"] = True
+        with open(test_path, "rb") as f:
+            files = {"file": (test_path.name, f, "text/markdown")}
+            headers = {"Authorization": f"Bearer {api_token}"} if api_token else {}
+            r = requests.post(
+                f"{api_base}/upload", files=files, headers=headers, timeout=30
+            )
+            if r.status_code in (401, 403):
+                summary["inferred_issue"] = "missing_api_token"
+            r.raise_for_status()
+            summary["api_upload_ok"] = True
     except Exception:
         pass
 
