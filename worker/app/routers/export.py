@@ -12,6 +12,8 @@ import io
 import os
 import os.path
 import zipfile
+import hashlib
+import datetime
 import time
 import uuid
 
@@ -251,6 +253,29 @@ def export_archive_get(
             else "chunks"
         )
 
+        # Compute counts across both collections for manifest
+        chunks_count = 0
+        images_count = 0
+        if used_collection == settings.QDRANT_COLLECTION:
+            chunks_count = len(points)
+            # try images
+            try:
+                images_count = len(
+                    _scroll_by_docid(
+                        client, settings.QDRANT_COLLECTION_IMAGES, document_id
+                    )
+                )
+            except Exception:
+                images_count = 0
+        else:
+            images_count = len(points)
+            try:
+                chunks_count = len(
+                    _scroll_by_docid(client, settings.QDRANT_COLLECTION, document_id)
+                )
+            except Exception:
+                chunks_count = 0
+
         # Build ZIP in-memory
         zip_bytes = io.BytesIO()
         with zipfile.ZipFile(
@@ -261,27 +286,11 @@ def export_archive_get(
                 if used_collection == settings.QDRANT_COLLECTION_IMAGES
                 else "chunks.jsonl"
             )
-            zf.writestr(jsonl_name, jsonl_buf.getvalue().encode("utf-8"))
-
-            # Add manifest.json with metadata
-            import datetime
-            import json as _json
-
-            manifest = {
-                "collection": used_collection,
-                "document_id": document_id,
-                "count": len(points),
-                "generated_at": datetime.datetime.now().isoformat(),
-                "collection_type": collection_type,
-                "files": [jsonl_name],
-            }
-
-            if source_path and os.path.exists(source_path):
-                manifest["files"].append(f"source/{os.path.basename(source_path)}")
-
-            zf.writestr(
-                "manifest.json", _json.dumps(manifest, indent=2).encode("utf-8")
-            )
+            # Write JSONL and compute sha256/size
+            jsonl_bytes = jsonl_buf.getvalue().encode("utf-8")
+            zf.writestr(jsonl_name, jsonl_bytes)
+            jsonl_sha = hashlib.sha256(jsonl_bytes).hexdigest()
+            jsonl_size = len(jsonl_bytes)
 
             # Add README.txt with metadata
             readme_content = f"""jsonify2ai Export Archive
@@ -303,10 +312,46 @@ For more information, visit: https://github.com/Mugiwara555343/jsonify2ai
 """
             zf.writestr("README.txt", readme_content.encode("utf-8"))
 
+            source_entry = None
             if source_path and os.path.exists(source_path):
                 # Store under source/<basename>
                 arcname = os.path.join("source", os.path.basename(source_path))
+                # Compute sha256 and bytes for source while also adding file
+                # zipfile doesn't expose streaming callback, so compute separately
+                src_sha = hashlib.sha256()
+                total = 0
+                with open(source_path, "rb") as f:
+                    while True:
+                        chunk = f.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        src_sha.update(chunk)
+                        total += len(chunk)
                 zf.write(source_path, arcname=arcname)
+                source_entry = {
+                    "path": arcname,
+                    "sha256": src_sha.hexdigest(),
+                    "bytes": total,
+                }
+
+            # Build manifest as last entry
+            import json as _json
+
+            manifest = {
+                "request_id": request_id,
+                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+                "collection": used_collection,
+                "document_id": document_id,
+                "counts": {"chunks": chunks_count, "images": images_count},
+                "files": [
+                    {"path": jsonl_name, "sha256": jsonl_sha, "bytes": jsonl_size}
+                ],
+            }
+            if source_entry:
+                manifest["files"].append(source_entry)
+            zf.writestr(
+                "manifest.json", _json.dumps(manifest, indent=2).encode("utf-8")
+            )
 
         zip_bytes.seek(0)
 

@@ -35,14 +35,21 @@ export async function apiRequest(
 export async function uploadFile(file: File): Promise<any> {
   const fd = new FormData();
   fd.append("file", file, file.name);
-  const res = await apiRequest("/upload", {
-    method: "POST",
-    body: fd
-  }, true);
+  return postUpload(fd);
+}
 
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.detail || `Upload failed (${res.status})`);
-  return data;
+// Explicit upload helper that always includes Authorization when present
+export async function postUpload(fd: FormData): Promise<any> {
+  const res = await fetch(`${apiBase}/upload`, {
+    method: "POST",
+    headers: getHeaders(true), // Authorization only; do not set Content-Type
+    body: fd
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`/upload failed: ${res.status} ${text}`);
+  }
+  return res.json();
 }
 
 export async function doSearch(q: string, kind: string, k = 5): Promise<any> {
