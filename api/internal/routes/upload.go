@@ -52,6 +52,12 @@ type UploadHandler struct {
 }
 
 func (h *UploadHandler) Post(c *gin.Context) {
+	// Check if worker auth token is configured
+	if h.Config.WorkerAuthToken == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": "server_worker_token_not_configured"})
+		return
+	}
+
 	// Resolve worker base URL (env WORKER_URL takes precedence; default to http://worker:8090)
 	workerBase := ""
 	if v := os.Getenv("WORKER_URL"); v != "" {
@@ -126,6 +132,7 @@ func (h *UploadHandler) Post(c *gin.Context) {
 		requestID = uuid.New().String()
 	}
 	req.Header.Set("X-Request-Id", requestID)
+	req.Header.Set("Authorization", "Bearer "+h.Config.WorkerAuthToken)
 
 	client := &http.Client{Timeout: h.Config.GetUploadTimeout()}
 	resp, err := client.Do(req)
@@ -134,6 +141,24 @@ func (h *UploadHandler) Post(c *gin.Context) {
 		return
 	}
 	defer resp.Body.Close()
+
+	// Handle worker non-2xx responses
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// Read error body (limit to 4KB)
+		var errBuf bytes.Buffer
+		io.CopyN(&errBuf, resp.Body, 4096)
+		errSnippet := strings.TrimSpace(errBuf.String())
+		if len(errSnippet) > 200 {
+			errSnippet = errSnippet[:200] + "..."
+		}
+		c.JSON(http.StatusBadGateway, gin.H{
+			"ok":             false,
+			"error":          "worker_reject",
+			"status":         resp.StatusCode,
+			"detail_snippet": errSnippet,
+		})
+		return
+	}
 
 	// Read worker JSON once so we can both relay it and trigger processing
 	var buf bytes.Buffer
@@ -187,6 +212,7 @@ func (h *UploadHandler) Post(c *gin.Context) {
 	req2.Header.Set("Content-Type", "application/json")
 	// Forward Request-ID to worker
 	req2.Header.Set("X-Request-Id", requestID)
+	req2.Header.Set("Authorization", "Bearer "+h.Config.WorkerAuthToken)
 
 	resp2, err := client.Do(req2)
 	if err != nil {
@@ -195,6 +221,24 @@ func (h *UploadHandler) Post(c *gin.Context) {
 		return
 	}
 	defer resp2.Body.Close()
+
+	// Handle worker non-2xx responses for process endpoint
+	if resp2.StatusCode < 200 || resp2.StatusCode >= 300 {
+		// Read error body (limit to 4KB)
+		var errBuf bytes.Buffer
+		io.CopyN(&errBuf, resp2.Body, 4096)
+		errSnippet := strings.TrimSpace(errBuf.String())
+		if len(errSnippet) > 200 {
+			errSnippet = errSnippet[:200] + "..."
+		}
+		c.JSON(http.StatusBadGateway, gin.H{
+			"ok":             false,
+			"error":          "worker_reject",
+			"status":         resp2.StatusCode,
+			"detail_snippet": errSnippet,
+		})
+		return
+	}
 
 	// Pass through worker status + body to the client
 	c.Header("Content-Type", "application/json")

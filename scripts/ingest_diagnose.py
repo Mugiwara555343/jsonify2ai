@@ -64,8 +64,49 @@ def main():
             )
             if r.status_code in (401, 403):
                 summary["inferred_issue"] = "missing_api_token"
-            r.raise_for_status()
-            summary["api_upload_ok"] = True
+                summary["api_upload_status"] = r.status_code
+                try:
+                    error_data = r.json()
+                    # Handle nested error format from worker: {"detail": {"error": "..."}}
+                    if "detail" in error_data and isinstance(
+                        error_data["detail"], dict
+                    ):
+                        summary["api_upload_error_snippet"] = error_data["detail"].get(
+                            "error", "unknown"
+                        )
+                    else:
+                        summary["api_upload_error_snippet"] = error_data.get(
+                            "error", "unknown"
+                        )
+                except Exception:
+                    summary["api_upload_error_snippet"] = "no_json_response"
+                summary["used_token_prefix"] = mask(api_token)
+            elif r.status_code == 200:
+                summary["api_upload_ok"] = True
+            else:
+                r.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        if hasattr(e, "response") and e.response is not None:
+            if e.response.status_code in (401, 403):
+                summary["api_upload_status"] = e.response.status_code
+                try:
+                    error_data = e.response.json()
+                    # Handle nested error format from worker: {"detail": {"error": "..."}}
+                    if "detail" in error_data and isinstance(
+                        error_data["detail"], dict
+                    ):
+                        summary["api_upload_error_snippet"] = error_data["detail"].get(
+                            "error", "unknown"
+                        )
+                    else:
+                        summary["api_upload_error_snippet"] = error_data.get(
+                            "error", "unknown"
+                        )
+                except Exception:
+                    summary["api_upload_error_snippet"] = "no_json_response"
+                summary["used_token_prefix"] = mask(api_token)
+                if not summary.get("inferred_issue"):
+                    summary["inferred_issue"] = "missing_api_token"
     except Exception:
         pass
 

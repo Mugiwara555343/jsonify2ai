@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -32,7 +33,8 @@ type Config struct {
 	GinMode string
 
 	// Authentication
-	APIAuthToken string
+	APIAuthToken    string
+	WorkerAuthToken string
 }
 
 func getenv(k, def string) string {
@@ -126,11 +128,30 @@ func Load() *Config {
 		config.GinMode = v
 	}
 
-	if v := os.Getenv("API_AUTH_TOKEN"); v != "" {
+	// Load auth token with fallback: API_AUTH_TOKEN (primary) -> AUTH_TOKEN (legacy)
+	if v := getEnvAny([]string{"API_AUTH_TOKEN", "AUTH_TOKEN"}); v != "" {
 		config.APIAuthToken = v
 	}
 
+	// Load worker auth token
+	if v := getEnvAny([]string{"WORKER_AUTH_TOKEN"}); v != "" {
+		config.WorkerAuthToken = v
+	}
+
 	return config
+}
+
+// getEnvAny returns the first non-empty environment variable value from the given keys
+func getEnvAny(keys []string) string {
+	for _, k := range keys {
+		if v := os.Getenv(k); v != "" {
+			// Trim whitespace
+			if trimmed := strings.TrimSpace(v); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return ""
 }
 
 // GetHTTPTimeout returns the HTTP timeout as a time.Duration

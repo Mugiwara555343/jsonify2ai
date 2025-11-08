@@ -38,3 +38,12 @@ if (-not $envMap.ContainsKey("API_AUTH_TOKEN") -or [string]::IsNullOrWhiteSpace(
 } else {
   Write-Host "API_AUTH_TOKEN present in .env" -ForegroundColor Cyan
 }
+
+if (-not $envMap.ContainsKey("WORKER_AUTH_TOKEN") -or [string]::IsNullOrWhiteSpace($envMap["WORKER_AUTH_TOKEN"])) {
+  $wtoken = -join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })
+  $envMap["WORKER_AUTH_TOKEN"] = $wtoken
+  Save-Env $EnvPath $envMap
+  Write-Host "WORKER_AUTH_TOKEN created and saved to .env" -ForegroundColor Green
+} else {
+  Write-Host "WORKER_AUTH_TOKEN present in .env" -ForegroundColor Cyan
+}
