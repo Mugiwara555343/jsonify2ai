@@ -20,6 +20,10 @@ function Load-DotEnv([string]$Path) {
 Write-Host "== jsonify2ai :: start_all" -ForegroundColor Cyan
 $root = Resolve-Path (Join-Path (Split-Path -Parent $PSCommandPath) "..")
 Set-Location $root
+
+# Ensure API_AUTH_TOKEN exists before starting services
+& "$PSScriptRoot\ensure_api_token.ps1" | Out-Null
+
 $null = Load-DotEnv ".env"
 
 try {
