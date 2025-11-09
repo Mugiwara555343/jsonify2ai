@@ -1,0 +1,5 @@
+services:
+  web:
+    environment:
+      # In all-in-docker runs (no host browser), web should talk to 'api' service.
+      VITE_API_URL: http://api:8082

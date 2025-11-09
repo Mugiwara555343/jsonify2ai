@@ -3,6 +3,7 @@ import ThemeControls from "./ThemeControls";
 import { applyTheme, loadTheme } from "./theme";
 import './App.css'
 import { uploadFile, doSearch, askQuestion, fetchStatus, fetchDocuments, downloadJson } from './api'
+import { API_BASE } from './api';
 
 type Status = {
   ok: boolean;
@@ -16,10 +17,29 @@ type Status = {
   ask_synth_total?: number;
 }
 type Hit = { id: string; score: number; text?: string; caption?: string; path?: string; idx?: number; kind?: string; document_id?: string }
+
 type Document = { document_id: string; kinds: string[]; paths: string[]; counts: Record<string, number> }
-const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8082"
+const apiBase = API_BASE
 type AskResp = { ok: boolean; mode: 'search' | 'llm'; model?: string; answer?: string; final?: string; sources?: Hit[]; answers?: Hit[]; error?: string }
 
+
+function HealthChip() {
+  const [state, setState] = useState<"checking"|"ok"|"warn">("checking");
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE}/health/full`, { method: "GET" });
+        if (!alive) return;
+        setState(r.ok ? "ok" : "warn");
+      } catch { setState("warn"); }
+    })();
+    return () => { alive = false; };
+  }, []);
+  const bg = state==="ok" ? "#c6f6d5" : state==="checking" ? "#fefcbf" : "#fed7d7";
+  const label = state==="ok" ? "API: healthy" : state==="checking" ? "API: checking" : "API: unreachable";
+  return <span style={{background:bg, padding:"2px 8px", borderRadius:12, fontSize:12, marginLeft:8}}>{label}</span>;
+}
 
 function sleep(ms: number) {
   return new Promise(r => setTimeout(r, ms));
@@ -197,7 +217,7 @@ function App() {
 
   return (
     <div style={{ fontFamily: 'ui-sans-serif', padding: 24, maxWidth: 720, margin: '0 auto', background: 'var(--bg)', color: 'var(--fg)', minHeight: '100vh' }}>
-      <h1 style={{ fontSize: 24, marginBottom: 12 }}>jsonify2ai — Status</h1>
+      <h1 style={{ fontSize: 24, marginBottom: 12 }}>jsonify2ai — Status <HealthChip /></h1>
       {!s && <div>Loading…</div>}
       {s && (
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>

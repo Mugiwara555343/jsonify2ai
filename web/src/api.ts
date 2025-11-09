@@ -1,7 +1,19 @@
 // web/src/api.ts
 // API utility functions with optional authentication
 
-const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8082";
+const envBase = import.meta.env.VITE_API_URL;
+
+function hostDefault(): string {
+  try {
+    const h = window.location.hostname;
+    if (h === "localhost" || h === "127.0.0.1") return "http://localhost:8082";
+  } catch {}
+  return "http://api:8082";
+}
+
+export const API_BASE = envBase && envBase.trim() !== "" ? envBase : hostDefault();
+const apiBase = API_BASE;
+
 // Support both VITE_API_TOKEN (new) and VITE_API_AUTH_TOKEN (legacy) for backward compatibility
 const authToken = import.meta.env.VITE_API_TOKEN || import.meta.env.VITE_API_AUTH_TOKEN;
 
