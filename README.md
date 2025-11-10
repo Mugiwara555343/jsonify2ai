@@ -91,20 +91,44 @@ If an optional parser isn't installed, files are **skipped gracefully**.
 ### 🚀 Get Running in 2 Minutes
 
 **Step 1: Start the system**
-```bash
-# Start all services with Docker Compose
-docker compose up -d
 
-# Access the web interface at http://localhost:5173
+**Windows (PowerShell):**
+```powershell
+.\scripts\start_all.ps1
 ```
 
-**Step 2: Upload and search your files**
-1. Open http://localhost:5173 in your browser
-2. Drag and drop files into the upload area
-3. Search for content using the search box
-4. Ask questions using the "Ask" feature
+**macOS/Linux (Bash):**
+```bash
+./scripts/start_all.sh
+```
+
+**Or manually with Docker Compose:**
+```bash
+docker compose up -d
+```
+
+**Step 2: Access the web interface**
+- Open http://localhost:5173 in your browser
+
+**Step 3: Upload and search your files**
+1. Drag and drop files into the upload area
+2. Search for content using the search box
+3. Ask questions using the "Ask" feature
 
 That's it! Your files are now searchable and ready for AI-powered queries.
+
+### 🔑 Tokens
+
+API authentication tokens are **auto-generated on first run** via:
+- **Windows**: `scripts\ensure_tokens.ps1`
+- **macOS/Linux**: `scripts/ensure_tokens.sh`
+
+These scripts create or update `.env` with `API_AUTH_TOKEN` and `WORKER_AUTH_TOKEN` if they don't exist.
+
+**Where tokens are used:**
+- **Client (web UI)**: Uses `VITE_API_TOKEN` or `VITE_API_AUTH_TOKEN` for API requests (upload, search, ask, export)
+- **Internal API → Worker**: Uses `WORKER_AUTH_TOKEN` for service-to-service communication
+- **API endpoints**: Protected endpoints require `API_AUTH_TOKEN` in the `Authorization: Bearer <token>` header
 
 ### 🔧 Alternative: Manual Setup
 
@@ -230,8 +254,13 @@ GET /export?document_id=<DOC>                   # auto-detect collection
 
 ### Export ZIP
 
-Bundle JSONL rows and the original source file (if present) into a single ZIP.
+Bundle JSONL rows and the original source file (if present) into a single ZIP. The ZIP contains `manifest.json` with metadata.
 
+**Web UI (Recent Documents panel):**
+- **Copy ID**: Copies the document ID to clipboard
+- **Export ZIP**: Downloads a ZIP file containing the document data and manifest.json
+
+**API:**
 ```
 GET /export/archive?document_id=<DOC>&collection=<COLL>
 GET /export/archive?document_id=<DOC>  # auto-detects: chunks first, then images
@@ -392,7 +421,7 @@ WORKER_URL=http://localhost:8090
 | `IMAGES_CAPTION` | `0` | Enable image captioning | No |
 | `IMAGES_CAPTION_MODEL` | `Salesforce/blip-image-captioning-base` | Image captioning model | No |
 | **Web Interface** |
-| `VITE_API_URL` | `http://localhost:8082` | API URL for web interface | No |
+| `VITE_API_URL` | Auto-detected | API URL for web interface (optional; auto-detects from hostname) | No |
 
 ### Setup Instructions
 
@@ -428,6 +457,27 @@ This creates indexes on:
 - **Rapid prototyping for local AI data pipelines**
 
 ---
+
+### Optional: LLM Synthesis
+
+Enable AI-powered question answering with Ollama:
+
+1. **Set environment variable:**
+   ```bash
+   LLM_PROVIDER=ollama
+   ```
+
+2. **Ensure Ollama is running:**
+   ```bash
+   # Install and start Ollama (see https://ollama.ai)
+   ollama serve
+   ```
+
+3. **Verify in web UI:**
+   - The status bar will show **"LLM: on (ollama)"** chip when LLM is enabled
+   - The chip appears when `ask_synth_total` telemetry is available (indicating LLM is configured)
+
+When enabled, the "Ask" feature will synthesize answers from search results using your local Ollama model. The UI chip shows the current LLM status.
 
 ### Optional: image captions
 To enable BLIP-based captions on CPU:
@@ -573,6 +623,46 @@ python scripts/smoke_e2e.py
 # Extended test with all file types
 python scripts/smoke_e2e.py --csv data/dropzone/smoke_golden/mini.csv --docx data/dropzone/smoke_golden/mini.docx --html data/dropzone/smoke_golden/mini.html
 ```
+
+### Smoke Verify
+
+End-to-end verification script that checks API health, worker status, upload, search, ask, and export functionality.
+
+**Run smoke verify:**
+```powershell
+# Windows (PowerShell)
+.\scripts\smoke_verify.ps1
+```
+
+```bash
+# macOS/Linux (Bash)
+./scripts/smoke_verify.sh
+```
+
+**Expected output (JSON):**
+```json
+{
+  "api_health_ok": true,
+  "worker_status_ok": true,
+  "api_upload_ok": true,
+  "search_hits_all": true,
+  "ask_answers": 3,
+  "ask_final_present": false,
+  "export_manifest_ok": true,
+  "qdrant_points": 6,
+  "inferred_issue": "ok",
+  "diag": {}
+}
+```
+
+**Auto-seeding:** If no search hits are found (empty database), the script automatically:
+1. Creates `data/dropzone/export_seed.md` with a unique token
+2. Uploads it via API
+3. Waits for processing
+4. Re-runs search queries
+5. Uses the first hit for export verification
+
+This ensures `export_manifest_ok=true` even with an empty database.
 
 ### Dependency Management
 

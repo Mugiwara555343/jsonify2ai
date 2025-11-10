@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import ThemeControls from "./ThemeControls";
 import { applyTheme, loadTheme } from "./theme";
 import './App.css'
-import { uploadFile, doSearch, askQuestion, fetchStatus, fetchDocuments, downloadJson } from './api'
+import { uploadFile, doSearch, askQuestion, fetchStatus, fetchDocuments, downloadJson, apiRequest } from './api'
 import { API_BASE } from './api';
 
 type Status = {
@@ -41,6 +41,20 @@ function HealthChip() {
   return <span style={{background:bg, padding:"2px 8px", borderRadius:12, fontSize:12, marginLeft:8}}>{label}</span>;
 }
 
+function LLMChip({ status }: { status: Status | null }) {
+  // Non-blocking: show nothing if telemetry lacks ask_synth_total
+  if (!status || status.ask_synth_total === undefined) {
+    return null;
+  }
+  // ask_synth_total being defined means LLM is configured/enabled
+  // The key exists when LLM_PROVIDER=ollama is set, regardless of usage count
+  const isOn = true; // If the key exists, LLM is enabled
+  const bg = isOn ? "#e0f2fe" : "#f3f4f6";
+  const color = isOn ? "#0369a1" : "#6b7280";
+  const label = isOn ? "LLM: on (ollama)" : "LLM: off";
+  return <span style={{background:bg, color:color, padding:"2px 8px", borderRadius:12, fontSize:12, marginLeft:8, border:"1px solid #bae6fd"}}>{label}</span>;
+}
+
 function sleep(ms: number) {
   return new Promise(r => setTimeout(r, ms));
 }
@@ -62,10 +76,21 @@ async function waitForProcessed(oldTotal: number, timeoutMs = 20000, intervalMs 
 }
 
 
-function downloadZip(documentId: string, kind: string | undefined) {
-  const collection = kind === 'image' ? 'images' : 'chunks'
-  const url = `${apiBase}/export/archive?document_id=${encodeURIComponent(documentId)}&collection=${collection}`
-  window.open(url, '_blank')
+async function downloadZip(documentId: string, collection: string = 'jsonify2ai_chunks_768') {
+  try {
+    const url = `/export/archive?document_id=${encodeURIComponent(documentId)}&collection=${encodeURIComponent(collection)}`
+    const response = await apiRequest(url, { method: 'GET' }, true)
+    if (!response.ok) {
+      throw new Error(`Export failed: ${response.status}`)
+    }
+    const blob = await response.blob()
+    const blobUrl = window.URL.createObjectURL(blob)
+    window.open(blobUrl, '_blank')
+    // Clean up blob URL after a delay
+    setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000)
+  } catch (err) {
+    console.error('Export ZIP failed:', err)
+  }
 }
 
 function collectionForDoc(d: Document) {
@@ -217,7 +242,7 @@ function App() {
 
   return (
     <div style={{ fontFamily: 'ui-sans-serif', padding: 24, maxWidth: 720, margin: '0 auto', background: 'var(--bg)', color: 'var(--fg)', minHeight: '100vh' }}>
-      <h1 style={{ fontSize: 24, marginBottom: 12 }}>jsonify2ai — Status <HealthChip /></h1>
+      <h1 style={{ fontSize: 24, marginBottom: 12 }}>jsonify2ai — Status <HealthChip /><LLMChip status={s} /></h1>
       {!s && <div>Loading…</div>}
       {s && (
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>
@@ -299,13 +324,24 @@ function App() {
                   </span>
                   <div style={{ display: 'flex', gap: 4 }}>
                     <button
+                      onClick={() => {
+                        if (doc.document_id) {
+                          copyToClipboard(doc.document_id)
+                          showToast('Document ID copied')
+                        }
+                      }}
+                      style={{ fontSize: 11, color: '#1976d2', textDecoration: 'underline', padding: '2px 4px' }}
+                    >
+                      Copy ID
+                    </button>
+                    <button
                       onClick={() => downloadJson(doc.document_id!, doc.kind === 'image' ? 'images' : 'chunks')}
                       style={{ fontSize: 11, color: '#1976d2', textDecoration: 'underline', padding: '2px 4px' }}
                     >
                       Export JSON
                     </button>
                     <button
-                      onClick={() => downloadZip(doc.document_id!, doc.kind)}
+                      onClick={() => downloadZip(doc.document_id!, doc.kind === 'image' ? 'jsonify2ai_images_768' : 'jsonify2ai_chunks_768')}
                       style={{ fontSize: 11, color: '#1976d2', textDecoration: 'underline', padding: '2px 4px' }}
                     >
                       Export ZIP
@@ -340,7 +376,7 @@ function App() {
             </button>
             <button
               className="text-xs underline opacity-70 hover:opacity-100"
-              onClick={() => downloadZip(lastDoc.id, lastDoc.kind)}
+              onClick={() => downloadZip(lastDoc.id, lastDoc.kind === 'image' ? 'jsonify2ai_images_768' : 'jsonify2ai_chunks_768')}
             >
               Download ZIP
             </button>
