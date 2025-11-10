@@ -86,6 +86,10 @@ ask_answers=$(jq -r '.answers|length // 0' <<<"$ask" 2>/dev/null || echo "0")
 final=$(jq -r '.final // ""' <<<"$ask" 2>/dev/null || echo "")
 if [[ -n "$final" ]]; then ask_final_present=true; else ask_final_present=false; fi
 
+# Parse LLM reachability (default false if missing)
+llm_reachable=false
+llm_reachable=$(jq -r '.llm.reachable // false' <<<"$worker_status_raw" 2>/dev/null || echo "false")
+
 expok=false
 docid=$(jq -r '.results[0].document_id // ""' <<<"$s1" 2>/dev/null || echo "")
 if [[ -n "$docid" ]]; then
@@ -99,7 +103,8 @@ if [ "$expok" = "true" ]; then export_manifest_ok=true; else export_manifest_ok=
 if [ "$api_health_ok" = "false" ]; then inferred_issue="api_unhealthy";
 elif [ "$worker_status_ok" = "false" ]; then inferred_issue="worker_unhealthy";
 elif [ "$api_upload_ok" = "false" ]; then inferred_issue="upload_failed";
-elif [ "$search_hits_all" = "false" ]; then inferred_issue="search_empty"; fi
+elif [ "$search_hits_all" = "false" ]; then inferred_issue="search_empty";
+elif [ "$llm_reachable" = "true" ] && [ "$ask_final_present" = "false" ]; then inferred_issue="llm_expected_final_missing"; fi
 
 # Convert booleans to JSON format (already strings "true"/"false")
 api_health_ok_json="$api_health_ok"

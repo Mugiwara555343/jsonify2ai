@@ -170,6 +170,13 @@ $workerOk    = $false; try { $workerOk    = (($workerStatusRaw | ConvertFrom-Jso
 $counts = $null; try { $counts = ($workerStatusRaw | ConvertFrom-Json).counts } catch {}
 $qdrantPoints = if ($counts) { [int]$counts.total } else { 0 }
 
+# Parse LLM reachability (default false if missing)
+$llmReachable = $false
+try {
+  $llmStatus = ($workerStatusRaw | ConvertFrom-Json).llm
+  if ($llmStatus -and $llmStatus.reachable) { $llmReachable = $true }
+} catch {}
+
 $hits1 = HasHits $search1
 $hits2 = HasHits $search2
 
@@ -185,6 +192,7 @@ if (-not $apiHealthOk) { $inferred = "api_unhealthy" }
 elseif (-not $workerOk) { $inferred = "worker_unhealthy" }
 elseif ($uploadStatus -ne 200) { $inferred = "upload_failed" }
 elseif (-not ($hits1 -or $hits2)) { $inferred = "search_empty" }
+elseif ($llmReachable -and -not $finalPresent) { $inferred = "llm_expected_final_missing" }
 
 $diag = @{}
 if ($inferred -ne "ok") {

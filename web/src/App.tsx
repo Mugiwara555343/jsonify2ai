@@ -15,6 +15,8 @@ type Status = {
   watcher_triggers_total?: number;
   export_total?: number;
   ask_synth_total?: number;
+  // LLM status
+  llm?: { provider?: string; model?: string; reachable?: boolean; synth_total?: number };
 }
 type Hit = { id: string; score: number; text?: string; caption?: string; path?: string; idx?: number; kind?: string; document_id?: string }
 
@@ -42,17 +44,33 @@ function HealthChip() {
 }
 
 function LLMChip({ status }: { status: Status | null }) {
-  // Non-blocking: show nothing if telemetry lacks ask_synth_total
-  if (!status || status.ask_synth_total === undefined) {
-    return null;
+  if (!status || !status.llm) {
+    return null; // Non-blocking: show nothing if LLM status is missing
   }
-  // ask_synth_total being defined means LLM is configured/enabled
-  // The key exists when LLM_PROVIDER=ollama is set, regardless of usage count
-  const isOn = true; // If the key exists, LLM is enabled
-  const bg = isOn ? "#e0f2fe" : "#f3f4f6";
-  const color = isOn ? "#0369a1" : "#6b7280";
-  const label = isOn ? "LLM: on (ollama)" : "LLM: off";
-  return <span style={{background:bg, color:color, padding:"2px 8px", borderRadius:12, fontSize:12, marginLeft:8, border:"1px solid #bae6fd"}}>{label}</span>;
+
+  const provider = status.llm.provider || "none";
+  const reachable = status.llm.reachable === true;
+
+  // Determine state: on, offline, or off
+  let isOn = false;
+  let isOffline = false;
+  let label = "LLM: off";
+
+  if (provider === "ollama") {
+    if (reachable) {
+      isOn = true;
+      label = "LLM: on (ollama)";
+    } else {
+      isOffline = true;
+      label = "LLM: offline";
+    }
+  }
+
+  const bg = isOn ? "#e0f2fe" : isOffline ? "#fef3c7" : "#f3f4f6";
+  const color = isOn ? "#0369a1" : isOffline ? "#92400e" : "#6b7280";
+  const borderColor = isOn ? "#bae6fd" : isOffline ? "#fde68a" : "#d1d5db";
+
+  return <span style={{background:bg, color:color, padding:"2px 8px", borderRadius:12, fontSize:12, marginLeft:8, border:`1px solid ${borderColor}`}}>{label}</span>;
 }
 
 function sleep(ms: number) {

@@ -1,9 +1,11 @@
 # worker/app/routers/status.py
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
+import requests
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
@@ -16,6 +18,33 @@ from worker.app.telemetry import telemetry
 
 # Keep router path exactly as-is for compatibility
 router = APIRouter()
+
+# Module-level memoization for Ollama reachability (15s cache)
+_ollama_cache: tuple = (0.0, False)
+
+
+def _ollama_reachable() -> bool:
+    """
+    Check if Ollama is reachable with 2s timeout, memoized for 15s.
+    """
+    global _ollama_cache
+    now = time.time()
+    last_ts, last_bool = _ollama_cache
+
+    # Return cached value if within 15s
+    if now - last_ts < 15.0:
+        return last_bool
+
+    # Check reachability
+    try:
+        resp = requests.get(f"{settings.OLLAMA_HOST}/api/tags", timeout=2.0)
+        reachable = resp.status_code == 200
+    except Exception:
+        reachable = False
+
+    # Update cache
+    _ollama_cache = (now, reachable)
+    return reachable
 
 
 # --- Minimal in-memory ingest summary (to be updated by process.py) ----------
@@ -92,6 +121,16 @@ async def status():
     # Get telemetry stats
     telemetry_stats = telemetry.get_stats()
 
+    # Build LLM status
+    llm = {
+        "provider": settings.LLM_PROVIDER or "none",
+        "model": settings.OLLAMA_MODEL if settings.LLM_PROVIDER == "ollama" else "",
+        "reachable": (
+            _ollama_reachable() if settings.LLM_PROVIDER == "ollama" else False
+        ),
+        "synth_total": telemetry_stats["ask_synth_total"],
+    }
+
     data = {
         "ok": True,
         "qdrant_url": settings.QDRANT_URL,
@@ -113,5 +152,7 @@ async def status():
         "export_total": telemetry_stats["export_total"],
         "ask_synth_total": telemetry_stats["ask_synth_total"],
         "last_error": telemetry_stats["last_error"],
+        # LLM status
+        "llm": llm,
     }
     return JSONResponse(data)
