@@ -169,8 +169,29 @@ function App() {
     try {
       const j = await fetchDocuments()
       setDocs(j)
-    } catch (err) {
-      console.error('Failed to fetch documents:', err)
+    } catch (err: any) {
+      // Log detailed error information for debugging
+      const errorMsg = err?.message || String(err);
+      const statusMatch = errorMsg.match(/HTTP (\d+)/);
+      const statusCode = statusMatch ? statusMatch[1] : 'unknown';
+
+      console.error('Failed to fetch documents:', {
+        error: errorMsg,
+        statusCode: statusCode,
+        fullError: err
+      });
+
+      // Set docs to empty array to avoid showing stale data
+      setDocs([]);
+
+      // Show user-friendly error message
+      if (statusCode === '401' || statusCode === '403') {
+        showToast('Failed to load documents: Authentication required', true);
+      } else if (statusCode === '500') {
+        showToast('Failed to load documents: Server error', true);
+      } else {
+        showToast(`Failed to load documents: ${errorMsg}`, true);
+      }
     }
   }
 
@@ -547,7 +568,7 @@ function App() {
         <h2 style={{ fontSize: 18, marginBottom: 8 }}>Documents</h2>
         <div style={{ marginBottom: 12 }}>
           <button
-            onClick={fetchDocuments}
+            onClick={loadDocuments}
             style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14 }}
           >
             Refresh documents

@@ -17,4 +17,5 @@ COPY . .
 EXPOSE 5173
 
 # Start development server
-CMD ["npm", "run", "dev"]
+# Note: Vite reads VITE_* env vars from process environment when dev server starts
+CMD ["sh", "-c", "npm run dev"]

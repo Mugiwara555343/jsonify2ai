@@ -12,6 +12,8 @@ done < "$ENV_PATH"
 gen(){ od -An -N16 -tx1 /dev/urandom | tr -d ' \n'; }
 [[ -n "${map[API_AUTH_TOKEN]:-}" ]] || map[API_AUTH_TOKEN]="$(gen)"
 [[ -n "${map[WORKER_AUTH_TOKEN]:-}" ]] || map[WORKER_AUTH_TOKEN]="$(gen)"
+# Ensure VITE_API_TOKEN matches API_AUTH_TOKEN for web bundle
+[[ -n "${map[API_AUTH_TOKEN]:-}" ]] && map[VITE_API_TOKEN]="${map[API_AUTH_TOKEN]}"
 # write back
 {
   for key in "${!map[@]}"; do echo "$key=${map[$key]}"; done

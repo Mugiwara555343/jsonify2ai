@@ -21,13 +21,13 @@ repos:
     hooks:
       - id: smoke-cli
         name: smoke-cli (help + discovery)
-        entry: python scripts/smoke_precommit.py
+        entry: python scripts/dev/smoke_precommit.py
         language: system
         pass_filenames: false
         stages: [pre-commit]
       - id: smoke-e2e
         name: Smoke E2E (API/Worker/Web)
-        entry: python scripts/smoke_e2e.py
+        entry: python scripts/dev/smoke_e2e.py
         language: system
         pass_filenames: false
         stages: [manual]

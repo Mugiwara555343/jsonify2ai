@@ -4,8 +4,8 @@ services:
     container_name: ${COMPOSE_PROJECT_NAME:-jsonify2ai-main}-web-1
     ports:
       - "5173:5173"
-    environment:
-      - VITE_API_TOKEN=${API_AUTH_TOKEN}
+    env_file:
+      - ./.env
     depends_on:
       - api
     restart: unless-stopped
@@ -29,6 +29,7 @@ services:
       - DOCS_DIR=/app/data/documents
       - GIN_MODE=${GIN_MODE:-release}
       - GIN_TRUSTED_PROXIES=${GIN_TRUSTED_PROXIES:-}
+      - AUTH_MODE=${AUTH_MODE:-local}
     restart: unless-stopped
     depends_on:
       - worker

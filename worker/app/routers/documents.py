@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter
 from qdrant_client import QdrantClient
 from worker.app.config import settings
 from worker.app.services.qdrant_client import get_qdrant_client
 from collections import defaultdict
 from typing import Dict, List, Any
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -79,9 +83,42 @@ def get_documents():
     """Get list of documents across both collections"""
     client = get_qdrant_client()
 
-    # Get documents from both collections
-    chunks_docs = _scroll_all_documents(client, settings.QDRANT_COLLECTION)
-    images_docs = _scroll_all_documents(client, settings.QDRANT_COLLECTION_IMAGES)
+    # Get documents from both collections (handle missing collections gracefully)
+    try:
+        chunks_docs = _scroll_all_documents(client, settings.QDRANT_COLLECTION)
+    except Exception as e:
+        error_msg = str(e).lower()
+        # Only suppress collection-not-found errors; log and re-raise others
+        if "does not exist" in error_msg or "not found" in error_msg:
+            logger.debug(
+                f"Collection '{settings.QDRANT_COLLECTION}' does not exist yet, returning empty list"
+            )
+            chunks_docs = []
+        else:
+            # Critical error: configuration, network, or other issues
+            logger.error(
+                f"Failed to retrieve documents from collection '{settings.QDRANT_COLLECTION}': {e}",
+                exc_info=True,
+            )
+            raise
+
+    try:
+        images_docs = _scroll_all_documents(client, settings.QDRANT_COLLECTION_IMAGES)
+    except Exception as e:
+        error_msg = str(e).lower()
+        # Only suppress collection-not-found errors; log and re-raise others
+        if "does not exist" in error_msg or "not found" in error_msg:
+            logger.debug(
+                f"Collection '{settings.QDRANT_COLLECTION_IMAGES}' does not exist yet, returning empty list"
+            )
+            images_docs = []
+        else:
+            # Critical error: configuration, network, or other issues
+            logger.error(
+                f"Failed to retrieve documents from collection '{settings.QDRANT_COLLECTION_IMAGES}': {e}",
+                exc_info=True,
+            )
+            raise
 
     # Merge documents (in case same document_id exists in both collections)
     merged_docs = {}

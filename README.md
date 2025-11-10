@@ -18,7 +18,10 @@
 [![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![OS](https://img.shields.io/badge/tested-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
+<<<<<<< HEAD
 [![CI / test-worker](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml)
+=======
+>>>>>>> 7ed13ef (feat(auth): implement AUTH_MODE with local/strict modes and fix strict mode validation)
 
 ---
 
@@ -101,11 +104,6 @@ Open http://localhost:5173 in your browser.
 
 ---
 
-> 🎥 **Demo GIF coming soon** – quick walkthrough: start containers → upload a doc → search → ask → export ZIP.
-![jsonify2ai demo](docs/jsonify2ai-demo.gif)
-
----
-
 ## Features
 
 - **Multi-format parsing**: Text, PDF, DOCX, CSV, HTML, images, audio
@@ -146,6 +144,7 @@ Create `.env` from `.env.example` and set:
 |----------|-------------|----------|
 | `API_AUTH_TOKEN` | API authentication token (auto-generated) | Auto |
 | `WORKER_AUTH_TOKEN` | Worker service token (auto-generated) | Auto |
+| `AUTH_MODE` | Authentication mode: `local` (default) or `strict` | No |
 | `LLM_PROVIDER` | Set to `ollama` to enable LLM synthesis | No |
 | `OLLAMA_HOST` | Ollama service URL (default: `http://localhost:11434`) | No |
 | `OLLAMA_MODEL` | Ollama model name (default: `llama3.1:8b`) | No |
@@ -155,6 +154,12 @@ Create `.env` from `.env.example` and set:
 | `CORS_ORIGINS` | Comma-separated allowed origins | No |
 
 **⚠️ Important:** Do not set `VITE_API_URL` unless deploying behind a reverse proxy. The web UI auto-detects the API URL from the hostname by default.
+
+## Auth Modes
+
+- **`AUTH_MODE=local`** (default): No bearer authentication is enforced by the API. Browser uploads and UI actions work with zero configuration. Perfect for local demos, recruiters, and single-user setups. You can still set tokens, but they're not required in this mode. This is what you get by default when running `scripts/start_all.ps1` or `scripts/start_all.sh`.
+
+- **`AUTH_MODE=strict`**: All protected endpoints (upload, search, ask) require a valid `Authorization: Bearer <API_AUTH_TOKEN>` header. Use this for production deployments, multi-user setups, or when you need strict access control.
 
 See [docs/API.md](docs/API.md) for full API documentation.
 

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -35,6 +36,7 @@ type Config struct {
 	// Authentication
 	APIAuthToken    string
 	WorkerAuthToken string
+	AuthMode        string // "local" or "strict" - local mode bypasses all auth, strict requires bearer tokens
 }
 
 func getenv(k, def string) string {
@@ -72,6 +74,9 @@ func Load() *Config {
 
 		// Authentication (optional)
 		APIAuthToken: "",
+		// AuthMode: "local" (default) allows localhost requests without bearer tokens
+		// "strict" requires bearer tokens for all protected endpoints
+		AuthMode: "local",
 	}
 
 	// Override with environment variables if present
@@ -136,6 +141,24 @@ func Load() *Config {
 	// Load worker auth token
 	if v := getEnvAny([]string{"WORKER_AUTH_TOKEN"}); v != "" {
 		config.WorkerAuthToken = v
+	}
+
+	// Load auth mode (default: "local")
+	// If AUTH_MODE is empty or not set, default to "local"
+	authModeEnv := os.Getenv("AUTH_MODE")
+	if authModeEnv == "" {
+		// Not set - use default "local"
+		config.AuthMode = "local"
+	} else {
+		// Set - validate and use it
+		authMode := strings.ToLower(strings.TrimSpace(authModeEnv))
+		if authMode == "local" || authMode == "strict" {
+			config.AuthMode = authMode
+		} else {
+			// Invalid value - default to "strict" for safety and log warning
+			config.AuthMode = "strict"
+			log.Printf("[config] WARNING: invalid AUTH_MODE value '%s', defaulting to 'strict'. Valid values: 'local' or 'strict'", authModeEnv)
+		}
 	}
 
 	return config
