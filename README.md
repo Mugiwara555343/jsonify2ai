@@ -4,6 +4,17 @@
 
 **Effortlessly turn your local files into structured JSON and searchable AI-ready vectors, entirely offline, on your own hardware.**
 
+---
+
+### At a Glance
+
+- 🧩 **Multi-format ingestion** – TXT, MD, PDF, CSV, HTML, DOCX, images, audio → normalized JSONL
+- 🔍 **Vector search** – Qdrant-backed semantic retrieval with optional LLM “Ask” via Ollama
+- 🖥️ **Fully offline** – Runs entirely on your hardware, no cloud APIs or external services
+- 🧪 **Built-in verification** – Health endpoints + smoke scripts validate API, worker, and vector points
+
+---
+
 [![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![OS](https://img.shields.io/badge/tested-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
@@ -87,6 +98,11 @@ Open http://localhost:5173 in your browser.
     - `export_<document_id>.jsonl` - All chunks/rows
     - `manifest.json` - Document metadata
     - Original source file (if available)
+
+---
+
+> 🎥 **Demo GIF coming soon** – quick walkthrough: start containers → upload a doc → search → ask → export ZIP.
+![jsonify2ai demo](docs/jsonify2ai-demo.gif)
 
 ---
 
