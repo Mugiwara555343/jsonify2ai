@@ -18,10 +18,8 @@
 [![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![OS](https://img.shields.io/badge/tested-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
-<<<<<<< HEAD
-[![CI / test-worker](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Mugiwara555343/jsonify2ai/actions/workflows/ci.yml)
-=======
->>>>>>> 7ed13ef (feat(auth): implement AUTH_MODE with local/strict modes and fix strict mode validation)
+
+---
 
 ---
 
@@ -35,72 +33,73 @@
 
 ---
 
-## Quick Start
+## Quick Start (Local Demo)
 
-### Windows (PowerShell)
+1. **Clone and enter the repo:**
+   ```bash
+   git clone https://github.com/Mugiwara555343/jsonify2ai.git
+   cd jsonify2ai
+   ```
+
+2. **Start everything:**
+   ```powershell
+   # Windows (PowerShell)
+   scripts/start_all.ps1
+   ```
+   ```bash
+   # macOS / Linux
+   ./scripts/start_all.sh
+   ```
+
+3. **Open the web UI:**
+   - http://localhost:5173
+
+4. **Upload a file:**
+   - Click **Browse…** and pick a `.pdf`, `.md`, `.txt`, or `.csv`
+   - Wait for **Uploading…** → **Ingested** chip increments → **Text Chunks** updates
+
+5. **Explore and export:**
+   - Use **Search** to query text from your file
+   - Use **Ask** to ask a question about your file
+   - In **Documents**, use:
+     - **Export JSON** → downloads `chunks.jsonl` or `images.jsonl`
+     - **Export ZIP** → downloads ZIP with `manifest.json` + JSONL (and sources when available)
+
+### Supported file types (demo)
+
+- `.md`, `.txt`
+- `.pdf`
+- `.csv` (basic text rows)
+- Images & audio if already supported by the pipeline (see [Support Matrix](#support-matrix) below)
+
+### To stop services
+
 ```powershell
-.\scripts\start_all.ps1
+# Windows
+scripts/stop_all.ps1
 ```
 
-### macOS/Linux (Bash)
 ```bash
-./scripts/start_all.sh
+# macOS / Linux
+./scripts/stop_all.sh
 ```
-
-### Verify Installation
-Run the smoke verify script to confirm everything works:
-
-**Windows:**
-```powershell
-.\scripts\smoke_verify.ps1
-```
-
-**macOS/Linux:**
-```bash
-./scripts/smoke_verify.sh
-```
-
-**Expected output:**
-```json
-{
-  "api_health_ok": true,
-  "worker_status_ok": true,
-  "api_upload_ok": true,
-  "search_hits_all": true,
-  "ask_answers": 3,
-  "ask_final_present": false,
-  "export_manifest_ok": true,
-  "qdrant_points": 6,
-  "inferred_issue": "ok",
-  "diag": {}
-}
-```
-
-Open http://localhost:5173 in your browser.
 
 ---
 
-## 3-Minute Eval Path
+---
 
-### 1. Upload
-- Drag and drop any file (`.txt`, `.md`, `.pdf`, `.docx`, `.csv`, images, audio) into the web UI
-- Wait for "Processed ✓" notification
+## Auth Modes
 
-### 2. Search
-- Type a query in the search box
-- Results show matching chunks with scores and source paths
+- **`AUTH_MODE=local`** (default)
+  - No auth required
+  - Best for local experiments and demos
 
-### 3. Ask (Optional)
-- If `LLM_PROVIDER=ollama` is set and Ollama is running, use the "Ask" feature
-- The UI chip shows **LLM: on (ollama)** when reachable, **LLM: offline** if configured but unreachable
+- **`AUTH_MODE=strict`**
+  - All protected API endpoints require `Authorization: Bearer <API_AUTH_TOKEN>`
+  - The API uses `WORKER_AUTH_TOKEN` for internal calls to the worker
+  - Intended for multi-user / production setups
 
-### 4. Export ZIP
-- In the **Recent Documents** panel:
-  - Click **Copy ID** to copy the document ID to clipboard
-  - Click **Export ZIP** to download a ZIP containing:
-    - `export_<document_id>.jsonl` - All chunks/rows
-    - `manifest.json` - Document metadata
-    - Original source file (if available)
+See [docs/DEPLOY.md](docs/DEPLOY.md) for more details on deployment modes.
 
 ---
 
@@ -138,7 +137,9 @@ pip install -r worker/requirements.images.txt # Images
 
 ## Configuration
 
-Create `.env` from `.env.example` and set:
+For the local demo, no configuration is required. Tokens are auto-generated on first run.
+
+For advanced usage, create `.env` from `.env.example` and set:
 
 | Variable | Description | Required |
 |----------|-------------|----------|
@@ -154,12 +155,6 @@ Create `.env` from `.env.example` and set:
 | `CORS_ORIGINS` | Comma-separated allowed origins | No |
 
 **⚠️ Important:** Do not set `VITE_API_URL` unless deploying behind a reverse proxy. The web UI auto-detects the API URL from the hostname by default.
-
-## Auth Modes
-
-- **`AUTH_MODE=local`** (default): No bearer authentication is enforced by the API. Browser uploads and UI actions work with zero configuration. Perfect for local demos, recruiters, and single-user setups. You can still set tokens, but they're not required in this mode. This is what you get by default when running `scripts/start_all.ps1` or `scripts/start_all.sh`.
-
-- **`AUTH_MODE=strict`**: All protected endpoints (upload, search, ask) require a valid `Authorization: Bearer <API_AUTH_TOKEN>` header. Use this for production deployments, multi-user setups, or when you need strict access control.
 
 See [docs/API.md](docs/API.md) for full API documentation.
 
@@ -194,6 +189,36 @@ See [docs/API.md](docs/API.md) for full API documentation.
 - Check `.env` configuration
 - See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for system overview
 - See [docs/DATA_MODEL.md](docs/DATA_MODEL.md) for data schema
+
+### Verify Installation
+
+Run the smoke verify script to confirm everything works:
+
+**Windows:**
+```powershell
+.\scripts\smoke_verify.ps1
+```
+
+**macOS/Linux:**
+```bash
+./scripts/smoke_verify.sh
+```
+
+**Expected output:**
+```json
+{
+  "api_health_ok": true,
+  "worker_status_ok": true,
+  "api_upload_ok": true,
+  "search_hits_all": true,
+  "ask_answers": 3,
+  "ask_final_present": false,
+  "export_manifest_ok": true,
+  "qdrant_points": 6,
+  "inferred_issue": "ok",
+  "diag": {}
+}
+```
 
 ---
 

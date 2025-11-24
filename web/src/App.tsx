@@ -377,13 +377,13 @@ function App() {
                       onClick={() => downloadJson(doc.document_id!, doc.kind === 'image' ? 'images' : 'chunks')}
                       style={{ fontSize: 11, color: '#1976d2', textDecoration: 'underline', padding: '2px 4px' }}
                     >
-                      Export JSON
+                      Export JSON ({doc.kind === 'image' ? 'images.jsonl' : 'chunks.jsonl'})
                     </button>
                     <button
                       onClick={() => downloadZip(doc.document_id!, doc.kind === 'image' ? 'jsonify2ai_images_768' : 'jsonify2ai_chunks_768')}
                       style={{ fontSize: 11, color: '#1976d2', textDecoration: 'underline', padding: '2px 4px' }}
                     >
-                      Export ZIP
+                      Export ZIP (manifest + JSON)
                     </button>
                   </div>
                 </div>
@@ -411,13 +411,13 @@ function App() {
               className="text-xs underline opacity-70 hover:opacity-100"
               onClick={() => downloadJson(lastDoc.id, lastDoc.kind === 'image' ? 'images' : 'chunks')}
             >
-              Download JSON
+              Export JSON ({lastDoc.kind === 'image' ? 'images.jsonl' : 'chunks.jsonl'})
             </button>
             <button
               className="text-xs underline opacity-70 hover:opacity-100"
               onClick={() => downloadZip(lastDoc.id, lastDoc.kind === 'image' ? 'jsonify2ai_images_768' : 'jsonify2ai_chunks_768')}
             >
-              Download ZIP
+              Export ZIP (manifest + JSON)
             </button>
           </div>
         )}
@@ -556,7 +556,7 @@ function App() {
                     className="text-xs underline opacity-70 hover:opacity-100"
                     onClick={() => downloadJson((h as any).document_id, h.kind === 'image' ? 'images' : 'chunks')}
                   >
-                    Download JSON
+                    Export JSON ({h.kind === 'image' ? 'images.jsonl' : 'chunks.jsonl'})
                   </button>
                 </div>
               )}
@@ -566,6 +566,9 @@ function App() {
       )}
       <div style={{ marginTop: 24 }}>
         <h2 style={{ fontSize: 18, marginBottom: 8 }}>Documents</h2>
+        <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 12 }}>
+          Tip: Export JSON gives you a `.jsonl` where each line is a chunk with `id`, `document_id`, `path`, `text`, and `meta`.
+        </div>
         <div style={{ marginBottom: 12 }}>
           <button
             onClick={loadDocuments}
@@ -612,7 +615,7 @@ function App() {
                     }}
                     style={{ fontSize: 12, color: '#1976d2', textDecoration: 'underline' }}
                   >
-                    Export JSON
+                    Export JSON ({collection.includes('images') ? 'images.jsonl' : 'chunks.jsonl'})
                   </button>
                   <button
                     onClick={() => {
@@ -622,7 +625,7 @@ function App() {
                     }}
                     style={{ fontSize: 12, color: '#1976d2', textDecoration: 'underline' }}
                   >
-                    Export ZIP
+                    Export ZIP (manifest + JSON)
                   </button>
                   <button
                     onClick={() => {

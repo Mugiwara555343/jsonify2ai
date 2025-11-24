@@ -15,13 +15,8 @@ export const API_BASE = envBase && envBase.trim() !== "" ? envBase : hostDefault
 const apiBase = API_BASE;
 
 // API token from environment - Vite reads VITE_API_TOKEN at build/dev server startup
+// Token is optional: in local mode (AUTH_MODE=local), no token is required
 const API_TOKEN = import.meta.env.VITE_API_TOKEN || import.meta.env.VITE_API_AUTH_TOKEN;
-
-// Warn if token is missing at module load
-if (!API_TOKEN) {
-  console.warn("[jsonify2ai] WARNING: VITE_API_TOKEN is not set. Authenticated API calls will fail.");
-  console.warn("[jsonify2ai] Run scripts/ensure_tokens.ps1 or scripts/ensure_tokens.sh to generate tokens.");
-}
 
 function getHeaders(includeAuth = true): HeadersInit {
   const headers: HeadersInit = {};
@@ -86,15 +81,6 @@ export async function apiRequest(
     }
   }
 
-  // Debug logging only for upload endpoint
-  if (requireAuth && endpoint === "/upload") {
-    const authHeader = (mergedHeaders as Record<string, string>)['Authorization'];
-    if (authHeader) {
-      console.log("[jsonify2ai-debug] apiRequest /upload auth header =>", authHeader.slice(0, 20) + "...");
-    } else {
-      console.warn("[jsonify2ai-debug] apiRequest /upload auth header => NONE");
-    }
-  }
 
   return fetch(url, {
     ...options,
@@ -109,10 +95,8 @@ export async function uploadFile(file: File): Promise<any> {
   return postUpload(fd);
 }
 
-// Explicit upload helper that always includes Authorization when present
+// Explicit upload helper that includes Authorization when token is available
 export async function postUpload(fd: FormData): Promise<any> {
-  console.log('[jsonify2ai-debug] upload via apiRequest, auth=', true);
-
   // Use apiRequest for consistency - do NOT set Content-Type header
   // (browser will set it automatically with boundary for FormData)
   const res = await apiRequest("/upload", {
