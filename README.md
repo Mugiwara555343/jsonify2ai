@@ -21,8 +21,6 @@
 
 ---
 
----
-
 ## Why Local-First?
 
 - **Privacy**: Your data never leaves your machine—no cloud uploads, no third-party APIs
