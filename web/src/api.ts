@@ -193,3 +193,21 @@ export function downloadJson(documentId: string, kind: string): void {
   const url = `${apiBase}/export?document_id=${documentId}&collection=${kind}`;
   window.open(url, '_blank');
 }
+
+export async function fetchJsonPreview(
+  documentId: string,
+  collection: string,
+  maxLines = 5
+): Promise<{ lines: string[] }> {
+  const res = await apiRequest(
+    `/export?document_id=${encodeURIComponent(documentId)}&collection=${encodeURIComponent(collection)}`,
+    { method: 'GET' },
+    true
+  );
+  if (!res.ok) {
+    throw new Error(`Failed to fetch JSON preview: ${res.status}`);
+  }
+  const text = await res.text();
+  const lines = text.split('\n').filter(Boolean).slice(0, maxLines);
+  return { lines };
+}

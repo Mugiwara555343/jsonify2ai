@@ -84,24 +84,38 @@ def _export_doc(client: QdrantClient, collection: str, document_id: str) -> str:
 def export_get(
     document_id: str = Query(..., description="Document ID to export"),
     collection: str | None = Query(
-        None, description="Override collection: chunks or images"
+        None,
+        description="Override collection: chunks or images (or full collection name)",
     ),
     _: bool = Depends(require_auth),
 ):
     client = get_qdrant_client()
 
+    # Normalize requested collection: accept full names or simple hints
+    def normalize_collection(value: str | None) -> str:
+        if not value or value.strip() == "":
+            return settings.QDRANT_COLLECTION
+        v = value.lower()
+        if "image" in v:
+            return settings.QDRANT_COLLECTION_IMAGES
+        if "chunk" in v:
+            return settings.QDRANT_COLLECTION
+        # fallback: if matches exactly either collection, honor it
+        if value == settings.QDRANT_COLLECTION_IMAGES:
+            return settings.QDRANT_COLLECTION_IMAGES
+        if value == settings.QDRANT_COLLECTION:
+            return settings.QDRANT_COLLECTION
+        # default to chunks
+        return settings.QDRANT_COLLECTION
+
     # Try the specified collection first
-    coll = (
-        settings.QDRANT_COLLECTION
-        if collection in (None, "", "chunks")
-        else settings.QDRANT_COLLECTION_IMAGES
-    )
+    coll = normalize_collection(collection)
 
     # Check if we have points in the primary collection
     points = _scroll_by_docid(client, coll, document_id)
 
     # If no points and no specific collection was requested, try the other collection
-    if not points and (not collection or collection == ""):
+    if not points and (not collection or collection.strip() == ""):
         alt_coll = (
             settings.QDRANT_COLLECTION_IMAGES
             if coll == settings.QDRANT_COLLECTION

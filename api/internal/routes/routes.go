@@ -209,6 +209,10 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 		if requestID := c.GetString("request_id"); requestID != "" {
 			req.Header.Set("X-Request-Id", requestID)
 		}
+		// Forward worker auth token if configured
+		if cfg.WorkerAuthToken != "" {
+			req.Header.Set("Authorization", "Bearer "+cfg.WorkerAuthToken)
+		}
 		resp, err := httpClient.Do(req)
 		if err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "worker unreachable", "detail": err.Error()})
@@ -230,6 +234,10 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 		// Forward Request-ID to worker
 		if requestID := c.GetString("request_id"); requestID != "" {
 			req.Header.Set("X-Request-Id", requestID)
+		}
+		// Forward worker auth token if configured
+		if cfg.WorkerAuthToken != "" {
+			req.Header.Set("Authorization", "Bearer "+cfg.WorkerAuthToken)
 		}
 		resp, err := httpClient.Do(req)
 		if err != nil {

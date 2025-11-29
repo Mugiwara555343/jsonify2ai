@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import ThemeControls from "./ThemeControls";
 import { applyTheme, loadTheme } from "./theme";
 import './App.css'
-import { uploadFile, doSearch, askQuestion, fetchStatus, fetchDocuments, downloadJson, apiRequest } from './api'
+import { uploadFile, doSearch, askQuestion, fetchStatus, fetchDocuments, downloadJson, apiRequest, fetchJsonPreview } from './api'
 import { API_BASE } from './api';
 
 type Status = {
@@ -145,6 +145,11 @@ function App() {
   const [recentDocs, setRecentDocs] = useState<Hit[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [askLoading, setAskLoading] = useState(false)
+  const [previewDocId, setPreviewDocId] = useState<string | null>(null)
+  const [previewLines, setPreviewLines] = useState<string[] | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  const currentFetchDocIdRef = useRef<string | null>(null)
 
   // Apply saved theme on mount
   useEffect(() => { try { applyTheme(loadTheme()); } catch {} }, [])
@@ -422,6 +427,9 @@ function App() {
           </div>
         )}
       </div>
+      <div style={{ fontSize: 11, opacity: 0.6, marginTop: 8 }}>
+        You can also drop files into data/dropzone/ on disk; the watcher will ingest them automatically.
+      </div>
       <div style={{ marginTop: 24 }}>
         <h2 style={{ fontSize: 18, marginBottom: 8 }}>Ask</h2>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -567,7 +575,7 @@ function App() {
       <div style={{ marginTop: 24 }}>
         <h2 style={{ fontSize: 18, marginBottom: 8 }}>Documents</h2>
         <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 12 }}>
-          Tip: Export JSON gives you a `.jsonl` where each line is a chunk with `id`, `document_id`, `path`, `text`, and `meta`.
+          When you upload a file, jsonify2ai splits it into text chunks. Each line in the exported .jsonl is one chunk with fields like id, document_id, text, and meta.
         </div>
         <div style={{ marginBottom: 12 }}>
           <button
@@ -638,6 +646,38 @@ function App() {
                   >
                     Copy export cmd
                   </button>
+                  <button
+                    onClick={async () => {
+                      const collection = collectionForDoc(doc);
+                      const requestedDocId = doc.document_id;
+                      currentFetchDocIdRef.current = requestedDocId;
+                      setPreviewDocId(requestedDocId);
+                      setPreviewLoading(true);
+                      setPreviewError(null);
+                      setPreviewLines(null);
+                      try {
+                        const result = await fetchJsonPreview(requestedDocId, collection, 5);
+                        // Only update state if this fetch is still the current one
+                        if (currentFetchDocIdRef.current === requestedDocId) {
+                          setPreviewLines(result.lines);
+                        }
+                      } catch (err: any) {
+                        // Only update error if this fetch is still the current one
+                        if (currentFetchDocIdRef.current === requestedDocId) {
+                          setPreviewError(err?.message || 'Failed to load JSON preview');
+                        }
+                      } finally {
+                        // Only update loading state if this fetch is still the current one
+                        if (currentFetchDocIdRef.current === requestedDocId) {
+                          setPreviewLoading(false);
+                        }
+                      }
+                    }}
+                    style={{ fontSize: 12, color: '#1976d2', textDecoration: 'underline' }}
+                    title="Show a sample of the JSONL chunks for this document"
+                  >
+                    Preview JSON
+                  </button>
                 </div>
               </div>
             ))}
@@ -647,6 +687,58 @@ function App() {
           <div style={{ color: '#666', fontSize: 14 }}>No documents found. Upload some files to see them here.</div>
         )}
       </div>
+      {previewDocId && (
+        <section style={{ marginTop: 24, padding: 16, border: '1px solid #ddd', borderRadius: 8, background: '#fafafa' }}>
+          <h3 style={{ fontSize: 16, marginBottom: 8 }}>JSON Preview – {previewDocId}</h3>
+          <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 12 }}>
+            Each line below is one JSON chunk. This is what gets stored in Qdrant.
+          </p>
+          {previewLoading && <p style={{ fontSize: 14, opacity: 0.7 }}>Loading JSON preview…</p>}
+          {previewError && (
+            <p style={{ color: '#dc2626', fontSize: 14 }}>Failed to load JSON preview: {previewError}</p>
+          )}
+          {previewLines && (
+            <pre style={{
+              background: '#fff',
+              padding: 12,
+              borderRadius: 4,
+              border: '1px solid #e5e7eb',
+              overflow: 'auto',
+              fontSize: 12,
+              lineHeight: 1.5,
+              maxHeight: '400px'
+            }}>
+{previewLines.map((line, idx) => {
+                try {
+                  const obj = JSON.parse(line);
+                  return JSON.stringify(obj, null, 2) + (idx < previewLines.length - 1 ? '\n\n' : '');
+                } catch {
+                  return line + (idx < previewLines.length - 1 ? '\n\n' : '');
+                }
+              }).join('')}
+            </pre>
+          )}
+          <button
+            onClick={() => {
+              setPreviewDocId(null);
+              setPreviewLines(null);
+              setPreviewError(null);
+              setPreviewLoading(false);
+            }}
+            style={{
+              marginTop: 12,
+              padding: '8px 16px',
+              borderRadius: 6,
+              border: '1px solid #ddd',
+              background: '#fff',
+              cursor: 'pointer',
+              fontSize: 14
+            }}
+          >
+            Close
+          </button>
+        </section>
+      )}
       <div style={{ marginTop: 16, opacity: .7, fontSize: 12 }}>API: {apiBase}</div>
     </div>
   )
