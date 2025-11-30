@@ -189,6 +189,49 @@ export async function fetchDocuments(): Promise<any> {
   return await res.json();
 }
 
+export function collectionForKind(kind: string): string {
+  return kind === "image" || kind === "images"
+    ? "jsonify2ai_images_768"
+    : "jsonify2ai_chunks";
+}
+
+export async function exportJson(documentId: string, kind: string): Promise<void> {
+  const collection = collectionForKind(kind);
+  const url = `/export?document_id=${encodeURIComponent(documentId)}&collection=${encodeURIComponent(collection)}`;
+  const response = await apiRequest(url, { method: "GET" }, true);
+  if (!response.ok) {
+    throw new Error(`Export failed: ${response.status}`);
+  }
+  const blob = await response.blob();
+  const blobUrl = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = `${documentId}.${kind === "image" || kind === "images" ? "images" : "chunks"}.jsonl`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+}
+
+export async function exportZip(documentId: string, kind: string): Promise<void> {
+  const collection = collectionForKind(kind);
+  const url = `/export/archive?document_id=${encodeURIComponent(documentId)}&collection=${encodeURIComponent(collection)}`;
+  const response = await apiRequest(url, { method: "GET" }, true);
+  if (!response.ok) {
+    throw new Error(`Export failed: ${response.status}`);
+  }
+  const blob = await response.blob();
+  const blobUrl = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = `${documentId}.archive.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+}
+
+// Legacy function - kept for backward compatibility but should use exportJson instead
 export function downloadJson(documentId: string, kind: string): void {
   const url = `${apiBase}/export?document_id=${documentId}&collection=${kind}`;
   window.open(url, '_blank');

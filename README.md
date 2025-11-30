@@ -53,7 +53,11 @@
    - http://localhost:5173
 
 4. **Upload a file:**
-   - Click **Browse…** and pick a `.pdf`, `.md`, `.txt`, or `.csv`
+   - Click **Browse…** and pick a file
+   - ✅ Markdown / text (.md, .txt)
+   - ✅ PDFs (parsed into text chunks)
+   - ✅ CSV / JSON (treated as text)
+   - ⚠️ Other binary formats may be skipped or stored without embeddings
    - Wait for **Uploading…** → **Ingested** chip increments → **Text Chunks** updates
 
 5. **Explore and export:**

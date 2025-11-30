@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import ThemeControls from "./ThemeControls";
 import { applyTheme, loadTheme } from "./theme";
 import './App.css'
-import { uploadFile, doSearch, askQuestion, fetchStatus, fetchDocuments, downloadJson, apiRequest, fetchJsonPreview } from './api'
+import { uploadFile, doSearch, askQuestion, fetchStatus, fetchDocuments, exportJson, exportZip, apiRequest, fetchJsonPreview, collectionForKind } from './api'
 import { API_BASE } from './api';
 
 type Status = {
@@ -94,7 +94,7 @@ async function waitForProcessed(oldTotal: number, timeoutMs = 20000, intervalMs 
 }
 
 
-async function downloadZip(documentId: string, collection: string = 'jsonify2ai_chunks_768') {
+async function downloadZip(documentId: string, collection: string = 'jsonify2ai_chunks') {
   try {
     const url = `/export/archive?document_id=${encodeURIComponent(documentId)}&collection=${encodeURIComponent(collection)}`
     const response = await apiRequest(url, { method: 'GET' }, true)
@@ -112,7 +112,7 @@ async function downloadZip(documentId: string, collection: string = 'jsonify2ai_
 }
 
 function collectionForDoc(d: Document) {
-  return (d.kinds || []).includes("image") ? "jsonify2ai_images_768" : "jsonify2ai_chunks_768";
+  return (d.kinds || []).includes("image") ? "jsonify2ai_images_768" : "jsonify2ai_chunks";
 }
 
 function copyToClipboard(text: string) {
@@ -170,10 +170,11 @@ function App() {
     setS(j)
   }
 
-  const loadDocuments = async () => {
+  const loadDocuments = async (): Promise<Document[]> => {
     try {
       const j = await fetchDocuments()
       setDocs(j)
+      return j
     } catch (err: any) {
       // Log detailed error information for debugging
       const errorMsg = err?.message || String(err);
@@ -197,6 +198,7 @@ function App() {
       } else {
         showToast(`Failed to load documents: ${errorMsg}`, true);
       }
+      return []
     }
   }
 
@@ -263,6 +265,15 @@ function App() {
 
       const data = await uploadFile(file);
 
+      // Check for upload errors
+      if (data?.ok === false || data?.error) {
+        const errorMsg = data?.error || String(data);
+        if (errorMsg.includes("skipped") || errorMsg.includes("unsupported") || errorMsg.includes("empty")) {
+          showToast("File skipped (unsupported or empty). Check worker logs for details.", true);
+          return;
+        }
+      }
+
       // if API returns worker JSON, we'll have document_id and collection
       const docId = data?.document_id as string | undefined;
       const coll  = (data?.collection || "") as string;
@@ -272,6 +283,39 @@ function App() {
 
       const done = await waitForProcessed(baseTotal, 20000, 4000);
       showToast(done.ok ? "Processed ✓" : "Uploaded (pending…)");
+
+      // Auto-preview: refresh documents and open preview for the uploaded document
+      if (docId) {
+        const refreshedDocs = await loadDocuments();
+        // Find the document in the refreshed list
+        const uploadedDoc = refreshedDocs.find(d => d.document_id === docId);
+        if (uploadedDoc) {
+          const collection = collectionForDoc(uploadedDoc);
+          const requestedDocId = uploadedDoc.document_id;
+          currentFetchDocIdRef.current = requestedDocId;
+          setPreviewDocId(requestedDocId);
+          setPreviewLoading(true);
+          setPreviewError(null);
+          setPreviewLines(null);
+          try {
+            const result = await fetchJsonPreview(requestedDocId, collection, 5);
+            if (currentFetchDocIdRef.current === requestedDocId) {
+              setPreviewLines(result.lines);
+            }
+          } catch (err: any) {
+            if (currentFetchDocIdRef.current === requestedDocId) {
+              setPreviewError(err?.message || 'Failed to load JSON preview');
+            }
+          } finally {
+            if (currentFetchDocIdRef.current === requestedDocId) {
+              setPreviewLoading(false);
+            }
+          }
+        } else {
+          // Document not found after refresh - might not be indexed yet
+          showToast("Uploaded, but document not yet indexed. Try Refresh documents.", true);
+        }
+      }
     } catch (err:any) {
       if (err?.message?.includes("rate_limited") || err?.message?.includes("429")) {
         showToast("Rate limited — try again in a few seconds.", true);
@@ -379,13 +423,27 @@ function App() {
                       Copy ID
                     </button>
                     <button
-                      onClick={() => downloadJson(doc.document_id!, doc.kind === 'image' ? 'images' : 'chunks')}
+                      onClick={async () => {
+                        if (!doc.document_id) return;
+                        try {
+                          await exportJson(doc.document_id, doc.kind === 'image' ? 'image' : 'text');
+                        } catch (err: any) {
+                          showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+                        }
+                      }}
                       style={{ fontSize: 11, color: '#1976d2', textDecoration: 'underline', padding: '2px 4px' }}
                     >
                       Export JSON ({doc.kind === 'image' ? 'images.jsonl' : 'chunks.jsonl'})
                     </button>
                     <button
-                      onClick={() => downloadZip(doc.document_id!, doc.kind === 'image' ? 'jsonify2ai_images_768' : 'jsonify2ai_chunks_768')}
+                      onClick={async () => {
+                        if (!doc.document_id) return;
+                        try {
+                          await exportZip(doc.document_id, doc.kind === 'image' ? 'image' : 'text');
+                        } catch (err: any) {
+                          showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+                        }
+                      }}
                       style={{ fontSize: 11, color: '#1976d2', textDecoration: 'underline', padding: '2px 4px' }}
                     >
                       Export ZIP (manifest + JSON)
@@ -410,24 +468,61 @@ function App() {
             {toast}
           </span>
         )}
-        {lastDoc && (
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              className="text-xs underline opacity-70 hover:opacity-100"
-              onClick={() => downloadJson(lastDoc.id, lastDoc.kind === 'image' ? 'images' : 'chunks')}
-            >
-              Export JSON ({lastDoc.kind === 'image' ? 'images.jsonl' : 'chunks.jsonl'})
-            </button>
-            <button
-              className="text-xs underline opacity-70 hover:opacity-100"
-              onClick={() => downloadZip(lastDoc.id, lastDoc.kind === 'image' ? 'jsonify2ai_images_768' : 'jsonify2ai_chunks_768')}
-            >
-              Export ZIP (manifest + JSON)
-            </button>
-          </div>
-        )}
+        <div style={{ display: 'flex', gap: 8 }}>
+          {(() => {
+            const previewedDoc = previewDocId ? docs.find(d => d.document_id === previewDocId) : null;
+            const isEnabled = previewedDoc !== null;
+            const kind = previewedDoc ? (previewedDoc.kinds.includes('image') ? 'image' : 'text') : 'text';
+
+            return (
+              <>
+                <button
+                  className="text-xs underline opacity-70 hover:opacity-100"
+                  disabled={!isEnabled}
+                  title={isEnabled ? undefined : "Preview a document first"}
+                  onClick={async () => {
+                    if (!previewedDoc) return;
+                    try {
+                      await exportJson(previewedDoc.document_id, kind);
+                    } catch (err: any) {
+                      showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+                    }
+                  }}
+                  style={{
+                    opacity: isEnabled ? 0.7 : 0.3,
+                    cursor: isEnabled ? 'pointer' : 'not-allowed'
+                  }}
+                >
+                  Download JSON
+                </button>
+                <button
+                  className="text-xs underline opacity-70 hover:opacity-100"
+                  disabled={!isEnabled}
+                  title={isEnabled ? undefined : "Preview a document first"}
+                  onClick={async () => {
+                    if (!previewedDoc) return;
+                    try {
+                      await exportZip(previewedDoc.document_id, kind);
+                    } catch (err: any) {
+                      showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+                    }
+                  }}
+                  style={{
+                    opacity: isEnabled ? 0.7 : 0.3,
+                    cursor: isEnabled ? 'pointer' : 'not-allowed'
+                  }}
+                >
+                  Download ZIP
+                </button>
+              </>
+            );
+          })()}
+        </div>
       </div>
       <div style={{ fontSize: 11, opacity: 0.6, marginTop: 8 }}>
+        Works best with: .md, .txt, .pdf, .csv, .json. Other formats may be skipped by the worker.
+      </div>
+      <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4 }}>
         You can also drop files into data/dropzone/ on disk; the watcher will ingest them automatically.
       </div>
       <div style={{ marginTop: 24 }}>
@@ -562,7 +657,14 @@ function App() {
                 <div className="mt-1">
                   <button
                     className="text-xs underline opacity-70 hover:opacity-100"
-                    onClick={() => downloadJson((h as any).document_id, h.kind === 'image' ? 'images' : 'chunks')}
+                    onClick={async () => {
+                      if (!h.document_id) return;
+                      try {
+                        await exportJson(h.document_id, h.kind === 'image' ? 'image' : 'text');
+                      } catch (err: any) {
+                        showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+                      }
+                    }}
                   >
                     Export JSON ({h.kind === 'image' ? 'images.jsonl' : 'chunks.jsonl'})
                   </button>
@@ -616,20 +718,26 @@ function App() {
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <button
-                    onClick={() => {
-                      const collection = collectionForDoc(doc);
-                      const url = `${apiBase}/export?document_id=${encodeURIComponent(doc.document_id)}&collection=${collection}`;
-                      window.open(url, '_blank');
+                    onClick={async () => {
+                      const kind = doc.kinds.includes('image') ? 'image' : 'text';
+                      try {
+                        await exportJson(doc.document_id, kind);
+                      } catch (err: any) {
+                        showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+                      }
                     }}
                     style={{ fontSize: 12, color: '#1976d2', textDecoration: 'underline' }}
                   >
-                    Export JSON ({collection.includes('images') ? 'images.jsonl' : 'chunks.jsonl'})
+                    Export JSON ({collectionForDoc(doc).includes('images') ? 'images.jsonl' : 'chunks.jsonl'})
                   </button>
                   <button
-                    onClick={() => {
-                      const collection = collectionForDoc(doc);
-                      const url = `${apiBase}/export/archive?document_id=${encodeURIComponent(doc.document_id)}&collection=${collection}`;
-                      window.open(url, '_blank');
+                    onClick={async () => {
+                      const kind = doc.kinds.includes('image') ? 'image' : 'text';
+                      try {
+                        await exportZip(doc.document_id, kind);
+                      } catch (err: any) {
+                        showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+                      }
                     }}
                     style={{ fontSize: 12, color: '#1976d2', textDecoration: 'underline' }}
                   >
@@ -687,58 +795,75 @@ function App() {
           <div style={{ color: '#666', fontSize: 14 }}>No documents found. Upload some files to see them here.</div>
         )}
       </div>
-      {previewDocId && (
-        <section style={{ marginTop: 24, padding: 16, border: '1px solid #ddd', borderRadius: 8, background: '#fafafa' }}>
-          <h3 style={{ fontSize: 16, marginBottom: 8 }}>JSON Preview – {previewDocId}</h3>
-          <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 12 }}>
-            Each line below is one JSON chunk. This is what gets stored in Qdrant.
-          </p>
-          {previewLoading && <p style={{ fontSize: 14, opacity: 0.7 }}>Loading JSON preview…</p>}
-          {previewError && (
-            <p style={{ color: '#dc2626', fontSize: 14 }}>Failed to load JSON preview: {previewError}</p>
-          )}
-          {previewLines && (
-            <pre style={{
-              background: '#fff',
-              padding: 12,
-              borderRadius: 4,
-              border: '1px solid #e5e7eb',
-              overflow: 'auto',
-              fontSize: 12,
-              lineHeight: 1.5,
-              maxHeight: '400px'
-            }}>
+      {previewDocId && (() => {
+        const previewedDoc = docs.find(d => d.document_id === previewDocId);
+        const collection = previewedDoc ? collectionForDoc(previewedDoc) : '';
+        const truncatedId = previewDocId.length > 40 ? previewDocId.substring(0, 40) + '...' : previewDocId;
+
+        return (
+          <section style={{ marginTop: 24, padding: 16, border: '1px solid #ddd', borderRadius: 8, background: '#fafafa' }}>
+            <h3 style={{ fontSize: 16, marginBottom: 4, fontFamily: 'monospace' }}>Preview: {truncatedId}</h3>
+            {collection && (
+              <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>
+                Collection: {collection} {previewLines && previewLines.length > 0 && `• Showing ${previewLines.length} lines (JSONL preview)`}
+              </p>
+            )}
+            <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 12 }}>
+              Each line below is one JSON chunk. This is what gets stored in Qdrant.
+            </p>
+            {previewLoading && <p style={{ fontSize: 14, opacity: 0.7 }}>Loading JSON preview…</p>}
+            {previewError && (
+              <p style={{ color: '#dc2626', fontSize: 14 }}>Failed to load JSON preview: {previewError}</p>
+            )}
+            {!previewLoading && !previewError && (!previewLines || previewLines.length === 0) && (
+              <p style={{ fontSize: 14, opacity: 0.7, fontStyle: 'italic' }}>
+                No JSON rows yet. The document may not be fully indexed. Try Refresh documents.
+              </p>
+            )}
+            {previewLines && previewLines.length > 0 && (
+              <pre style={{
+                background: '#fff',
+                padding: 12,
+                borderRadius: 4,
+                border: '1px solid #e5e7eb',
+                overflow: 'auto',
+                fontSize: 12,
+                lineHeight: 1.5,
+                maxHeight: '400px',
+                fontFamily: 'monospace'
+              }}>
 {previewLines.map((line, idx) => {
-                try {
-                  const obj = JSON.parse(line);
-                  return JSON.stringify(obj, null, 2) + (idx < previewLines.length - 1 ? '\n\n' : '');
-                } catch {
-                  return line + (idx < previewLines.length - 1 ? '\n\n' : '');
-                }
-              }).join('')}
-            </pre>
-          )}
-          <button
-            onClick={() => {
-              setPreviewDocId(null);
-              setPreviewLines(null);
-              setPreviewError(null);
-              setPreviewLoading(false);
-            }}
-            style={{
-              marginTop: 12,
-              padding: '8px 16px',
-              borderRadius: 6,
-              border: '1px solid #ddd',
-              background: '#fff',
-              cursor: 'pointer',
-              fontSize: 14
-            }}
-          >
-            Close
-          </button>
-        </section>
-      )}
+                  try {
+                    const obj = JSON.parse(line);
+                    return JSON.stringify(obj, null, 2) + (idx < previewLines.length - 1 ? '\n\n' : '');
+                  } catch {
+                    return line + (idx < previewLines.length - 1 ? '\n\n' : '');
+                  }
+                }).join('')}
+              </pre>
+            )}
+            <button
+              onClick={() => {
+                setPreviewDocId(null);
+                setPreviewLines(null);
+                setPreviewError(null);
+                setPreviewLoading(false);
+              }}
+              style={{
+                marginTop: 12,
+                padding: '8px 16px',
+                borderRadius: 6,
+                border: '1px solid #ddd',
+                background: '#fff',
+                cursor: 'pointer',
+                fontSize: 14
+              }}
+            >
+              Close
+            </button>
+          </section>
+        );
+      })()}
       <div style={{ marginTop: 16, opacity: .7, fontSize: 12 }}>API: {apiBase}</div>
     </div>
   )
