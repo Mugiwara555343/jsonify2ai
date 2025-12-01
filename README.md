@@ -31,6 +31,20 @@
 
 ---
 
+## For reviewers / hiring managers
+
+If you're skimming this repo, here's the fastest way to evaluate it:
+
+1. **Run the demo** – follow the "Quick Start" and use the **Load demo data** button in the UI.
+2. **Inspect the JSON** – upload or use a demo doc, then click **Preview JSON** to see the normalized chunks (JSONL).
+3. **Ask your data** – go to the **Ask** section, click one of the example questions, and see snippets come back.
+4. **Export** – use **Export JSON** or **Export ZIP** on a document to see manifest + chunks + source.
+5. **Check self-tests** – run the smoke/diagnostic scripts (described below) and look at the JSON verdict.
+
+This project is meant to feel like a small product: clone → start → click through → understand the architecture.
+
+---
+
 ## Quick Start (Local Demo)
 
 1. **Clone and enter the repo:**
@@ -52,19 +66,19 @@
 3. **Open the web UI:**
    - http://localhost:5173
 
-**💡 Quick demo:** Click **"Load demo data"** in the web UI to instantly load 3 example documents, or follow the step-by-step guide in [DEMO_SCRIPT.md](DEMO_SCRIPT.md).
+4. **Load demo data (fastest path):**
+   - Click **"Load demo data"** button in the upload section
+   - This instantly loads 3 example documents (Qdrant info, Export features, Environment toggles)
+   - Or follow the step-by-step guide in [DEMO_SCRIPT.md](DEMO_SCRIPT.md)
 
-4. **Upload a file:**
-   - Click **Browse…** and pick a file
-   - ✅ Markdown / text (.md, .txt)
-   - ✅ PDFs (parsed into text chunks)
-   - ✅ CSV / JSON (treated as text)
-   - ⚠️ Other binary formats may be skipped or stored without embeddings
-   - Wait for **Uploading…** → **Ingested** chip increments → **Text Chunks** updates
+5. **Inspect the JSON:**
+   - In the **Documents** section, find a document
+   - Click **"Preview JSON"** to see the normalized chunks (JSONL format)
+   - Each line shows one chunk with fields: `id`, `document_id`, `text`, `path`, `idx`, `meta`
 
-5. **Ask your data:**
+6. **Ask your data:**
    - Scroll down to the **Ask** section
-   - Click one of the example questions or type your own
+   - Click one of the example questions (e.g., "What is Qdrant used for in this repo?") or type your own
    - Press **Ask** or Enter to search
    - View results:
      - **Answer** block (if LLM synthesis is enabled) - shows a synthesized answer with an "local (ollama)" badge
@@ -72,11 +86,29 @@
    - In `AUTH_MODE=local`, Ask works without any API token
    - **Note**: The "Answer" block appears only if `LLM_PROVIDER=ollama` and Ollama is reachable. Otherwise, Ask still returns sources/snippets, which is the baseline behavior.
 
-6. **Explore and export:**
-   - Use **Search** to query text from your file
-   - In **Documents**, use:
-     - **Export JSON** → downloads `chunks.jsonl` or `images.jsonl`
-     - **Export ZIP** → downloads ZIP with `manifest.json` + JSONL (and sources when available)
+7. **Export:**
+   - In the **Documents** section, use:
+     - **Export JSON** → downloads `chunks.jsonl` or `images.jsonl` (all chunks for a document)
+     - **Export ZIP** → downloads ZIP with `manifest.json` + JSONL + source file (when available)
+   - The manifest.json shows document metadata (paths, counts, kinds)
+
+## UI preview
+
+_A short animated GIF or screenshot of the main flow will go here in a future update._
+
+For now, the key pieces are:
+- Upload + **"Load demo data"** buttons at the top.
+- Documents list with **Preview JSON / Export JSON / Export ZIP**.
+- Ask panel with Answer + Sources.
+- Status chips showing API/worker health and LLM status.
+
+## Where this shines
+
+- **Local-first knowledgebase** – point it at notes, PDFs, and logs without sending data to the cloud.
+- **Semantic search over messy content** – normalized chunks + vector search via Qdrant.
+- **Traceable answers** – Ask returns snippets with paths + document IDs, plus optional local LLM synthesis.
+- **Exportable data** – JSONL and ZIP exports with manifest + checksums.
+- **Demo → production gradient** – simple local mode by default, stricter auth and tokens available when you need them.
 
 ### Supported file types (demo)
 
@@ -232,6 +264,43 @@ Run the smoke verify script to confirm everything works:
   "diag": {}
 }
 ```
+
+---
+
+## Health & self-checks
+
+jsonify2ai ships with small scripts that tell you if the system is healthy.
+
+### Core scripts
+
+- `scripts/smoke_verify.ps1` / `scripts/smoke_verify.sh`
+  Full end-to-end smoke: starts fresh containers, uploads a seed doc, runs health checks, search, ask, and export.
+
+- `python scripts/ingest_diagnose.py`
+  Lightweight ingestion + search diagnosis. Good for quick local checks.
+
+- `python scripts/export_smoke.py`
+  Verifies that `/export` and `/export/archive` return well-formed JSONL and ZIPs.
+
+Each script prints a single JSON object with a high-level verdict.
+
+### Reading the JSON verdict
+
+The exact fields may evolve, but common ones include:
+
+- `api_upload_ok` – `true` if an upload through the API succeeded.
+- `worker_process_ok` – `true` if the worker processed and embedded the test file.
+- `status_counts` – chunk/image counts reported by the worker.
+- `search_hits` – whether key probe queries (like `"vector"` or `"manifest.json"`) returned results.
+- `qdrant_points_count` – number of points in the Qdrant collection.
+- `export_manifest_ok` – `true` if the ZIP manifest looks correct.
+- `ask_answers` / `ask_final_present` – ask/LLM behavior where configured.
+- `inferred_issue` – the script's best guess at what's wrong, or `"ok"` when everything passes.
+
+You don't have to remember every field. The usual flow is:
+
+- **Healthy:** `inferred_issue` is `"ok"`, and counts / hits look reasonable.
+- **Something off:** `inferred_issue` is a short string like `"missing_api_token"` or `"qdrant_empty"`. Use that plus the other fields as breadcrumbs. The [Troubleshooting](#troubleshooting) section and [docs/DEPLOY.md](docs/DEPLOY.md) cover common failure modes.
 
 ---
 
