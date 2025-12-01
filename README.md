@@ -60,9 +60,18 @@
    - ⚠️ Other binary formats may be skipped or stored without embeddings
    - Wait for **Uploading…** → **Ingested** chip increments → **Text Chunks** updates
 
-5. **Explore and export:**
+5. **Ask your data:**
+   - Scroll down to the **Ask** section
+   - Click one of the example questions or type your own
+   - Press **Ask** or Enter to search
+   - View results:
+     - **Answer** block (if LLM synthesis is enabled) - shows a synthesized answer with an "local (ollama)" badge
+     - **Sources** section - always shows matching snippets with filenames, document IDs, and scores
+   - In `AUTH_MODE=local`, Ask works without any API token
+   - **Note**: The "Answer" block appears only if `LLM_PROVIDER=ollama` and Ollama is reachable. Otherwise, Ask still returns sources/snippets, which is the baseline behavior.
+
+6. **Explore and export:**
    - Use **Search** to query text from your file
-   - Use **Ask** to ask a question about your file
    - In **Documents**, use:
      - **Export JSON** → downloads `chunks.jsonl` or `images.jsonl`
      - **Export ZIP** → downloads ZIP with `manifest.json` + JSONL (and sources when available)

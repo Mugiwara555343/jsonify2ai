@@ -80,7 +80,7 @@ All protected endpoints require `Authorization: Bearer <API_AUTH_TOKEN>` header.
 
 **POST /ask**
 - Ask questions with optional LLM synthesis
-- **Auth required**: Yes
+- **Auth required**: Yes (optional in `AUTH_MODE=local`)
 - **Content-Type**: `application/json`
 - **Body**:
   ```json
@@ -90,17 +90,46 @@ All protected endpoints require `Authorization: Bearer <API_AUTH_TOKEN>` header.
     "limit": 6
   }
   ```
-- **Response**:
+- **Response (with LLM synthesis enabled)**:
   ```json
   {
     "ok": true,
     "mode": "llm",
     "model": "llama3.1:8b",
     "final": "Synthesized answer...",
-    "sources": [...],
+    "sources": [
+      {
+        "id": "point_id",
+        "score": 0.85,
+        "text": "chunk content",
+        "path": "data/documents/...",
+        "document_id": "uuid"
+      }
+    ],
     "answers": [...]
   }
   ```
+- **Response (search mode only, LLM disabled or unavailable)**:
+  ```json
+  {
+    "ok": true,
+    "mode": "search",
+    "answer": "Top matching snippets summary...",
+    "sources": [
+      {
+        "id": "point_id",
+        "score": 0.85,
+        "text": "chunk content",
+        "path": "data/documents/...",
+        "document_id": "uuid"
+      }
+    ]
+  }
+  ```
+- **Notes**:
+  - The `final` field is optional and only present when LLM synthesis is enabled (`LLM_PROVIDER=ollama` and Ollama is reachable)
+  - The `sources` array is always returned and contains matching snippets with metadata (path, document_id, score, text/caption)
+  - When LLM is unavailable, the endpoint falls back to search mode and returns `answer` (summary) instead of `final`
 
 ### Documents
 

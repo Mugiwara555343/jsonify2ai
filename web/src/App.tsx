@@ -138,6 +138,7 @@ function App() {
   const [busy, setBusy] = useState(false)
   const [askQ, setAskQ] = useState('')
   const [ans, setAns] = useState<AskResp | null>(null)
+  const [askError, setAskError] = useState<string | null>(null)
   const [uploadBusy, setUploadBusy] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [lastDoc, setLastDoc] = useState<{id:string, kind:string} | null>(null)
@@ -150,6 +151,7 @@ function App() {
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const currentFetchDocIdRef = useRef<string | null>(null)
+  const askInputRef = useRef<HTMLInputElement>(null)
 
   // Apply saved theme on mount
   useEffect(() => { try { applyTheme(loadTheme()); } catch {} }, [])
@@ -224,6 +226,44 @@ function App() {
   async function performSearch(q: string, kind: string) {
     return await doSearch(q, kind);
   }
+
+  const handleAsk = async () => {
+    if (!askQ.trim()) {
+      showToast("Please enter a question", true);
+      return;
+    }
+
+    setAskLoading(true);
+    setAskError(null);
+    try {
+      const j: AskResp = await askQuestion(askQ, 6);
+      if (j.ok === false) {
+        const errorMsg = j.error === "rate_limited"
+          ? "Rate limited — try again in a few seconds."
+          : `Ask failed: ${j.error || 'Unknown error'}`;
+        setAskError(errorMsg);
+        setAns(null);
+        if (j.error === "rate_limited") {
+          showToast(errorMsg, true);
+        }
+      } else {
+        setAns(j);
+        setAskError(null);
+      }
+    } catch (err: any) {
+      // Check if it's a 429 rate limit error
+      const errorMsg = (err?.status === 429 || err?.errorData?.error === "rate_limited")
+        ? "Rate limited — try again in a few seconds."
+        : `Ask error: ${err?.message || err}`;
+      setAskError(errorMsg);
+      setAns(null);
+      if (err?.status === 429 || err?.errorData?.error === "rate_limited") {
+        showToast(errorMsg, true);
+      }
+    } finally {
+      setAskLoading(false);
+    }
+  };
 
   const handleSearch = async () => {
     if (!q.trim()) {
@@ -527,41 +567,199 @@ function App() {
       </div>
       <div style={{ marginTop: 24 }}>
         <h2 style={{ fontSize: 18, marginBottom: 8 }}>Ask</h2>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>Try these questions:</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {[
+              "What is Qdrant used for in this repo?",
+              "Which env toggles enable dev modes?",
+              "How do I export a ZIP for a document?"
+            ].map((example, i) => (
+              <button
+                key={i}
+                onClick={() => {
+                  setAskQ(example);
+                  // Focus the input after setting the value
+                  setTimeout(() => {
+                    if (askInputRef.current) {
+                      askInputRef.current.focus();
+                    }
+                  }, 0);
+                }}
+                style={{
+                  fontSize: 12,
+                  padding: '4px 8px',
+                  borderRadius: 6,
+                  border: '1px solid #ddd',
+                  background: '#fff',
+                  color: '#1976d2',
+                  cursor: 'pointer',
+                  textDecoration: 'none'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#f0f9ff';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = '#fff';
+                }}
+              >
+                {example}
+              </button>
+            ))}
+          </div>
+        </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <input
+            ref={askInputRef}
             value={askQ}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAskQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !askLoading && askQ.trim()) {
+                e.preventDefault();
+                handleAsk();
+              }
+            }}
             placeholder="ask your data…"
             style={{ flex: 1, padding: 12, borderRadius: 8, border: '1px solid #ddd' }}
           />
           <button
-            onClick={async () => {
+            onClick={handleAsk}
+            disabled={askLoading}
+            style={{
+              padding: '12px 16px',
+              borderRadius: 8,
+              border: '1px solid #ddd',
+              opacity: askLoading ? 0.6 : 1,
+              cursor: askLoading ? 'not-allowed' : 'pointer'
+            }}
+          >
+            {askLoading ? 'Asking...' : 'Ask'}
+          </button>
+        </div>
+        {askLoading && (
+          <div style={{ marginTop: 12, padding: 12, color: '#666', fontSize: 14 }}>
+            Searching your data…
+          </div>
+        )}
+        {askError && (
+          <div style={{ marginTop: 12, padding: 12, border: '1px solid #fecaca', borderRadius: 8, background: '#fef2f2', color: '#dc2626', fontSize: 14 }}>
+            {askError}
+          </div>
+        )}
+        {!askLoading && !askError && !ans && (
+          <div style={{ marginTop: 12, padding: 12, color: '#999', fontSize: 13, fontStyle: 'italic' }}>
+            Run a question to see answers and sources here.
+          </div>
+        )}
+        {!askLoading && ans && (
+          <div style={{ marginTop: 12, padding: 12, border: '1px solid #eee', borderRadius: 10 }}>
+            {(ans.final && ans.final.trim()) || (ans.answer && ans.answer.trim()) ? (
+              <div style={{ marginBottom: 16, padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fafafa' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <div style={{ fontWeight: 600, fontSize: 16 }}>Answer</div>
+                  {s && s.llm?.provider === "ollama" && s.llm?.reachable === true ? (
+                    <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 999, background: '#eef2ff', color: '#3730a3' }}>local (ollama)</span>
+                  ) : (
+                    <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 999, background: '#f3f4f6', color: '#6b7280' }}>Top matches below</span>
+                  )}
+                </div>
+                <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: 14 }}>
+                  {ans.final && ans.final.trim() ? ans.final : (ans.answer || '')}
+                </div>
+              </div>
+            ) : null}
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 12 }}>Sources</div>
+              {(() => {
+                const sources = ans.sources || ans.answers || [];
+                if (sources.length === 0) {
+                  return (
+                    <div style={{ color: '#666', fontSize: 14, padding: 12, background: '#f9fafb', borderRadius: 6 }}>
+                      No matching snippets yet. Try a different query or upload more files.
+                    </div>
+                  );
+                }
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {sources.map((h, i) => {
+                      const filename = h.path ? h.path.split('/').pop() || h.path : (h.id || `Source ${i + 1}`);
+                      const docId = h.document_id ? h.document_id.substring(0, 12) : null;
+                      const snippet = h.text || h.caption || '';
+                      const score = h.score !== undefined ? h.score : null;
+
+                      return (
+                        <div key={i} style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 500, fontSize: 13 }}>{filename}</span>
+                            {docId && (
+                              <code style={{ fontSize: 11, fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
+                                {docId}...
+                              </code>
+                            )}
+                            {score !== null && (
+                              <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: '#f0f9ff', color: '#0369a1' }}>
+                                score: {score.toFixed(2)}
+                              </span>
+                            )}
+                          </div>
+                          {snippet && (
+                            <div style={{
+                              fontSize: 13,
+                              lineHeight: 1.5,
+                              color: '#374151',
+                              fontFamily: 'ui-monospace, monospace',
+                              background: '#f9fafb',
+                              padding: 8,
+                              borderRadius: 4,
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word'
+                            }}>
+                              {snippet}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+      </div>
+      <div style={{ marginTop: 24, display: 'flex', gap: 8 }}>
               if (!askQ.trim()) {
                 showToast("Please enter a question", true);
                 return;
               }
 
               setAskLoading(true);
+              setAskError(null);
               try {
                 const j: AskResp = await askQuestion(askQ, 6);
                 if (j.ok === false) {
-                  if (j.error === "rate_limited") {
-                    showToast("Rate limited — try again in a few seconds.", true);
-                  } else {
-                    showToast(`Ask failed: ${j.error || 'Unknown error'}`, true);
-                  }
+                  const errorMsg = j.error === "rate_limited"
+                    ? "Rate limited — try again in a few seconds."
+                    : `Ask failed: ${j.error || 'Unknown error'}`;
+                  setAskError(errorMsg);
                   setAns(null);
+                  if (j.error === "rate_limited") {
+                    showToast(errorMsg, true);
+                  }
                 } else {
                   setAns(j);
+                  setAskError(null);
                 }
               } catch (err: any) {
                 // Check if it's a 429 rate limit error
-                if (err?.status === 429 || err?.errorData?.error === "rate_limited") {
-                  showToast("Rate limited — try again in a few seconds.", true);
-                } else {
-                  showToast(`Ask error: ${err?.message || err}`, true);
-                }
+                const errorMsg = (err?.status === 429 || err?.errorData?.error === "rate_limited")
+                  ? "Rate limited — try again in a few seconds."
+                  : `Ask error: ${err?.message || err}`;
+                setAskError(errorMsg);
                 setAns(null);
+                if (err?.status === 429 || err?.errorData?.error === "rate_limited") {
+                  showToast(errorMsg, true);
+                }
               } finally {
                 setAskLoading(false);
               }
@@ -578,34 +776,94 @@ function App() {
             {askLoading ? 'Asking...' : 'Ask'}
           </button>
         </div>
-        {ans && (
+        {askLoading && (
+          <div style={{ marginTop: 12, padding: 12, color: '#666', fontSize: 14 }}>
+            Searching your data…
+          </div>
+        )}
+        {askError && (
+          <div style={{ marginTop: 12, padding: 12, border: '1px solid #fecaca', borderRadius: 8, background: '#fef2f2', color: '#dc2626', fontSize: 14 }}>
+            {askError}
+          </div>
+        )}
+        {!askLoading && !askError && !ans && (
+          <div style={{ marginTop: 12, padding: 12, color: '#999', fontSize: 13, fontStyle: 'italic' }}>
+            Run a question to see answers and sources here.
+          </div>
+        )}
+        {!askLoading && ans && (
           <div style={{ marginTop: 12, padding: 12, border: '1px solid #eee', borderRadius: 10 }}>
-            <div style={{ fontSize: 12, opacity: .6, marginBottom: 6 }}>mode: {ans.mode}{ans.model ? ` (${ans.model})` : ''}</div>
-            {ans.final && ans.final.trim() && (
-              <div style={{ marginBottom: 12, padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fafafa' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  <div style={{ fontWeight: 600 }}>Answer</div>
-                  <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 999, background: '#eef2ff', color: '#3730a3' }}>local (ollama)</span>
+            {(ans.final && ans.final.trim()) || (ans.answer && ans.answer.trim()) ? (
+              <div style={{ marginBottom: 16, padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fafafa' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <div style={{ fontWeight: 600, fontSize: 16 }}>Answer</div>
+                  {s && s.llm?.provider === "ollama" && s.llm?.reachable === true ? (
+                    <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 999, background: '#eef2ff', color: '#3730a3' }}>local (ollama)</span>
+                  ) : (
+                    <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 999, background: '#f3f4f6', color: '#6b7280' }}>Top matches below</span>
+                  )}
                 </div>
-                <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.4 }}>{ans.final}</div>
+                <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: 14 }}>
+                  {ans.final && ans.final.trim() ? ans.final : (ans.answer || '')}
+                </div>
               </div>
-            )}
-            {(ans.answer || ans.sources || ans.answers) && (
-              <>
-                {ans.answer && ans.answer.trim() && (
-                  <div style={{ whiteSpace: 'pre-wrap', marginBottom: ans.sources?.length || ans.answers?.length ? 10 : 0 }}>{ans.answer}</div>
-                )}
-                {(ans.sources && ans.sources.length > 0) || (ans.answers && ans.answers.length > 0) ? (
-                  <div style={{ marginTop: 10, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {(ans.sources || ans.answers || []).map((h, i) => (
-                      <span key={i} style={{ fontSize: 12, opacity: .75, border: '1px solid #eee', padding: '2px 6px', borderRadius: 999 }}>{h.path?.split('/').pop() || h.id}</span>
-                    ))}
+            ) : null}
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 12 }}>Sources</div>
+              {(() => {
+                const sources = ans.sources || ans.answers || [];
+                if (sources.length === 0) {
+                  return (
+                    <div style={{ color: '#666', fontSize: 14, padding: 12, background: '#f9fafb', borderRadius: 6 }}>
+                      No matching snippets yet. Try a different query or upload more files.
+                    </div>
+                  );
+                }
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {sources.map((h, i) => {
+                      const filename = h.path ? h.path.split('/').pop() || h.path : (h.id || `Source ${i + 1}`);
+                      const docId = h.document_id ? h.document_id.substring(0, 12) : null;
+                      const snippet = h.text || h.caption || '';
+                      const score = h.score !== undefined ? h.score : null;
+
+                      return (
+                        <div key={i} style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 500, fontSize: 13 }}>{filename}</span>
+                            {docId && (
+                              <code style={{ fontSize: 11, fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
+                                {docId}...
+                              </code>
+                            )}
+                            {score !== null && (
+                              <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: '#f0f9ff', color: '#0369a1' }}>
+                                score: {score.toFixed(2)}
+                              </span>
+                            )}
+                          </div>
+                          {snippet && (
+                            <div style={{
+                              fontSize: 13,
+                              lineHeight: 1.5,
+                              color: '#374151',
+                              fontFamily: 'ui-monospace, monospace',
+                              background: '#f9fafb',
+                              padding: 8,
+                              borderRadius: 4,
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word'
+                            }}>
+                              {snippet}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                ) : (
-                  <div style={{ color: '#666', fontSize: 13, marginTop: 8 }}>No matching snippets.</div>
-                )}
-              </>
-            )}
+                );
+              })()}
+            </div>
           </div>
         )}
       </div>
