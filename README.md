@@ -4,6 +4,8 @@
 
 **Effortlessly turn your local files into structured JSON and searchable AI-ready vectors, entirely offline, on your own hardware.**
 
+**Status: Demo-ready** (local mode, single user)
+
 ---
 
 ### At a Glance

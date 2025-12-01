@@ -1,3 +1,6 @@
+# INTERNAL: dev helper, not part of public demo surface
+# This script is superseded by scripts/smoke_verify.ps1 for end users.
+# Use smoke_verify.ps1 or python scripts/ingest_diagnose.py instead.
 [CmdletBinding()] param()
 
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest

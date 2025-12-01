@@ -2,9 +2,9 @@
 
 | Mode | How to run | API base | Notes |
 |---|---|---|---|
-| Local laptop (default) | `scripts/start_all.ps1` or `scripts/start_all.sh` | auto-detect → `http://localhost:8082` | No env override needed |
+| Local laptop (default) | `scripts/start_all.ps1` or `scripts/start_all.sh` | auto-detect → `http://localhost:8082` | No env override needed. **This is the default for demos.** |
 | All-in-Docker (no host browser) | `docker compose -f docker-compose.yml -f docker-compose.docker.yml up -d` | `http://api:8082` | Copy `docker-compose.docker.yml.sample` to `docker-compose.docker.yml` |
-| Remote/Company domain | Behind reverse proxy | Set `VITE_API_URL=https://your.domain/api` | Align CORS for your origins |
+| Remote/Company domain | Behind reverse proxy | Set `VITE_API_URL=https://your.domain/api` | Align CORS for your origins. **Strict mode + externalized Docker configs are the path to multi-user / company deployment.** |
 
 ## Tokens
 
@@ -31,13 +31,19 @@
 **PowerShell**
 
 ```powershell
-scripts\smoke_all.ps1
+scripts\smoke_verify.ps1
 ```
 
 **Bash**
 
 ```bash
-./scripts/smoke_all.sh
+./scripts/smoke_verify.sh
+```
+
+Or use the lightweight diagnostic:
+
+```bash
+python scripts/ingest_diagnose.py
 ```
 
 Expect JSON with `"api_upload_ok": true` and `"inferred_issue": "ok"`.

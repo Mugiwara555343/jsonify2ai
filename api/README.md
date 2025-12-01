@@ -12,7 +12,8 @@ Go-based API service for the jsonify2ai memory system.
 
 - `POSTGRES_DSN` - PostgreSQL connection string
 - `QDRANT_URL` - Qdrant vector database URL (default: http://host.docker.internal:6333)
-- `OLLAMA_URL` - Ollama service URL (default: http://host.docker.internal:11434)
+- `OLLAMA_HOST` - Ollama service URL (preferred, default: http://host.docker.internal:11434)
+- `OLLAMA_URL` - Ollama service URL (legacy, deprecated in favor of OLLAMA_HOST)
 - `WORKER_BASE` - Worker service base URL (default: http://worker:8090)
 - `QDRANT_COLLECTION` - Qdrant collection name (default: jsonify2ai_chunks)
 - `EMBEDDINGS_MODEL` - Ollama embeddings model (default: nomic-embed-text)

@@ -1,3 +1,4 @@
+# INTERNAL: dev helper, not part of public demo surface
 # doctor.ps1 — quick diagnostics for common breakages
 $ErrorActionPreference = 'SilentlyContinue'
 Set-StrictMode -Version Latest

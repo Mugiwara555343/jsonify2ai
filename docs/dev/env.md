@@ -13,7 +13,7 @@ This document describes all environment variables used by jsonify2ai components.
 
 ### Service URLs
 - `QDRANT_URL`: Qdrant vector database URL (optional)
-- `OLLAMA_URL`: Ollama LLM service URL (optional)
+- `OLLAMA_HOST`: Ollama LLM service URL (optional, legacy: `OLLAMA_URL` is deprecated)
 - `WORKER_BASE`: Worker service base URL (optional)
 - `WORKER_URL`: Worker service URL (takes precedence over WORKER_BASE)
 - `DOCS_DIR`: Documents directory path (default: `./data/documents`)
@@ -44,7 +44,7 @@ This document describes all environment variables used by jsonify2ai components.
 
 ### Service URLs
 - `QDRANT_URL`: Qdrant vector database URL (default: `http://host.docker.internal:6333`)
-- `OLLAMA_URL`: Ollama LLM service URL (default: `http://host.docker.internal:11434`)
+- `OLLAMA_HOST`: Ollama LLM service URL (default: `http://host.docker.internal:11434`, legacy: `OLLAMA_URL` is deprecated)
 
 ### Collections
 - `QDRANT_COLLECTION`: Text chunks collection name (default: `jsonify2ai_chunks`)
@@ -201,7 +201,7 @@ export WORKER_CORS_ALLOWED_ORIGINS="*"
 
 # Qdrant and Ollama URLs for local development
 export QDRANT_URL="http://localhost:6333"
-export OLLAMA_URL="http://localhost:11434"
+export OLLAMA_HOST="http://localhost:11434"
 ```
 
 ### Production Setup
@@ -218,7 +218,7 @@ export API_PROXY_TIMEOUT_MS=30000
 # Database configuration
 export POSTGRES_DSN="postgres://user:pass@localhost:5432/jsonify2ai"
 export QDRANT_URL="http://qdrant:6333"
-export OLLAMA_URL="http://ollama:11434"
+export OLLAMA_HOST="http://ollama:11434"
 ```
 
 ### Docker Compose
@@ -290,7 +290,7 @@ The `scripts/start_all.ps1` script automatically ensures `API_AUTH_TOKEN` exists
 .\scripts\start_all.ps1
 
 # Or manually ensure token exists
-.\scripts\ensure_api_token.ps1
+.\scripts\ensure_tokens.ps1
 ```
 
 The API server reads `API_AUTH_TOKEN` from `.env` and requires it for protected endpoints (`/upload`, `/search`, `/ask`, `/export`).

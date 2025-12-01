@@ -51,7 +51,7 @@ func Load() *Config {
 		Port:        getenv("PORT_API", "8082"),
 		PostgresDSN: getenv("POSTGRES_DSN", ""),
 		QdrantURL:   getenv("QDRANT_URL", ""),
-		OllamaURL:   getenv("OLLAMA_URL", ""),
+		OllamaURL:   getEnvAny([]string{"OLLAMA_HOST", "OLLAMA_URL"}), // OLLAMA_HOST preferred, OLLAMA_URL legacy fallback
 		WorkerBase:  getenv("WORKER_BASE", ""),
 		DocsDir:     getenv("DOCS_DIR", "./data/documents"),
 
