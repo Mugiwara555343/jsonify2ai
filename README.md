@@ -52,6 +52,8 @@
 3. **Open the web UI:**
    - http://localhost:5173
 
+**💡 Quick demo:** Click **"Load demo data"** in the web UI to instantly load 3 example documents, or follow the step-by-step guide in [DEMO_SCRIPT.md](DEMO_SCRIPT.md).
+
 4. **Upload a file:**
    - Click **Browse…** and pick a file
    - ✅ Markdown / text (.md, .txt)

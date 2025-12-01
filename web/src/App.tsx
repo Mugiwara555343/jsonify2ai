@@ -140,6 +140,7 @@ function App() {
   const [ans, setAns] = useState<AskResp | null>(null)
   const [askError, setAskError] = useState<string | null>(null)
   const [uploadBusy, setUploadBusy] = useState(false)
+  const [demoLoading, setDemoLoading] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [lastDoc, setLastDoc] = useState<{id:string, kind:string} | null>(null)
   const [docs, setDocs] = useState<Document[]>([])
@@ -295,6 +296,177 @@ function App() {
     }
   }
 
+  async function loadDemoData() {
+    setDemoLoading(true);
+    const demoFiles = [
+      {
+        name: 'demo_qdrant.md',
+        content: `# Qdrant in jsonify2ai
+
+Qdrant is the vector database used by jsonify2ai for semantic search.
+
+## Key Features
+
+- **768-dimensional vectors**: All text chunks are embedded into 768-dim vectors using nomic-embed-text
+- **Semantic search**: Enables natural language queries that find relevant content by meaning, not just keywords
+- **Collection structure**:
+  - \`jsonify2ai_chunks_768\` for text/PDF/audio chunks
+  - \`jsonify2ai_images_768\` for image embeddings (when IMAGES_CAPTION is enabled)
+
+## How it works
+
+When you upload a file, the worker:
+1. Splits content into chunks
+2. Generates embeddings (768-dim vectors)
+3. Stores chunks + vectors in Qdrant
+4. Makes them searchable via the /search and /ask endpoints
+
+The Search and Ask features both query the same Qdrant collections to find relevant chunks.`
+      },
+      {
+        name: 'demo_export.md',
+        content: `# Export Features
+
+jsonify2ai provides two export formats for your indexed documents.
+
+## Export JSON
+
+Downloads a JSONL file containing all chunks for a document:
+- Each line is one JSON object
+- Fields include: \`id\`, \`document_id\`, \`text\`, \`path\`, \`idx\`, \`meta\`
+- Use this to inspect the exact data stored in Qdrant
+
+## Export ZIP
+
+Downloads a ZIP archive containing:
+- \`export_<document_id>.jsonl\` - All chunks (same as JSON export)
+- \`manifest.json\` - Document metadata (paths, counts, kinds)
+- Original source file (if available in the data directory)
+
+The manifest.json includes:
+- \`document_id\`: Unique identifier
+- \`paths\`: Array of source file paths
+- \`kinds\`: Array of content types (text, image, etc.)
+- \`counts\`: Object with chunk/image counts per kind
+
+Use Export ZIP when you need a complete snapshot of a document with its metadata.`
+      },
+      {
+        name: 'demo_env_toggles.md',
+        content: `# Environment Toggles
+
+jsonify2ai supports several environment variables to control behavior during development and testing.
+
+## Embedding Toggles
+
+- **EMBED_DEV_MODE**: Set to \`1\` to skip embeddings and use dummy vectors. Useful for testing without running embedding models.
+- **EMBEDDINGS_MODEL**: Model name for embeddings (default: \`nomic-embed-text\`)
+
+## Audio Toggles
+
+- **AUDIO_DEV_MODE**: Set to \`1\` to skip audio transcription. Audio files will be ingested but not transcribed.
+
+## Image Toggles
+
+- **IMAGES_CAPTION**: Set to \`1\` to enable image captioning. When enabled, images are processed and stored in \`jsonify2ai_images_768\` collection.
+
+## LLM Toggles
+
+- **LLM_PROVIDER**: Set to \`ollama\` to enable LLM synthesis for Ask feature
+- **OLLAMA_HOST**: Ollama service URL (default: \`http://localhost:11434\`)
+- **OLLAMA_MODEL**: Model name for Ask synthesis (default: \`qwen2.5:3b-instruct-q4_K_M\`)
+- **ASK_MODE**: Control Ask behavior (\`search\` or \`llm\`)
+
+## Auth Toggles
+
+- **AUTH_MODE**: \`local\` (no auth) or \`strict\` (requires tokens)
+
+These toggles make it easy to test different features without changing code.`
+      }
+    ];
+
+    try {
+      const s0 = await fetchStatus().catch(() => ({counts:{total:0}}))
+      const baseTotal = s0?.counts?.total ?? 0
+      let lastDocId: string | undefined = undefined;
+      let currentTotal = baseTotal;
+
+      for (let i = 0; i < demoFiles.length; i++) {
+        const demo = demoFiles[i];
+        showToast(`Loading demo doc ${i + 1}/${demoFiles.length}...`);
+
+        // Create Blob and File object
+        const blob = new Blob([demo.content], { type: 'text/markdown' });
+        const file = new File([blob], demo.name, { type: 'text/markdown' });
+
+        // Upload using existing uploadFile function
+        const data = await uploadFile(file);
+
+        // Check for upload errors
+        if (data?.ok === false || data?.error) {
+          const errorMsg = data?.error || String(data);
+          throw new Error(`Demo upload failed: ${errorMsg}`);
+        }
+
+        const docId = data?.document_id as string | undefined;
+        if (docId) {
+          lastDocId = docId;
+        }
+
+        // Wait for processing before next upload
+        if (i < demoFiles.length - 1) {
+          const done = await waitForProcessed(currentTotal, 20000, 4000);
+          if (done.ok) {
+            currentTotal = done.total;
+          }
+        }
+      }
+
+      // Wait for final processing
+      const finalDone = await waitForProcessed(currentTotal, 20000, 4000);
+      if (finalDone.ok) {
+        showToast("Demo data loaded ✓");
+      } else {
+        showToast("Demo data uploaded (processing may still be in progress)", true);
+      }
+
+      // Refresh documents list
+      const refreshedDocs = await loadDocuments();
+
+      // Auto-preview the last uploaded doc
+      if (lastDocId) {
+        const uploadedDoc = refreshedDocs.find(d => d.document_id === lastDocId);
+        if (uploadedDoc) {
+          const collection = collectionForDoc(uploadedDoc);
+          const requestedDocId = uploadedDoc.document_id;
+          currentFetchDocIdRef.current = requestedDocId;
+          setPreviewDocId(requestedDocId);
+          setPreviewLoading(true);
+          setPreviewError(null);
+          setPreviewLines(null);
+          try {
+            const result = await fetchJsonPreview(requestedDocId, collection, 5);
+            if (currentFetchDocIdRef.current === requestedDocId) {
+              setPreviewLines(result.lines);
+            }
+          } catch (err: any) {
+            if (currentFetchDocIdRef.current === requestedDocId) {
+              setPreviewError(err?.message || 'Failed to load JSON preview');
+            }
+          } finally {
+            if (currentFetchDocIdRef.current === requestedDocId) {
+              setPreviewLoading(false);
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      showToast(`Demo load failed: ${err?.message || err}. Check API/worker logs for details.`, true);
+    } finally {
+      setDemoLoading(false);
+    }
+  }
+
   async function onUploadChange(e: React.ChangeEvent<HTMLInputElement>) {
     if (!e.target.files?.length) return
     const file = e.target.files[0]
@@ -388,6 +560,23 @@ function App() {
       {/* Theme controls */}
       <div style={{ marginTop: 10 }}>
         <ThemeControls />
+      </div>
+
+      {/* What you're seeing info panel */}
+      <div style={{ marginTop: 16, padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#f9fafb' }}>
+        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>What you're seeing</div>
+        <ul style={{ margin: 0, paddingLeft: 20, fontSize: 12, lineHeight: 1.6, color: '#374151' }}>
+          <li style={{ marginBottom: 4 }}>Uploads are normalized into a unified JSONL schema (chunks).</li>
+          <li style={{ marginBottom: 4 }}>Chunks are embedded (768-dim vectors) and stored in Qdrant for semantic search.</li>
+          <li style={{ marginBottom: 4 }}>Search + Ask read from the same Qdrant collection.</li>
+          <li style={{ marginBottom: 4 }}>The JSON preview and export buttons show you exactly what's in the index.</li>
+          <li style={{ marginBottom: 4 }}>If LLM is enabled, 'Answer' is synthesized locally using your chunks as context.</li>
+          {s && s.counts && (
+            <li style={{ marginBottom: 4, marginTop: 8, fontWeight: 500 }}>
+              Currently indexed: {s.counts.total || (s.counts.chunks + s.counts.images)} chunks
+            </li>
+          )}
+        </ul>
       </div>
 
       {/* Telemetry Chips */}
@@ -496,8 +685,9 @@ function App() {
         </div>
       )}
       <div className="mb-4 flex items-center gap-3">
-        <input type="file" onChange={onUploadChange} disabled={uploadBusy} />
+        <input type="file" onChange={onUploadChange} disabled={uploadBusy || demoLoading} />
         {uploadBusy && <span className="text-sm opacity-70">Uploading…</span>}
+        {demoLoading && <span className="text-sm opacity-70">Loading demo data…</span>}
         {toast && (
           <span
             className="text-sm"
@@ -508,6 +698,23 @@ function App() {
             {toast}
           </span>
         )}
+        <button
+          onClick={loadDemoData}
+          disabled={uploadBusy || demoLoading}
+          title="Inject a few tiny example docs."
+          style={{
+            fontSize: 12,
+            padding: '8px 12px',
+            borderRadius: 6,
+            border: '1px solid #ddd',
+            background: demoLoading ? '#f3f4f6' : '#fff',
+            color: demoLoading ? '#9ca3af' : '#1976d2',
+            cursor: demoLoading ? 'not-allowed' : 'pointer',
+            opacity: (uploadBusy || demoLoading) ? 0.6 : 1
+          }}
+        >
+          Load demo data
+        </button>
         <div style={{ display: 'flex', gap: 8 }}>
           {(() => {
             const previewedDoc = previewDocId ? docs.find(d => d.document_id === previewDocId) : null;
