@@ -25,10 +25,10 @@
 
 ## Why Local-First?
 
-- **Privacy**: Your data never leaves your machine—no cloud uploads, no third-party APIs
+- **Privacy**: Your data never leaves your machine, no cloud uploads, no third-party APIs
 - **Control**: Full ownership of your documents, embeddings, and search indices
-- **Cost**: Zero API fees—runs entirely on your hardware
-- **Speed**: No network latency—instant search and processing
+- **Cost**: Zero API fees, runs entirely on your hardware
+- **Speed**: No network latency, instant search and processing
 - **Compliance**: Perfect for sensitive data, research, or enterprise environments
 
 ---
