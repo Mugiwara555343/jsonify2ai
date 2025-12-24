@@ -4,6 +4,11 @@ import { applyTheme, loadTheme } from "./theme";
 import './App.css'
 import { uploadFile, doSearch, askQuestion, fetchStatus, fetchDocuments, exportJson, exportZip, apiRequest, fetchJsonPreview, collectionForKind } from './api'
 import { API_BASE } from './api';
+import QuickActions from './QuickActions';
+import AssistantOutput from './AssistantOutput';
+import LLMOnboardingPanel from './LLMOnboardingPanel';
+
+const BUILD_STAMP = "beast-2 / 2025-12-23 / commit 39ed9bb";
 
 type Status = {
   ok: boolean;
@@ -151,15 +156,44 @@ function App() {
   const [previewLines, setPreviewLines] = useState<string[] | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
+  const [quickActionResult, setQuickActionResult] = useState<AskResp | null>(null)
+  const [quickActionsLoading, setQuickActionsLoading] = useState<string | null>(null)
+  const [quickActionName, setQuickActionName] = useState<string | null>(null)
+  const [quickActionError, setQuickActionError] = useState<string | null>(null)
   const currentFetchDocIdRef = useRef<string | null>(null)
   const askInputRef = useRef<HTMLInputElement>(null)
 
   // Apply saved theme on mount
   useEffect(() => { try { applyTheme(loadTheme()); } catch {} }, [])
 
+  // Log build stamp on app start
+  useEffect(() => {
+    console.log("[jsonify2ai] BUILD:", BUILD_STAMP);
+  }, [])
+
   function showToast(msg: string, isError = false) {
     setToast(msg);
     setTimeout(() => setToast(null), isError ? 5000 : 3000);
+  }
+
+  const handleQuickActionComplete = (result: AskResp, actionName: string) => {
+    setQuickActionResult(result);
+    setQuickActionName(actionName);
+    setQuickActionsLoading(null);
+    setQuickActionError(null); // Clear any previous errors on success
+  }
+
+  const handleQuickActionError = (error: string, actionName: string) => {
+    // If error is empty string, clear the error state (used when starting new action)
+    if (error === '') {
+      setQuickActionError(null);
+      setQuickActionResult(null);
+      return;
+    }
+    setQuickActionError(error);
+    setQuickActionName(actionName);
+    setQuickActionsLoading(null);
+    setQuickActionResult(null); // Clear any previous results on error
   }
 
   useEffect(() => {
@@ -542,7 +576,13 @@ These toggles make it easy to test different features without changing code.`
 
   return (
     <div style={{ fontFamily: 'ui-sans-serif', padding: 24, maxWidth: 720, margin: '0 auto', background: 'var(--bg)', color: 'var(--fg)', minHeight: '100vh' }}>
-      <h1 style={{ fontSize: 24, marginBottom: 12 }}>jsonify2ai — Status <HealthChip /><LLMChip status={s} /></h1>
+      <h1 style={{ fontSize: 24, marginBottom: 8 }}>jsonify2ai — Status <HealthChip /><LLMChip status={s} /></h1>
+      <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 8, fontStyle: 'italic' }}>
+        Upload files → JSONL chunks → semantic search → exports
+      </div>
+      <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 16, fontFamily: 'monospace' }}>
+        Build: {BUILD_STAMP}
+      </div>
       {!s && <div>Loading…</div>}
       {s && (
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>
@@ -772,7 +812,17 @@ These toggles make it easy to test different features without changing code.`
       <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4 }}>
         You can also drop files into data/dropzone/ on disk; the watcher will ingest them automatically.
       </div>
-      <div style={{ marginTop: 24 }}>
+      <LLMOnboardingPanel
+        status={s}
+        onStatusRefresh={loadStatus}
+      />
+      <div style={{
+        marginTop: 24,
+        padding: 20,
+        border: '1px solid #e5e7eb',
+        borderRadius: 12,
+        background: '#fafafa',
+      }}>
         <h2 style={{ fontSize: 18, marginBottom: 8 }}>Ask</h2>
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>Try these questions:</div>
@@ -843,7 +893,75 @@ These toggles make it easy to test different features without changing code.`
             {askLoading ? 'Asking...' : 'Ask'}
           </button>
         </div>
-        {askLoading && (
+        {(() => {
+          const llm = s?.llm;
+          const provider = llm?.provider || 'none';
+          const reachable = llm?.reachable === true;
+
+          if (!llm || provider === 'none') {
+            return (
+              <div style={{
+                marginTop: 8,
+                padding: 8,
+                fontSize: 12,
+                color: '#6b7280',
+                fontStyle: 'italic',
+              }}>
+                Synthesis is optional. You'll still get top matching sources + exports.
+              </div>
+            );
+          } else if (provider === 'ollama' && !reachable) {
+            return (
+              <div style={{
+                marginTop: 8,
+                padding: 8,
+                fontSize: 12,
+                color: '#92400e',
+                background: '#fef3c7',
+                borderRadius: 6,
+                border: '1px solid #fde68a',
+              }}>
+                Ollama configured but unreachable. Open the panel for steps.
+              </div>
+            );
+          } else if (provider === 'ollama' && reachable) {
+            return (
+              <div style={{
+                marginTop: 8,
+                padding: 8,
+                fontSize: 12,
+                color: '#0369a1',
+                background: '#e0f2fe',
+                borderRadius: 6,
+                border: '1px solid #bae6fd',
+              }}>
+                Answer generated locally with Ollama. Sources below.
+              </div>
+            );
+          }
+          return null;
+        })()}
+        <QuickActions
+          previewDocId={previewDocId}
+          documents={docs}
+          status={s}
+          onActionComplete={handleQuickActionComplete}
+          onActionError={handleQuickActionError}
+          loading={quickActionsLoading}
+          setLoading={setQuickActionsLoading}
+          showToast={showToast}
+        />
+        <AssistantOutput
+          result={quickActionResult}
+          status={s}
+          loading={quickActionsLoading !== null}
+          error={quickActionError}
+          actionName={quickActionName || undefined}
+          showToast={showToast}
+        />
+      </div>
+      {/* Existing Ask results (for backward compatibility) */}
+      {askLoading && (
           <div style={{ marginTop: 12, padding: 12, color: '#666', fontSize: 14 }}>
             Searching your data…
           </div>
@@ -933,147 +1051,6 @@ These toggles make it easy to test different features without changing code.`
             </div>
           </div>
         )}
-      </div>
-      <div style={{ marginTop: 24, display: 'flex', gap: 8 }}>
-              if (!askQ.trim()) {
-                showToast("Please enter a question", true);
-                return;
-              }
-
-              setAskLoading(true);
-              setAskError(null);
-              try {
-                const j: AskResp = await askQuestion(askQ, 6);
-                if (j.ok === false) {
-                  const errorMsg = j.error === "rate_limited"
-                    ? "Rate limited — try again in a few seconds."
-                    : `Ask failed: ${j.error || 'Unknown error'}`;
-                  setAskError(errorMsg);
-                  setAns(null);
-                  if (j.error === "rate_limited") {
-                    showToast(errorMsg, true);
-                  }
-                } else {
-                  setAns(j);
-                  setAskError(null);
-                }
-              } catch (err: any) {
-                // Check if it's a 429 rate limit error
-                const errorMsg = (err?.status === 429 || err?.errorData?.error === "rate_limited")
-                  ? "Rate limited — try again in a few seconds."
-                  : `Ask error: ${err?.message || err}`;
-                setAskError(errorMsg);
-                setAns(null);
-                if (err?.status === 429 || err?.errorData?.error === "rate_limited") {
-                  showToast(errorMsg, true);
-                }
-              } finally {
-                setAskLoading(false);
-              }
-            }}
-            disabled={askLoading}
-            style={{
-              padding: '12px 16px',
-              borderRadius: 8,
-              border: '1px solid #ddd',
-              opacity: askLoading ? 0.6 : 1,
-              cursor: askLoading ? 'not-allowed' : 'pointer'
-            }}
-          >
-            {askLoading ? 'Asking...' : 'Ask'}
-          </button>
-        </div>
-        {askLoading && (
-          <div style={{ marginTop: 12, padding: 12, color: '#666', fontSize: 14 }}>
-            Searching your data…
-          </div>
-        )}
-        {askError && (
-          <div style={{ marginTop: 12, padding: 12, border: '1px solid #fecaca', borderRadius: 8, background: '#fef2f2', color: '#dc2626', fontSize: 14 }}>
-            {askError}
-          </div>
-        )}
-        {!askLoading && !askError && !ans && (
-          <div style={{ marginTop: 12, padding: 12, color: '#999', fontSize: 13, fontStyle: 'italic' }}>
-            Run a question to see answers and sources here.
-          </div>
-        )}
-        {!askLoading && ans && (
-          <div style={{ marginTop: 12, padding: 12, border: '1px solid #eee', borderRadius: 10 }}>
-            {(ans.final && ans.final.trim()) || (ans.answer && ans.answer.trim()) ? (
-              <div style={{ marginBottom: 16, padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fafafa' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <div style={{ fontWeight: 600, fontSize: 16 }}>Answer</div>
-                  {s && s.llm?.provider === "ollama" && s.llm?.reachable === true ? (
-                    <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 999, background: '#eef2ff', color: '#3730a3' }}>local (ollama)</span>
-                  ) : (
-                    <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 999, background: '#f3f4f6', color: '#6b7280' }}>Top matches below</span>
-                  )}
-                </div>
-                <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: 14 }}>
-                  {ans.final && ans.final.trim() ? ans.final : (ans.answer || '')}
-                </div>
-              </div>
-            ) : null}
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 12 }}>Sources</div>
-              {(() => {
-                const sources = ans.sources || ans.answers || [];
-                if (sources.length === 0) {
-                  return (
-                    <div style={{ color: '#666', fontSize: 14, padding: 12, background: '#f9fafb', borderRadius: 6 }}>
-                      No matching snippets yet. Try a different query or upload more files.
-                    </div>
-                  );
-                }
-                return (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    {sources.map((h, i) => {
-                      const filename = h.path ? h.path.split('/').pop() || h.path : (h.id || `Source ${i + 1}`);
-                      const docId = h.document_id ? h.document_id.substring(0, 12) : null;
-                      const snippet = h.text || h.caption || '';
-                      const score = h.score !== undefined ? h.score : null;
-
-                      return (
-                        <div key={i} style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                            <span style={{ fontWeight: 500, fontSize: 13 }}>{filename}</span>
-                            {docId && (
-                              <code style={{ fontSize: 11, fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
-                                {docId}...
-                              </code>
-                            )}
-                            {score !== null && (
-                              <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: '#f0f9ff', color: '#0369a1' }}>
-                                score: {score.toFixed(2)}
-                              </span>
-                            )}
-                          </div>
-                          {snippet && (
-                            <div style={{
-                              fontSize: 13,
-                              lineHeight: 1.5,
-                              color: '#374151',
-                              fontFamily: 'ui-monospace, monospace',
-                              background: '#f9fafb',
-                              padding: 8,
-                              borderRadius: 4,
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-word'
-                            }}>
-                              {snippet}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
-        )}
-      </div>
       <div style={{ marginTop: 24, display: 'flex', gap: 8 }}>
         <input
           value={q}

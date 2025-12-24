@@ -49,6 +49,8 @@ This project is meant to feel like a small product: clone → start → click th
 
 ## Quick Start (Local Demo)
 
+**Works without an LLM (search + export).** The app provides semantic search and exports out of the box. LLM synthesis is optional and only enhances the "Ask" feature with generated answers.
+
 1. **Clone and enter the repo:**
    ```bash
    git clone https://github.com/Mugiwara555343/jsonify2ai.git
@@ -93,6 +95,47 @@ This project is meant to feel like a small product: clone → start → click th
      - **Export JSON** → downloads `chunks.jsonl` or `images.jsonl` (all chunks for a document)
      - **Export ZIP** → downloads ZIP with `manifest.json` + JSONL + source file (when available)
    - The manifest.json shows document metadata (paths, counts, kinds)
+
+### Optional: Local LLM
+
+To enable LLM synthesis for the "Ask" feature:
+
+1. **Install Ollama:**
+   - Download from [ollama.com](https://ollama.com) and install on your system
+
+2. **Pull a model:**
+   ```bash
+   ollama pull qwen2.5:3b-instruct-q4_K_M
+   ```
+   Or use any other model: `ollama pull llama2`, `ollama pull mistral`, etc.
+
+3. **Set environment variables:**
+   ```powershell
+   # Windows (PowerShell)
+   $env:LLM_PROVIDER="ollama"
+   $env:OLLAMA_HOST="http://host.docker.internal:11434"
+   $env:OLLAMA_MODEL="qwen2.5:3b-instruct-q4_K_M"
+   ```
+   ```bash
+   # macOS / Linux
+   export LLM_PROVIDER=ollama
+   export OLLAMA_HOST=http://host.docker.internal:11434
+   export OLLAMA_MODEL=qwen2.5:3b-instruct-q4_K_M
+   ```
+   Or add to `.env` file:
+   ```
+   LLM_PROVIDER=ollama
+   OLLAMA_HOST=http://host.docker.internal:11434
+   OLLAMA_MODEL=qwen2.5:3b-instruct-q4_K_M
+   ```
+   Then restart: `docker compose restart worker`
+
+**UI chip states:**
+- **LLM: off** (gray) - No LLM configured, search-only mode
+- **LLM: offline** (yellow) - Ollama configured but unreachable
+- **LLM: on (ollama)** (blue) - Ollama reachable, synthesis enabled
+
+The app works perfectly without an LLM—you'll still get semantic search results and exports. LLM synthesis is purely optional.
 
 ## UI preview
 

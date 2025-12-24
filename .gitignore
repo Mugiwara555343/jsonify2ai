@@ -26,6 +26,9 @@ web/package-lock.json
 web/pnpm-lock.yaml
 web/yarn.lock
 web/.eslintcache
+# TypeScript emit artifacts (Vite uses TS sources directly)
+web/src/**/*.js
+web/src/**/*.js.map
 
 # Python packaging/build
 build/

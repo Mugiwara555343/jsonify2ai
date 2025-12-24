@@ -130,8 +130,14 @@ export async function doSearch(q: string, kind: string, k = 5): Promise<any> {
   }
 }
 
-export async function askQuestion(query: string, k = 6): Promise<any> {
-  const r = await apiRequest("/ask", {
+export async function askQuestion(query: string, k = 6, documentId?: string): Promise<any> {
+  // Build URL with optional document_id query parameter
+  let url = "/ask";
+  if (documentId) {
+    url += `?document_id=${encodeURIComponent(documentId)}`;
+  }
+
+  const r = await apiRequest(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ query, k })

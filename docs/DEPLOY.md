@@ -26,6 +26,22 @@
 
 - Docker service: `OLLAMA_HOST=http://ollama:11434`
 
+## Optional: Local LLM
+
+The app works without an LLM—semantic search and exports are fully functional. LLM synthesis is optional and only enhances the "Ask" feature.
+
+To enable:
+
+1. Install Ollama from [ollama.com](https://ollama.com)
+2. Pull a model: `ollama pull qwen2.5:3b-instruct-q4_K_M`
+3. Set environment variables:
+   - `LLM_PROVIDER=ollama`
+   - `OLLAMA_HOST=http://host.docker.internal:11434` (host install) or `http://ollama:11434` (Docker service)
+   - `OLLAMA_MODEL=qwen2.5:3b-instruct-q4_K_M`
+4. Restart worker: `docker compose restart worker`
+
+See [README.md](../README.md#optional-local-llm) for full setup instructions and UI chip states.
+
 ## Smoke test
 
 **PowerShell**
