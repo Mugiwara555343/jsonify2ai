@@ -95,6 +95,28 @@ export async function uploadFile(file: File): Promise<any> {
   return postUpload(fd);
 }
 
+// Helper to parse skip reasons from error responses
+function parseSkipReason(errorData: any, status: number): string | undefined {
+  if (status === 400) {
+    const detail = errorData?.detail_snippet || errorData?.detail || errorData?.error || "";
+    const detailLower = detail.toLowerCase();
+
+    if (detailLower.includes("ignored extension") || detailLower.includes("unsupported")) {
+      return "unsupported_extension";
+    }
+    if (detailLower.includes("failed to parse") || detailLower.includes("extraction failed")) {
+      return "extraction_failed";
+    }
+    if (detailLower.includes("no content") || detailLower.includes("empty")) {
+      return "empty_file";
+    }
+    if (detailLower.includes("worker_reject") || detailLower.includes("processing")) {
+      return "processing_failed";
+    }
+  }
+  return undefined;
+}
+
 // Explicit upload helper that includes Authorization when token is available
 export async function postUpload(fd: FormData): Promise<any> {
   // Use apiRequest for consistency - do NOT set Content-Type header
@@ -106,10 +128,52 @@ export async function postUpload(fd: FormData): Promise<any> {
   }, true);
 
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`/upload failed: ${res.status} ${text}`);
+    let errorData: any = {};
+    try {
+      const text = await res.text();
+      try {
+        errorData = JSON.parse(text);
+      } catch {
+        errorData = { error: text };
+      }
+    } catch {
+      errorData = { error: `HTTP ${res.status}` };
+    }
+
+    // Check if this is a skip case (400 status with specific error patterns)
+    const skipReason = parseSkipReason(errorData, res.status);
+    if (skipReason) {
+      return {
+        ok: true,
+        accepted: false,
+        skipped: true,
+        skip_reason: skipReason,
+        details: errorData?.detail_snippet || errorData?.detail || errorData?.error || "File was skipped"
+      };
+    }
+
+    // Otherwise, throw error
+    throw new Error(`/upload failed: ${res.status} ${errorData?.error || errorData?.detail || JSON.stringify(errorData)}`);
   }
-  return res.json();
+
+  const data = await res.json();
+
+  // Normalize successful response
+  if (data.ok && data.document_id) {
+    return {
+      ok: true,
+      accepted: true,
+      skipped: false,
+      document_id: data.document_id,
+      chunks: data.chunks || data.upserted || 0,
+      collection: data.collection,
+      embedded: data.embedded,
+      upserted: data.upserted
+    };
+  }
+
+  // Return as-is for backward compatibility
+  return data;
 }
 
 export async function doSearch(q: string, kind: string, k = 5): Promise<any> {

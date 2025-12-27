@@ -98,6 +98,29 @@ async function waitForProcessed(oldTotal: number, timeoutMs = 20000, intervalMs 
   return { ok: false };
 }
 
+async function waitForDocumentIndexed(document_id: string, timeoutMs = 15000): Promise<{ok: boolean, chunks?: number}> {
+  const t0 = Date.now();
+  const pollInterval = 1500; // Poll every 1.5 seconds
+  while (Date.now() - t0 < timeoutMs) {
+    if (!visible()) { await sleep(500); continue; }
+    try {
+      const docs = await fetchDocuments();
+      const doc = docs.find((d: Document) => d.document_id === document_id);
+      if (doc) {
+        // Calculate total chunks from counts object
+        const totalChunks = Object.values(doc.counts || {}).reduce((sum: number, count: unknown) => sum + (typeof count === 'number' ? count : 0), 0);
+        if (totalChunks > 0) {
+          return { ok: true, chunks: totalChunks };
+        }
+      }
+    } catch (err) {
+      // Continue polling on error
+    }
+    await sleep(pollInterval);
+  }
+  return { ok: false };
+}
+
 
 async function downloadZip(documentId: string, collection: string = 'jsonify2ai_chunks') {
   try {
@@ -160,6 +183,14 @@ function App() {
   const [quickActionsLoading, setQuickActionsLoading] = useState<string | null>(null)
   const [quickActionName, setQuickActionName] = useState<string | null>(null)
   const [quickActionError, setQuickActionError] = useState<string | null>(null)
+  const [uploadResult, setUploadResult] = useState<{
+    filename: string;
+    status: 'uploading' | 'processed' | 'skipped' | 'error' | 'indexing';
+    document_id?: string;
+    chunks?: number;
+    skip_reason?: string;
+    error?: string;
+  } | null>(null)
   const currentFetchDocIdRef = useRef<string | null>(null)
   const askInputRef = useRef<HTMLInputElement>(null)
 
@@ -423,11 +454,18 @@ These toggles make it easy to test different features without changing code.`
       const s0 = await fetchStatus().catch(() => ({counts:{total:0}}))
       const baseTotal = s0?.counts?.total ?? 0
       let lastDocId: string | undefined = undefined;
+      let lastFileName: string | undefined = undefined;
       let currentTotal = baseTotal;
 
       for (let i = 0; i < demoFiles.length; i++) {
         const demo = demoFiles[i];
         showToast(`Loading demo doc ${i + 1}/${demoFiles.length}...`);
+
+        // Update upload result for current file
+        setUploadResult({
+          filename: demo.name,
+          status: 'uploading'
+        });
 
         // Create Blob and File object
         const blob = new Blob([demo.content], { type: 'text/markdown' });
@@ -436,15 +474,42 @@ These toggles make it easy to test different features without changing code.`
         // Upload using existing uploadFile function
         const data = await uploadFile(file);
 
+        // Handle skipped files
+        if (data?.skipped === true || (data?.ok === true && data?.accepted === false)) {
+          const skipReason = data?.skip_reason || "unknown";
+          const details = data?.details || "File was skipped";
+          setUploadResult({
+            filename: demo.name,
+            status: 'skipped',
+            skip_reason: skipReason,
+            error: details
+          });
+          throw new Error(`Demo upload skipped: ${details}`);
+        }
+
         // Check for upload errors
         if (data?.ok === false || data?.error) {
           const errorMsg = data?.error || String(data);
+          setUploadResult({
+            filename: demo.name,
+            status: 'error',
+            error: errorMsg
+          });
           throw new Error(`Demo upload failed: ${errorMsg}`);
         }
 
         const docId = data?.document_id as string | undefined;
         if (docId) {
           lastDocId = docId;
+          lastFileName = demo.name;
+
+          // Update status to indexing
+          setUploadResult({
+            filename: demo.name,
+            status: 'indexing',
+            document_id: docId,
+            chunks: data?.chunks || 0
+          });
         }
 
         // Wait for processing before next upload
@@ -456,12 +521,39 @@ These toggles make it easy to test different features without changing code.`
         }
       }
 
-      // Wait for final processing
-      const finalDone = await waitForProcessed(currentTotal, 20000, 4000);
-      if (finalDone.ok) {
-        showToast("Demo data loaded ✓");
+      // Wait for final processing and check indexing status
+      if (lastDocId && lastFileName) {
+        setUploadResult({
+          filename: lastFileName,
+          status: 'indexing',
+          document_id: lastDocId
+        });
+
+        const indexed = await waitForDocumentIndexed(lastDocId, 15000);
+
+        if (indexed.ok && indexed.chunks !== undefined) {
+          setUploadResult({
+            filename: lastFileName,
+            status: 'processed',
+            document_id: lastDocId,
+            chunks: indexed.chunks
+          });
+          showToast("Demo data loaded ✓");
+        } else {
+          setUploadResult({
+            filename: lastFileName,
+            status: 'indexing',
+            document_id: lastDocId
+          });
+          showToast("Demo data uploaded (still indexing…)", true);
+        }
       } else {
-        showToast("Demo data uploaded (processing may still be in progress)", true);
+        const finalDone = await waitForProcessed(currentTotal, 20000, 4000);
+        if (finalDone.ok) {
+          showToast("Demo data loaded ✓");
+        } else {
+          showToast("Demo data uploaded (processing may still be in progress)", true);
+        }
       }
 
       // Refresh documents list
@@ -495,7 +587,15 @@ These toggles make it easy to test different features without changing code.`
         }
       }
     } catch (err: any) {
-      showToast(`Demo load failed: ${err?.message || err}. Check API/worker logs for details.`, true);
+      const errorMsg = err?.message || String(err);
+      if (uploadResult) {
+        setUploadResult({
+          ...uploadResult,
+          status: 'error',
+          error: errorMsg
+        });
+      }
+      showToast(`Demo load failed: ${errorMsg}. Check API/worker logs for details.`, true);
     } finally {
       setDemoLoading(false);
     }
@@ -505,19 +605,47 @@ These toggles make it easy to test different features without changing code.`
     if (!e.target.files?.length) return
     const file = e.target.files[0]
     setUploadBusy(true)
-    try {
-      const s0 = await fetchStatus().catch(() => ({counts:{total:0}}))
-      const baseTotal = s0?.counts?.total ?? 0
 
+    // Initialize upload result state
+    setUploadResult({
+      filename: file.name,
+      status: 'uploading'
+    })
+
+    try {
       const data = await uploadFile(file);
 
-      // Check for upload errors
+      // Handle skipped files
+      if (data?.skipped === true || (data?.ok === true && data?.accepted === false)) {
+        const skipReason = data?.skip_reason || "unknown";
+        const details = data?.details || "File was skipped";
+
+        setUploadResult({
+          filename: file.name,
+          status: 'skipped',
+          skip_reason: skipReason,
+          error: details
+        });
+
+        showToast("File skipped. See upload results below.", true);
+        return;
+      }
+
+      // Handle upload errors
       if (data?.ok === false || data?.error) {
         const errorMsg = data?.error || String(data);
-        if (errorMsg.includes("skipped") || errorMsg.includes("unsupported") || errorMsg.includes("empty")) {
-          showToast("File skipped (unsupported or empty). Check worker logs for details.", true);
-          return;
+        setUploadResult({
+          filename: file.name,
+          status: 'error',
+          error: errorMsg
+        });
+
+        if (errorMsg.includes("rate_limited") || errorMsg.includes("429")) {
+          showToast("Rate limited — try again in a few seconds.", true);
+        } else {
+          showToast(`Upload failed: ${errorMsg}`, true);
         }
+        return;
       }
 
       // if API returns worker JSON, we'll have document_id and collection
@@ -525,48 +653,88 @@ These toggles make it easy to test different features without changing code.`
       const coll  = (data?.collection || "") as string;
       const kind  = coll.includes("images") ? "image" : "text"; // images vs chunks
 
-      if (docId) setLastDoc({ id: docId, kind });
-
-      const done = await waitForProcessed(baseTotal, 20000, 4000);
-      showToast(done.ok ? "Processed ✓" : "Uploaded (pending…)");
-
-      // Auto-preview: refresh documents and open preview for the uploaded document
       if (docId) {
-        const refreshedDocs = await loadDocuments();
-        // Find the document in the refreshed list
-        const uploadedDoc = refreshedDocs.find(d => d.document_id === docId);
-        if (uploadedDoc) {
-          const collection = collectionForDoc(uploadedDoc);
-          const requestedDocId = uploadedDoc.document_id;
-          currentFetchDocIdRef.current = requestedDocId;
-          setPreviewDocId(requestedDocId);
-          setPreviewLoading(true);
-          setPreviewError(null);
-          setPreviewLines(null);
-          try {
-            const result = await fetchJsonPreview(requestedDocId, collection, 5);
-            if (currentFetchDocIdRef.current === requestedDocId) {
-              setPreviewLines(result.lines);
-            }
-          } catch (err: any) {
-            if (currentFetchDocIdRef.current === requestedDocId) {
-              setPreviewError(err?.message || 'Failed to load JSON preview');
-            }
-          } finally {
-            if (currentFetchDocIdRef.current === requestedDocId) {
-              setPreviewLoading(false);
+        setLastDoc({ id: docId, kind });
+
+        // Update status to indexing
+        setUploadResult({
+          filename: file.name,
+          status: 'indexing',
+          document_id: docId,
+          chunks: data?.chunks || 0
+        });
+
+        // Poll for document indexing
+        const indexed = await waitForDocumentIndexed(docId, 15000);
+
+        if (indexed.ok && indexed.chunks !== undefined) {
+          // Document is indexed
+          setUploadResult({
+            filename: file.name,
+            status: 'processed',
+            document_id: docId,
+            chunks: indexed.chunks
+          });
+
+          showToast("Processed ✓");
+
+          // Auto-preview: refresh documents and open preview for the uploaded document
+          const refreshedDocs = await loadDocuments();
+          const uploadedDoc = refreshedDocs.find(d => d.document_id === docId);
+          if (uploadedDoc) {
+            const collection = collectionForDoc(uploadedDoc);
+            const requestedDocId = uploadedDoc.document_id;
+            currentFetchDocIdRef.current = requestedDocId;
+            setPreviewDocId(requestedDocId);
+            setPreviewLoading(true);
+            setPreviewError(null);
+            setPreviewLines(null);
+            try {
+              const result = await fetchJsonPreview(requestedDocId, collection, 5);
+              if (currentFetchDocIdRef.current === requestedDocId) {
+                setPreviewLines(result.lines);
+              }
+            } catch (err: any) {
+              if (currentFetchDocIdRef.current === requestedDocId) {
+                setPreviewError(err?.message || 'Failed to load JSON preview');
+              }
+            } finally {
+              if (currentFetchDocIdRef.current === requestedDocId) {
+                setPreviewLoading(false);
+              }
             }
           }
         } else {
-          // Document not found after refresh - might not be indexed yet
-          showToast("Uploaded, but document not yet indexed. Try Refresh documents.", true);
+          // Timeout - document not indexed yet
+          setUploadResult({
+            filename: file.name,
+            status: 'indexing',
+            document_id: docId,
+            chunks: data?.chunks || 0
+          });
+          showToast("Uploaded (still indexing…)", true);
         }
+      } else {
+        // No document_id returned - unexpected
+        setUploadResult({
+          filename: file.name,
+          status: 'error',
+          error: "Upload succeeded but no document ID returned"
+        });
+        showToast("Upload completed but document ID missing.", true);
       }
     } catch (err:any) {
-      if (err?.message?.includes("rate_limited") || err?.message?.includes("429")) {
+      const errorMsg = err?.message || String(err);
+      setUploadResult({
+        filename: file.name,
+        status: 'error',
+        error: errorMsg
+      });
+
+      if (errorMsg.includes("rate_limited") || errorMsg.includes("429")) {
         showToast("Rate limited — try again in a few seconds.", true);
       } else {
-        showToast(`Upload failed: ${err?.message || err}`, true)
+        showToast(`Upload failed: ${errorMsg}`, true);
       }
     } finally {
       setUploadBusy(false)
@@ -755,7 +923,79 @@ These toggles make it easy to test different features without changing code.`
         >
           Load demo data
         </button>
-        <div style={{ display: 'flex', gap: 8 }}>
+      </div>
+
+      {/* Upload Results Panel */}
+      {uploadResult && (
+        <div style={{
+          padding: 16,
+          borderRadius: 12,
+          boxShadow: '0 1px 4px rgba(0,0,0,.08)',
+          marginBottom: 16,
+          background: 'var(--bg)',
+          border: '1px solid rgba(0,0,0,.1)'
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, opacity: 0.7 }}>
+            Upload results
+          </div>
+          <div style={{ fontSize: 14, marginBottom: 8 }}>
+            <strong>{uploadResult.filename}</strong>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{
+              padding: '4px 8px',
+              borderRadius: 6,
+              fontSize: 12,
+              fontWeight: 500,
+              background:
+                uploadResult.status === 'processed' ? '#c6f6d5' :
+                uploadResult.status === 'uploading' ? '#dbeafe' :
+                uploadResult.status === 'indexing' ? '#fed7aa' :
+                uploadResult.status === 'skipped' ? '#fef3c7' :
+                '#fed7d7',
+              color:
+                uploadResult.status === 'processed' ? '#166534' :
+                uploadResult.status === 'uploading' ? '#1e40af' :
+                uploadResult.status === 'indexing' ? '#92400e' :
+                uploadResult.status === 'skipped' ? '#78350f' :
+                '#991b1b'
+            }}>
+              {uploadResult.status === 'processed' ? 'Processed' :
+               uploadResult.status === 'uploading' ? 'Uploading…' :
+               uploadResult.status === 'indexing' ? 'Indexing…' :
+               uploadResult.status === 'skipped' ? 'Skipped' :
+               'Error'}
+            </span>
+            {uploadResult.chunks !== undefined && uploadResult.status === 'processed' && (
+              <span style={{ fontSize: 12, opacity: 0.7 }}>
+                {uploadResult.chunks} {uploadResult.chunks === 1 ? 'chunk' : 'chunks'}
+              </span>
+            )}
+          </div>
+          {uploadResult.skip_reason && (
+            <div style={{ fontSize: 12, marginTop: 8, color: '#92400e' }}>
+              {uploadResult.skip_reason === 'unsupported_extension' && 'Unsupported file type. Try .txt/.md/.pdf/.csv/.json'}
+              {uploadResult.skip_reason === 'empty_file' && 'File is empty'}
+              {uploadResult.skip_reason === 'extraction_failed' && `Extraction failed: ${uploadResult.error || 'Check worker logs'}`}
+              {uploadResult.skip_reason === 'processing_failed' && `Processing failed: ${uploadResult.error || 'Check worker logs'}`}
+              {!['unsupported_extension', 'empty_file', 'extraction_failed', 'processing_failed'].includes(uploadResult.skip_reason) &&
+                `Skipped: ${uploadResult.error || uploadResult.skip_reason}`}
+            </div>
+          )}
+          {uploadResult.error && uploadResult.status === 'error' && (
+            <div style={{ fontSize: 12, marginTop: 8, color: '#dc2626' }}>
+              Upload failed: {uploadResult.error}
+            </div>
+          )}
+          {uploadResult.status === 'indexing' && (
+            <div style={{ fontSize: 12, marginTop: 8, color: '#92400e', fontStyle: 'italic' }}>
+              Indexing… try Refresh documents
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8 }}>
           {(() => {
             const previewedDoc = previewDocId ? docs.find(d => d.document_id === previewDocId) : null;
             const isEnabled = previewedDoc !== null;
@@ -805,7 +1045,6 @@ These toggles make it easy to test different features without changing code.`
             );
           })()}
         </div>
-      </div>
       <div style={{ fontSize: 11, opacity: 0.6, marginTop: 8 }}>
         Works best with: .md, .txt, .pdf, .csv, .json. Other formats may be skipped by the worker.
       </div>
