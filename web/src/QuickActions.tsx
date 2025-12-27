@@ -51,6 +51,8 @@ type QuickActionsProps = {
   loading: string | null;
   setLoading: (actionName: string | null) => void;
   showToast: (msg: string, isError?: boolean) => void;
+  activeDocId: string | null;
+  askScope: 'doc' | 'all';
 };
 
 export default function QuickActions({
@@ -62,32 +64,46 @@ export default function QuickActions({
   loading,
   setLoading,
   showToast,
+  activeDocId,
+  askScope,
 }: QuickActionsProps) {
   const getTargetDocument = (): Document | null => {
-    // Primary: Use previewDocId if available and document exists
+    // If scope is "all", return null (no document targeting)
+    if (askScope === 'all') {
+      return null;
+    }
+    // If scope is "doc", only return doc if explicitly selected (no fallback)
+    // Priority 1: previewDocId if available and document exists
     if (previewDocId) {
       const doc = documents.find((d) => d.document_id === previewDocId);
       if (doc) return doc;
     }
-    // Fallback: Use most recent document (first in list)
-    if (documents.length > 0) {
-      return documents[0];
+    // Priority 2: activeDocId if provided and document exists
+    if (activeDocId) {
+      const doc = documents.find((d) => d.document_id === activeDocId);
+      if (doc) return doc;
     }
+    // No fallback when scope is 'doc' - require explicit selection
     return null;
   };
 
   const handleAction = async (actionName: string, prompt: string) => {
-    const targetDoc = getTargetDocument();
-    if (!targetDoc) {
-      showToast('Upload or preview a document first.', true);
-      return;
+    // If scope is "doc" and no target doc, show toast and return
+    if (askScope === 'doc') {
+      const targetDoc = getTargetDocument();
+      if (!targetDoc) {
+        showToast('Preview or upload a document first', true);
+        return;
+      }
     }
 
     // Clear any previous errors when starting a new action
     onActionError('', actionName); // This will clear the error state
     setLoading(actionName);
     try {
-      const result: AskResp = await askQuestion(prompt, 6, targetDoc.document_id);
+      // Determine documentId based on scope
+      const documentId = askScope === 'doc' ? getTargetDocument()?.document_id : undefined;
+      const result: AskResp = await askQuestion(prompt, 6, documentId);
       if (result.ok === false) {
         const errorMsg = result.error === 'rate_limited'
           ? 'Rate limited — try again in a few seconds.'
@@ -128,14 +144,24 @@ export default function QuickActions({
     },
   ];
 
+  const getScopeLabel = (): string => {
+    if (askScope === 'all') {
+      return 'Scope: Global';
+    }
+    const targetDoc = getTargetDocument();
+    if (targetDoc) {
+      const filename = targetDoc.paths[0] ? targetDoc.paths[0].split('/').pop() || targetDoc.paths[0] : 'Unknown';
+      return `Scope: This doc (${filename})`;
+    }
+    return 'Scope: This doc (no active document)';
+  };
+
   return (
     <div style={{ marginTop: 16, marginBottom: 16 }}>
       <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Quick Actions</div>
-      {previewDocId && (
-        <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 8 }}>
-          Using previewed doc
-        </div>
-      )}
+      <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 8 }}>
+        {getScopeLabel()}
+      </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {actions.map((action) => {
           const isActive = loading === action.name;

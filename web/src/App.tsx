@@ -209,6 +209,8 @@ function App() {
   } | null>(null)
   const [activityFeed, setActivityFeed] = useState<IngestionEvent[]>([])
   const [showDropzoneHelp, setShowDropzoneHelp] = useState(false)
+  const [activeDocId, setActiveDocId] = useState<string | null>(null)
+  const [askScope, setAskScope] = useState<'doc' | 'all'>('all')
   const currentFetchDocIdRef = useRef<string | null>(null)
   const askInputRef = useRef<HTMLInputElement>(null)
 
@@ -281,6 +283,66 @@ function App() {
     } catch {}
   }
 
+  // Active document localStorage helpers
+  const ACTIVE_DOC_STORAGE_KEY = "jsonify2ai.activeDoc";
+  const ASK_SCOPE_STORAGE_KEY = "jsonify2ai.askScope";
+
+  function loadActiveDocId(): string | null {
+    try {
+      const raw = localStorage.getItem(ACTIVE_DOC_STORAGE_KEY);
+      if (raw) {
+        return raw;
+      }
+    } catch {}
+    return null;
+  }
+
+  function saveActiveDocId(docId: string | null) {
+    try {
+      if (docId) {
+        localStorage.setItem(ACTIVE_DOC_STORAGE_KEY, docId);
+      } else {
+        localStorage.removeItem(ACTIVE_DOC_STORAGE_KEY);
+      }
+    } catch {}
+  }
+
+  function loadAskScope(): 'doc' | 'all' {
+    try {
+      const raw = localStorage.getItem(ASK_SCOPE_STORAGE_KEY);
+      if (raw === 'doc' || raw === 'all') {
+        return raw;
+      }
+    } catch {}
+    return 'all'; // Default to 'all' for backward compatibility
+  }
+
+  function saveAskScope(scope: 'doc' | 'all') {
+    try {
+      localStorage.setItem(ASK_SCOPE_STORAGE_KEY, scope);
+    } catch {}
+  }
+
+  // Helper function to get active document based on priority
+  // When strictMode is true (doc scope), only returns doc if explicitly selected (previewDocId or activeDocId)
+  function getActiveDocument(strictMode: boolean = false): Document | null {
+    // Priority 1: previewDocId if exists and doc found
+    if (previewDocId) {
+      const doc = docs.find(d => d.document_id === previewDocId);
+      if (doc) return doc;
+    }
+    // Priority 2: activeDocId from state if set and doc exists
+    if (activeDocId) {
+      const doc = docs.find(d => d.document_id === activeDocId);
+      if (doc) return doc;
+    }
+    // Priority 3: Most recent doc (first in list) - only if not in strict mode
+    if (!strictMode && docs.length > 0) {
+      return docs[0];
+    }
+    return null;
+  }
+
   const handleQuickActionComplete = (result: AskResp, actionName: string) => {
     setQuickActionResult(result);
     setQuickActionName(actionName);
@@ -308,7 +370,24 @@ function App() {
     // Load activity feed from localStorage
     const saved = loadActivityFeed();
     setActivityFeed(saved);
+    // Load active doc and scope from localStorage
+    const savedActiveDoc = loadActiveDocId();
+    const savedScope = loadAskScope();
+    setActiveDocId(savedActiveDoc);
+    setAskScope(savedScope);
   }, [])
+
+  // Validate activeDocId exists in docs list after docs load
+  useEffect(() => {
+    if (activeDocId && docs.length > 0) {
+      const docExists = docs.some(d => d.document_id === activeDocId);
+      if (!docExists) {
+        // Active doc no longer exists, clear it
+        setActiveDocId(null);
+        saveActiveDocId(null);
+      }
+    }
+  }, [docs, activeDocId])
 
   const loadStatus = async () => {
     const j = await fetchStatus()
@@ -376,10 +455,21 @@ function App() {
       return;
     }
 
+    // Check scope: if "doc" and no active doc, show toast and return
+    if (askScope === 'doc') {
+      const activeDoc = getActiveDocument(true); // strictMode = true for doc scope
+      if (!activeDoc) {
+        showToast("Preview or upload a document first", true);
+        return;
+      }
+    }
+
     setAskLoading(true);
     setAskError(null);
     try {
-      const j: AskResp = await askQuestion(askQ, 6);
+      // Determine documentId based on scope
+      const documentId = askScope === 'doc' ? getActiveDocument(true)?.document_id : undefined; // strictMode = true for doc scope
+      const j: AskResp = await askQuestion(askQ, 6, documentId);
       if (j.ok === false) {
         const errorMsg = j.error === "rate_limited"
           ? "Rate limited — try again in a few seconds."
@@ -695,6 +785,9 @@ These toggles make it easy to test different features without changing code.`
           const requestedDocId = uploadedDoc.document_id;
           currentFetchDocIdRef.current = requestedDocId;
           setPreviewDocId(requestedDocId);
+          // Set as active document
+          setActiveDocId(requestedDocId);
+          saveActiveDocId(requestedDocId);
           setPreviewLoading(true);
           setPreviewError(null);
           setPreviewLines(null);
@@ -847,6 +940,9 @@ These toggles make it easy to test different features without changing code.`
             const requestedDocId = uploadedDoc.document_id;
             currentFetchDocIdRef.current = requestedDocId;
             setPreviewDocId(requestedDocId);
+            // Set as active document
+            setActiveDocId(requestedDocId);
+            saveActiveDocId(requestedDocId);
             setPreviewLoading(true);
             setPreviewError(null);
             setPreviewLines(null);
@@ -1066,6 +1162,11 @@ These toggles make it easy to test different features without changing code.`
           </div>
         </div>
       )}
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
+          Upload from anywhere (recommended).
+        </div>
+      </div>
       <div className="mb-4 flex items-center gap-3">
         <input type="file" onChange={onUploadChange} disabled={uploadBusy || demoLoading} />
         {uploadBusy && <span className="text-sm opacity-70">Uploading…</span>}
@@ -1338,7 +1439,7 @@ These toggles make it easy to test different features without changing code.`
       {/* Dropzone/Watcher Help */}
       <div style={{ marginTop: 12, marginBottom: 8 }}>
         <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
-          Watcher monitors the dropzone folder and auto-ingests new files.
+          Dropzone is optional. Watcher only monitors the dropzone folder for new files.
         </div>
         <button
           onClick={() => setShowDropzoneHelp(!showDropzoneHelp)}
@@ -1363,6 +1464,9 @@ These toggles make it easy to test different features without changing code.`
             border: '1px solid #e5e7eb',
             background: '#f9fafb'
           }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
+              Optional hot folder for auto-ingest
+            </div>
             <div style={{ fontSize: 12, marginBottom: 6 }}>
               <strong>Inside Docker:</strong> <code style={{ background: '#f5f5f5', padding: '2px 4px', borderRadius: 4 }}>/data/dropzone</code>
             </div>
@@ -1394,7 +1498,7 @@ These toggles make it easy to test different features without changing code.`
         Works best with: .md, .txt, .pdf, .csv, .json. Other formats may be skipped by the worker.
       </div>
       <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4 }}>
-        You can also drop files into data/dropzone/ on disk; the watcher will ingest them automatically.
+        Optional: You can also drop files into data/dropzone/ on disk; the watcher will ingest them automatically.
       </div>
       <LLMOnboardingPanel
         status={s}
@@ -1408,6 +1512,64 @@ These toggles make it easy to test different features without changing code.`
         background: '#fafafa',
       }}>
         <h2 style={{ fontSize: 18, marginBottom: 8 }}>Ask</h2>
+        {/* Scope Toggle */}
+        <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>Scope:</div>
+          <div style={{ display: 'flex', gap: 4, border: '1px solid #ddd', borderRadius: 6, padding: 2 }}>
+            <button
+              onClick={() => {
+                setAskScope('doc');
+                saveAskScope('doc');
+              }}
+              style={{
+                padding: '4px 12px',
+                borderRadius: 4,
+                border: 'none',
+                background: askScope === 'doc' ? '#1976d2' : 'transparent',
+                color: askScope === 'doc' ? '#fff' : '#666',
+                cursor: 'pointer',
+                fontSize: 12,
+                fontWeight: askScope === 'doc' ? 500 : 400
+              }}
+            >
+              This document
+            </button>
+            <button
+              onClick={() => {
+                setAskScope('all');
+                saveAskScope('all');
+              }}
+              style={{
+                padding: '4px 12px',
+                borderRadius: 4,
+                border: 'none',
+                background: askScope === 'all' ? '#1976d2' : 'transparent',
+                color: askScope === 'all' ? '#fff' : '#666',
+                cursor: 'pointer',
+                fontSize: 12,
+                fontWeight: askScope === 'all' ? 500 : 400
+              }}
+            >
+              All documents
+            </button>
+          </div>
+          {askScope === 'doc' && (() => {
+            const activeDoc = getActiveDocument(true); // strictMode = true for doc scope
+            if (activeDoc) {
+              const filename = activeDoc.paths[0] ? activeDoc.paths[0].split('/').pop() || activeDoc.paths[0] : 'Unknown';
+              return (
+                <span style={{ fontSize: 11, opacity: 0.7, fontStyle: 'italic' }}>
+                  ({filename})
+                </span>
+              );
+            }
+            return (
+              <span style={{ fontSize: 11, color: '#dc2626', fontStyle: 'italic' }}>
+                (No active document)
+              </span>
+            );
+          })()}
+        </div>
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>Try these questions:</div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -1534,6 +1696,8 @@ These toggles make it easy to test different features without changing code.`
           loading={quickActionsLoading}
           setLoading={setQuickActionsLoading}
           showToast={showToast}
+          activeDocId={activeDocId}
+          askScope={askScope}
         />
         <AssistantOutput
           result={quickActionResult}
@@ -1542,6 +1706,16 @@ These toggles make it easy to test different features without changing code.`
           error={quickActionError}
           actionName={quickActionName || undefined}
           showToast={showToast}
+          scope={askScope}
+          activeDocFilename={(() => {
+            if (askScope === 'doc') {
+              const activeDoc = getActiveDocument(true); // strictMode = true for doc scope
+              if (activeDoc && activeDoc.paths[0]) {
+                return activeDoc.paths[0].split('/').pop() || activeDoc.paths[0];
+              }
+            }
+            return undefined;
+          })()}
         />
       </div>
       {/* Existing Ask results (for backward compatibility) */}
@@ -1718,12 +1892,40 @@ These toggles make it easy to test different features without changing code.`
             {docs.map((doc, i) => {
               const status = getDocumentStatus(doc);
               const totalChunks = Object.values(doc.counts || {}).reduce((sum: number, count: unknown) => sum + (typeof count === 'number' ? count : 0), 0);
+              const isActive = activeDocId === doc.document_id || (previewDocId === doc.document_id && !activeDocId);
               return (
                 <div key={i} style={{ padding: 12, border: '1px solid #eee', borderRadius: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                  <code style={{ fontSize: 12, fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
+                  <code
+                    style={{
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                      background: '#f5f5f5',
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      cursor: 'pointer'
+                    }}
+                    onClick={() => {
+                      setActiveDocId(doc.document_id);
+                      saveActiveDocId(doc.document_id);
+                      showToast('Document set as active');
+                    }}
+                    title="Click to set as active document"
+                  >
                     {doc.document_id}
                   </code>
+                  {isActive && (
+                    <span style={{
+                      padding: '3px 8px',
+                      borderRadius: 6,
+                      fontSize: 11,
+                      fontWeight: 500,
+                      background: '#dbeafe',
+                      color: '#1e40af'
+                    }}>
+                      Active
+                    </span>
+                  )}
                   <span style={{
                     padding: '3px 8px',
                     borderRadius: 6,
@@ -1799,6 +2001,9 @@ These toggles make it easy to test different features without changing code.`
                       const requestedDocId = doc.document_id;
                       currentFetchDocIdRef.current = requestedDocId;
                       setPreviewDocId(requestedDocId);
+                      // Set as active document
+                      setActiveDocId(requestedDocId);
+                      saveActiveDocId(requestedDocId);
                       setPreviewLoading(true);
                       setPreviewError(null);
                       setPreviewLines(null);

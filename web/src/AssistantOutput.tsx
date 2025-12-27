@@ -33,6 +33,8 @@ type AssistantOutputProps = {
   error: string | null;
   actionName?: string;
   showToast?: (msg: string, isError?: boolean) => void;
+  scope?: 'doc' | 'all';
+  activeDocFilename?: string;
 };
 
 function copyToClipboard(text: string) {
@@ -66,6 +68,8 @@ export default function AssistantOutput({
   error,
   actionName,
   showToast,
+  scope,
+  activeDocFilename,
 }: AssistantOutputProps) {
   // Empty state
   if (!loading && !error && !result) {
@@ -163,7 +167,7 @@ export default function AssistantOutput({
   return (
     <div style={{ marginTop: 12, padding: 12, border: '1px solid #eee', borderRadius: 10 }}>
       {/* Title and Model Badge */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <div style={{ fontWeight: 600, fontSize: 16 }}>{title}</div>
         {hasLLM && (
           <span style={{
@@ -205,6 +209,16 @@ export default function AssistantOutput({
           </button>
         )}
       </div>
+      {/* Scope Label */}
+      {scope && (
+        <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 16, color: '#6b7280' }}>
+          {scope === 'doc' && activeDocFilename
+            ? `Using document: ${activeDocFilename}`
+            : scope === 'doc'
+            ? 'Using document: (no active document)'
+            : 'Using all indexed documents'}
+        </div>
+      )}
 
       {/* Main Output */}
       {mainText && (
