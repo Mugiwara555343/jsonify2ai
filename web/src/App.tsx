@@ -29,6 +29,17 @@ type Document = { document_id: string; kinds: string[]; paths: string[]; counts:
 const apiBase = API_BASE
 type AskResp = { ok: boolean; mode: 'search' | 'llm'; model?: string; answer?: string; final?: string; sources?: Hit[]; answers?: Hit[]; error?: string }
 
+type IngestionEvent = {
+  timestamp: number; // Date.now()
+  filename: string;
+  status: 'uploading' | 'indexing' | 'processed' | 'skipped' | 'error';
+  chunks?: number;
+  skip_reason?: string;
+  skip_message?: string;
+  error?: string;
+  document_id?: string; // short version (first 8 chars)
+}
+
 
 function HealthChip() {
   const [state, setState] = useState<"checking"|"ok"|"warn">("checking");
@@ -143,6 +154,11 @@ function collectionForDoc(d: Document) {
   return (d.kinds || []).includes("image") ? "jsonify2ai_images_768" : "jsonify2ai_chunks";
 }
 
+function getDocumentStatus(doc: Document): 'indexed' | 'pending' {
+  const totalChunks = Object.values(doc.counts || {}).reduce((sum: number, count: unknown) => sum + (typeof count === 'number' ? count : 0), 0);
+  return totalChunks > 0 ? 'indexed' : 'pending';
+}
+
 function copyToClipboard(text: string) {
   navigator.clipboard.writeText(text).then(() => {
     // Toast will be shown by caller
@@ -191,6 +207,8 @@ function App() {
     skip_reason?: string;
     error?: string;
   } | null>(null)
+  const [activityFeed, setActivityFeed] = useState<IngestionEvent[]>([])
+  const [showDropzoneHelp, setShowDropzoneHelp] = useState(false)
   const currentFetchDocIdRef = useRef<string | null>(null)
   const askInputRef = useRef<HTMLInputElement>(null)
 
@@ -205,6 +223,62 @@ function App() {
   function showToast(msg: string, isError = false) {
     setToast(msg);
     setTimeout(() => setToast(null), isError ? 5000 : 3000);
+  }
+
+  // Activity feed localStorage helpers
+  const ACTIVITY_STORAGE_KEY = "jsonify2ai.activity";
+  const MAX_ACTIVITY_EVENTS = 10;
+
+  function loadActivityFeed(): IngestionEvent[] {
+    try {
+      const raw = localStorage.getItem(ACTIVITY_STORAGE_KEY);
+      if (raw) {
+        const events = JSON.parse(raw) as IngestionEvent[];
+        // Limit to MAX_ACTIVITY_EVENTS, newest first
+        return events.slice(0, MAX_ACTIVITY_EVENTS);
+      }
+    } catch {}
+    return [];
+  }
+
+  function saveActivityFeed(events: IngestionEvent[]) {
+    try {
+      // Limit to MAX_ACTIVITY_EVENTS, newest first
+      const limited = events.slice(0, MAX_ACTIVITY_EVENTS);
+      localStorage.setItem(ACTIVITY_STORAGE_KEY, JSON.stringify(limited));
+    } catch {}
+  }
+
+  function addActivityEvent(event: IngestionEvent) {
+    setActivityFeed(prev => {
+      // Add new event at the beginning (newest first)
+      const updated = [event, ...prev].slice(0, MAX_ACTIVITY_EVENTS);
+      saveActivityFeed(updated);
+      return updated;
+    });
+  }
+
+  function updateActivityEvent(filename: string, updates: Partial<IngestionEvent>) {
+    setActivityFeed(prev => {
+      // Find the first (most recent) event with matching filename
+      const index = prev.findIndex(e => e.filename === filename);
+      if (index === -1) {
+        // Event not found, return unchanged
+        return prev;
+      }
+      // Update only the first matching event (most recent)
+      const updated = [...prev];
+      updated[index] = { ...updated[index], ...updates };
+      saveActivityFeed(updated);
+      return updated;
+    });
+  }
+
+  function clearActivityFeed() {
+    setActivityFeed([]);
+    try {
+      localStorage.removeItem(ACTIVITY_STORAGE_KEY);
+    } catch {}
   }
 
   const handleQuickActionComplete = (result: AskResp, actionName: string) => {
@@ -231,6 +305,9 @@ function App() {
     loadStatus()
     loadDocuments()
     loadRecentDocuments()
+    // Load activity feed from localStorage
+    const saved = loadActivityFeed();
+    setActivityFeed(saved);
   }, [])
 
   const loadStatus = async () => {
@@ -467,6 +544,13 @@ These toggles make it easy to test different features without changing code.`
           status: 'uploading'
         });
 
+        // Add activity event for upload start
+        addActivityEvent({
+          timestamp: Date.now(),
+          filename: demo.name,
+          status: 'uploading'
+        });
+
         // Create Blob and File object
         const blob = new Blob([demo.content], { type: 'text/markdown' });
         const file = new File([blob], demo.name, { type: 'text/markdown' });
@@ -484,6 +568,12 @@ These toggles make it easy to test different features without changing code.`
             skip_reason: skipReason,
             error: details
           });
+          // Update activity event for skipped
+          updateActivityEvent(demo.name, {
+            status: 'skipped',
+            skip_reason: skipReason,
+            skip_message: details
+          });
           throw new Error(`Demo upload skipped: ${details}`);
         }
 
@@ -492,6 +582,11 @@ These toggles make it easy to test different features without changing code.`
           const errorMsg = data?.error || String(data);
           setUploadResult({
             filename: demo.name,
+            status: 'error',
+            error: errorMsg
+          });
+          // Update activity event for error
+          updateActivityEvent(demo.name, {
             status: 'error',
             error: errorMsg
           });
@@ -509,6 +604,12 @@ These toggles make it easy to test different features without changing code.`
             status: 'indexing',
             document_id: docId,
             chunks: data?.chunks || 0
+          });
+
+          // Update activity event for indexing
+          updateActivityEvent(demo.name, {
+            status: 'indexing',
+            document_id: docId.substring(0, 8)
           });
         }
 
@@ -538,6 +639,14 @@ These toggles make it easy to test different features without changing code.`
             document_id: lastDocId,
             chunks: indexed.chunks
           });
+
+          // Update activity event for processed
+          updateActivityEvent(lastFileName, {
+            status: 'processed',
+            chunks: indexed.chunks,
+            document_id: lastDocId.substring(0, 8)
+          });
+
           showToast("Demo data loaded ✓");
         } else {
           setUploadResult({
@@ -553,6 +662,25 @@ These toggles make it easy to test different features without changing code.`
           showToast("Demo data loaded ✓");
         } else {
           showToast("Demo data uploaded (processing may still be in progress)", true);
+        }
+      }
+
+      // Refresh documents and update activity events for all demo files
+      const refreshedDocsBefore = await loadDocuments();
+      for (let i = 0; i < demoFiles.length; i++) {
+        const demo = demoFiles[i];
+        // Find the document for this demo file
+        const demoDoc = refreshedDocsBefore.find(d => d.paths.some(p => p.includes(demo.name)));
+        if (demoDoc) {
+          const totalChunks = Object.values(demoDoc.counts || {}).reduce((sum: number, count: unknown) => sum + (typeof count === 'number' ? count : 0), 0);
+          if (totalChunks > 0) {
+            // Update activity event for processed if not already updated
+            updateActivityEvent(demo.name, {
+              status: 'processed',
+              chunks: totalChunks,
+              document_id: demoDoc.document_id.substring(0, 8)
+            });
+          }
         }
       }
 
@@ -612,6 +740,13 @@ These toggles make it easy to test different features without changing code.`
       status: 'uploading'
     })
 
+    // Add activity event for upload start
+    addActivityEvent({
+      timestamp: Date.now(),
+      filename: file.name,
+      status: 'uploading'
+    });
+
     try {
       const data = await uploadFile(file);
 
@@ -627,6 +762,13 @@ These toggles make it easy to test different features without changing code.`
           error: details
         });
 
+        // Update activity event for skipped
+        updateActivityEvent(file.name, {
+          status: 'skipped',
+          skip_reason: skipReason,
+          skip_message: details
+        });
+
         showToast("File skipped. See upload results below.", true);
         return;
       }
@@ -636,6 +778,12 @@ These toggles make it easy to test different features without changing code.`
         const errorMsg = data?.error || String(data);
         setUploadResult({
           filename: file.name,
+          status: 'error',
+          error: errorMsg
+        });
+
+        // Update activity event for error
+        updateActivityEvent(file.name, {
           status: 'error',
           error: errorMsg
         });
@@ -664,6 +812,12 @@ These toggles make it easy to test different features without changing code.`
           chunks: data?.chunks || 0
         });
 
+        // Update activity event for indexing
+        updateActivityEvent(file.name, {
+          status: 'indexing',
+          document_id: docId.substring(0, 8)
+        });
+
         // Poll for document indexing
         const indexed = await waitForDocumentIndexed(docId, 15000);
 
@@ -674,6 +828,13 @@ These toggles make it easy to test different features without changing code.`
             status: 'processed',
             document_id: docId,
             chunks: indexed.chunks
+          });
+
+          // Update activity event for processed
+          updateActivityEvent(file.name, {
+            status: 'processed',
+            chunks: indexed.chunks,
+            document_id: docId.substring(0, 8)
           });
 
           showToast("Processed ✓");
@@ -721,12 +882,25 @@ These toggles make it easy to test different features without changing code.`
           status: 'error',
           error: "Upload succeeded but no document ID returned"
         });
+
+        // Update activity event for error
+        updateActivityEvent(file.name, {
+          status: 'error',
+          error: "Upload succeeded but no document ID returned"
+        });
+
         showToast("Upload completed but document ID missing.", true);
       }
     } catch (err:any) {
       const errorMsg = err?.message || String(err);
       setUploadResult({
         filename: file.name,
+        status: 'error',
+        error: errorMsg
+      });
+
+      // Update activity event for error
+      updateActivityEvent(file.name, {
         status: 'error',
         error: errorMsg
       });
@@ -809,7 +983,7 @@ These toggles make it easy to test different features without changing code.`
             )}
             {s.watcher_triggers_total !== undefined && (
               <div style={{ fontSize: 12, background: '#fefce8', color: '#a16207', padding: '4px 8px', borderRadius: 12, border: '1px solid #fde68a' }}>
-                Watcher: {s.watcher_triggers_total}
+                Watcher triggers: {s.watcher_triggers_total}
               </div>
             )}
             {s.export_total !== undefined && (
@@ -995,6 +1169,122 @@ These toggles make it easy to test different features without changing code.`
         </div>
       )}
 
+      {/* Ingestion Activity Feed */}
+      <div style={{
+        padding: 16,
+        borderRadius: 12,
+        boxShadow: '0 1px 4px rgba(0,0,0,.08)',
+        marginBottom: 16,
+        background: 'var(--bg)',
+        border: '1px solid rgba(0,0,0,.1)'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.7 }}>
+            Ingestion activity
+          </div>
+          {activityFeed.length > 0 && (
+            <button
+              onClick={clearActivityFeed}
+              style={{
+                fontSize: 11,
+                padding: '4px 8px',
+                borderRadius: 6,
+                border: '1px solid #ddd',
+                background: '#fff',
+                color: '#666',
+                cursor: 'pointer'
+              }}
+            >
+              Clear activity
+            </button>
+          )}
+        </div>
+        {activityFeed.length === 0 ? (
+          <div style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>
+            No ingestion activity yet. Upload files to see activity here.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {activityFeed.map((event, idx) => {
+              const timestamp = new Date(event.timestamp);
+              const timeStr = timestamp.toLocaleTimeString();
+              const getSkipMessage = () => {
+                if (event.skip_reason === 'unsupported_extension') return 'Unsupported file type. Try .txt/.md/.pdf/.csv/.json';
+                if (event.skip_reason === 'empty_file') return 'File is empty';
+                if (event.skip_reason === 'extraction_failed') return `Extraction failed: ${event.error || 'Check worker logs'}`;
+                if (event.skip_reason === 'processing_failed') return `Processing failed: ${event.error || 'Check worker logs'}`;
+                return event.skip_message || event.error || event.skip_reason || 'Skipped';
+              };
+              return (
+                <div key={idx} style={{
+                  padding: 12,
+                  borderRadius: 8,
+                  border: '1px solid #e5e7eb',
+                  background: '#fafafa'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+                        {event.filename}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{
+                          padding: '3px 8px',
+                          borderRadius: 6,
+                          fontSize: 11,
+                          fontWeight: 500,
+                          background:
+                            event.status === 'processed' ? '#c6f6d5' :
+                            event.status === 'uploading' ? '#dbeafe' :
+                            event.status === 'indexing' ? '#fed7aa' :
+                            event.status === 'skipped' ? '#fef3c7' :
+                            '#fed7d7',
+                          color:
+                            event.status === 'processed' ? '#166534' :
+                            event.status === 'uploading' ? '#1e40af' :
+                            event.status === 'indexing' ? '#92400e' :
+                            event.status === 'skipped' ? '#78350f' :
+                            '#991b1b'
+                        }}>
+                          {event.status === 'processed' ? 'Processed' :
+                           event.status === 'uploading' ? 'Uploading…' :
+                           event.status === 'indexing' ? 'Indexing…' :
+                           event.status === 'skipped' ? 'Skipped' :
+                           'Error'}
+                        </span>
+                        {event.chunks !== undefined && event.status === 'processed' && (
+                          <span style={{ fontSize: 11, opacity: 0.7 }}>
+                            {event.chunks} {event.chunks === 1 ? 'chunk' : 'chunks'}
+                          </span>
+                        )}
+                        {event.document_id && (
+                          <code style={{ fontSize: 10, fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
+                            {event.document_id}
+                          </code>
+                        )}
+                      </div>
+                      {event.skip_reason && (
+                        <div style={{ fontSize: 11, marginTop: 6, color: '#92400e' }}>
+                          {getSkipMessage()}
+                        </div>
+                      )}
+                      {event.error && event.status === 'error' && (
+                        <div style={{ fontSize: 11, marginTop: 6, color: '#dc2626' }}>
+                          {event.error}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 10, color: '#9ca3af', marginLeft: 8 }}>
+                      {timeStr}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       <div style={{ display: 'flex', gap: 8 }}>
           {(() => {
             const previewedDoc = previewDocId ? docs.find(d => d.document_id === previewDocId) : null;
@@ -1045,6 +1335,61 @@ These toggles make it easy to test different features without changing code.`
             );
           })()}
         </div>
+      {/* Dropzone/Watcher Help */}
+      <div style={{ marginTop: 12, marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
+          Watcher monitors the dropzone folder and auto-ingests new files.
+        </div>
+        <button
+          onClick={() => setShowDropzoneHelp(!showDropzoneHelp)}
+          style={{
+            fontSize: 11,
+            padding: '4px 8px',
+            borderRadius: 6,
+            border: '1px solid #ddd',
+            background: '#fff',
+            color: '#1976d2',
+            cursor: 'pointer',
+            textDecoration: 'underline'
+          }}
+        >
+          Where is dropzone?
+        </button>
+        {showDropzoneHelp && (
+          <div style={{
+            marginTop: 8,
+            padding: 12,
+            borderRadius: 8,
+            border: '1px solid #e5e7eb',
+            background: '#f9fafb'
+          }}>
+            <div style={{ fontSize: 12, marginBottom: 6 }}>
+              <strong>Inside Docker:</strong> <code style={{ background: '#f5f5f5', padding: '2px 4px', borderRadius: 4 }}>/data/dropzone</code>
+            </div>
+            <div style={{ fontSize: 12, marginBottom: 8 }}>
+              <strong>On your machine:</strong> Host path is configured in docker-compose.yml under the worker volume for /data/dropzone.
+            </div>
+            <button
+              onClick={() => {
+                const text = `/data/dropzone\n(Host path configured in docker-compose.yml)`;
+                copyToClipboard(text);
+                showToast('Dropzone path copied');
+              }}
+              style={{
+                fontSize: 11,
+                padding: '4px 8px',
+                borderRadius: 6,
+                border: '1px solid #ddd',
+                background: '#fff',
+                color: '#1976d2',
+                cursor: 'pointer'
+              }}
+            >
+              Copy dropzone path
+            </button>
+          </div>
+        )}
+      </div>
       <div style={{ fontSize: 11, opacity: 0.6, marginTop: 8 }}>
         Works best with: .md, .txt, .pdf, .csv, .json. Other formats may be skipped by the worker.
       </div>
@@ -1370,12 +1715,25 @@ These toggles make it easy to test different features without changing code.`
         </div>
         {docs.length > 0 && (
           <div style={{ display: 'grid', gap: 8 }}>
-            {docs.map((doc, i) => (
-              <div key={i} style={{ padding: 12, border: '1px solid #eee', borderRadius: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            {docs.map((doc, i) => {
+              const status = getDocumentStatus(doc);
+              const totalChunks = Object.values(doc.counts || {}).reduce((sum: number, count: unknown) => sum + (typeof count === 'number' ? count : 0), 0);
+              return (
+                <div key={i} style={{ padding: 12, border: '1px solid #eee', borderRadius: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
                   <code style={{ fontSize: 12, fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
                     {doc.document_id}
                   </code>
+                  <span style={{
+                    padding: '3px 8px',
+                    borderRadius: 6,
+                    fontSize: 11,
+                    fontWeight: 500,
+                    background: status === 'indexed' ? '#c6f6d5' : '#fef3c7',
+                    color: status === 'indexed' ? '#166534' : '#78350f'
+                  }}>
+                    {status === 'indexed' ? `Indexed (${totalChunks} ${totalChunks === 1 ? 'chunk' : 'chunks'})` : 'Pending / not indexed yet'}
+                  </span>
                   <button
                     onClick={() => {
                       copyToClipboard(doc.document_id);
@@ -1468,8 +1826,9 @@ These toggles make it easy to test different features without changing code.`
                     Preview JSON
                   </button>
                 </div>
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
         )}
         {docs.length === 0 && (
@@ -1480,6 +1839,7 @@ These toggles make it easy to test different features without changing code.`
         const previewedDoc = docs.find(d => d.document_id === previewDocId);
         const collection = previewedDoc ? collectionForDoc(previewedDoc) : '';
         const truncatedId = previewDocId.length > 40 ? previewDocId.substring(0, 40) + '...' : previewDocId;
+        const previewStatus = previewedDoc ? getDocumentStatus(previewedDoc) : null;
 
         return (
           <section style={{ marginTop: 24, padding: 16, border: '1px solid #ddd', borderRadius: 8, background: '#fafafa' }}>
@@ -1487,6 +1847,11 @@ These toggles make it easy to test different features without changing code.`
             {collection && (
               <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>
                 Collection: {collection} {previewLines && previewLines.length > 0 && `• Showing ${previewLines.length} lines (JSONL preview)`}
+              </p>
+            )}
+            {previewStatus && (
+              <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 12 }}>
+                Status: {previewStatus === 'indexed' ? 'Indexed' : 'Pending'}
               </p>
             )}
             <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 12 }}>
