@@ -25,6 +25,8 @@ type AskResp = {
   answers?: Hit[];
   error?: string;
   synth_skipped_reason?: string;
+  top_score?: number;
+  min_synth_score?: number;
 };
 
 type AssistantOutputProps = {
@@ -234,6 +236,12 @@ export default function AssistantOutput({
           </button>
         )}
       </div>
+      {/* Score transparency for low confidence */}
+      {showLowConfidence && result.top_score !== undefined && result.min_synth_score !== undefined && (
+        <div style={{ fontSize: 11, color: '#92400e', marginTop: 4, marginBottom: 8 }}>
+          Top score: {result.top_score.toFixed(2)} (threshold {result.min_synth_score.toFixed(2)})
+        </div>
+      )}
       {/* Scope Label */}
       {scope && (
         <div style={{ marginBottom: 16 }}>

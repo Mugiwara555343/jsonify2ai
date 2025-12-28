@@ -173,6 +173,54 @@ function copyToClipboard(text: string) {
   });
 }
 
+function generateSuggestionChips(
+  askScope: 'doc' | 'all',
+  activeDoc: Document | null
+): string[] {
+  if (askScope === 'doc' && activeDoc) {
+    // Get filename and extension
+    const path = activeDoc.paths[0] || '';
+    const filename = path.split('/').pop() || path;
+    const ext = filename.split('.').pop()?.toLowerCase() || '';
+    const kind = activeDoc.kinds[0] || 'text';
+
+    // Generate file-type-specific prompts
+    if (ext === 'md' || ext === 'txt' || kind === 'text') {
+      return [
+        `Summarize ${filename}`,
+        `What are the key points in ${filename}?`,
+        `Extract action items from ${filename}`,
+        `Create a checklist from ${filename}`,
+        `What is the main topic of ${filename}?`
+      ];
+    } else if (ext === 'pdf' || kind === 'pdf') {
+      return [
+        `Summarize ${filename}`,
+        `What are the key requirements in ${filename}?`,
+        `Extract important points from ${filename}`,
+        `What topics are covered in ${filename}?`,
+        `Create a glossary from ${filename}`
+      ];
+    } else {
+      // Generic for other types
+      return [
+        `Summarize ${filename}`,
+        `What are the key points in ${filename}?`,
+        `Extract important information from ${filename}`
+      ];
+    }
+  } else {
+    // Global scope: retrieval-first questions
+    return [
+      "Which documents mention this topic?",
+      "Show the best matching excerpts about this",
+      "List top related files for this query",
+      "Find documents containing this information",
+      "What files discuss this subject?"
+    ];
+  }
+}
+
 function App() {
   const [s, setS] = useState<Status | null>(null)
   const [q, setQ] = useState('')
@@ -379,15 +427,31 @@ function App() {
 
   // Validate activeDocId exists in docs list after docs load
   useEffect(() => {
-    if (activeDocId && docs.length > 0) {
-      const docExists = docs.some(d => d.document_id === activeDocId);
-      if (!docExists) {
-        // Active doc no longer exists, clear it
+    if (activeDocId) {
+      if (docs.length === 0) {
+        // All documents deleted, clear activeDocId and reset scope
         setActiveDocId(null);
         saveActiveDocId(null);
+        if (askScope === 'doc') {
+          setAskScope('all');
+          saveAskScope('all');
+        }
+      } else {
+        // Check if the active doc still exists
+        const docExists = docs.some(d => d.document_id === activeDocId);
+        if (!docExists) {
+          // Active doc no longer exists, clear it
+          setActiveDocId(null);
+          saveActiveDocId(null);
+          // Reset askScope to 'all' if it was set to 'doc'
+          if (askScope === 'doc') {
+            setAskScope('all');
+            saveAskScope('all');
+          }
+        }
       }
     }
-  }, [docs, activeDocId])
+  }, [docs, activeDocId, askScope])
 
   const loadStatus = async () => {
     const j = await fetchStatus()
@@ -1576,47 +1640,53 @@ These toggles make it easy to test different features without changing code.`
             );
           })()}
         </div>
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>Try these questions:</div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {[
-              "What is Qdrant used for in this repo?",
-              "Which env toggles enable dev modes?",
-              "How do I export a ZIP for a document?"
-            ].map((example, i) => (
-              <button
-                key={i}
-                onClick={() => {
-                  setAskQ(example);
-                  // Focus the input after setting the value
-                  setTimeout(() => {
-                    if (askInputRef.current) {
-                      askInputRef.current.focus();
-                    }
-                  }, 0);
-                }}
-                style={{
-                  fontSize: 12,
-                  padding: '4px 8px',
-                  borderRadius: 6,
-                  border: '1px solid #ddd',
-                  background: '#fff',
-                  color: '#1976d2',
-                  cursor: 'pointer',
-                  textDecoration: 'none'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = '#f0f9ff';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = '#fff';
-                }}
-              >
-                {example}
-              </button>
-            ))}
-          </div>
-        </div>
+        {(() => {
+          const activeDoc = askScope === 'doc' ? getActiveDocument(true) : null;
+          const chips = generateSuggestionChips(askScope, activeDoc);
+          return (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
+                {askScope === 'doc' && activeDoc
+                  ? `Try these questions about ${activeDoc.paths[0]?.split('/').pop() || 'this document'}:`
+                  : 'Try these questions (retrieval-first):'}
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {chips.map((example, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      setAskQ(example);
+                      // Focus the input after setting the value
+                      setTimeout(() => {
+                        if (askInputRef.current) {
+                          askInputRef.current.focus();
+                        }
+                      }, 0);
+                    }}
+                    style={{
+                      fontSize: 12,
+                      padding: '4px 8px',
+                      borderRadius: 6,
+                      border: '1px solid #ddd',
+                      background: '#fff',
+                      color: '#1976d2',
+                      cursor: 'pointer',
+                      textDecoration: 'none'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = '#f0f9ff';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = '#fff';
+                    }}
+                  >
+                    {example}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
         <div style={{ display: 'flex', gap: 8 }}>
           <input
             ref={askInputRef}

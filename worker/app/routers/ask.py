@@ -266,6 +266,8 @@ def _try_llm_synthesis(query: str, result: dict, log) -> dict:
     top_score = max((s.get("score", 0.0) for s in sources), default=0.0)
     if top_score < settings.MIN_SYNTH_SCORE:
         result["synth_skipped_reason"] = "low_confidence"
+        result["top_score"] = top_score
+        result["min_synth_score"] = settings.MIN_SYNTH_SCORE
         log.info(
             f"[ask] synthesis skipped: top_score {top_score:.3f} < {settings.MIN_SYNTH_SCORE}"
         )
