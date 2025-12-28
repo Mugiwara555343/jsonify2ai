@@ -24,6 +24,7 @@ type AskResp = {
   sources?: Hit[];
   answers?: Hit[];
   error?: string;
+  synth_skipped_reason?: string;
 };
 
 type AssistantOutputProps = {
@@ -128,6 +129,8 @@ export default function AssistantOutput({
   const mainText = result.final?.trim() || result.answer?.trim() || '';
   const sources = result.sources || result.answers || [];
   const hasLLM = status?.llm?.provider === 'ollama' && status?.llm?.reachable === true;
+  const showLowConfidence = result.synth_skipped_reason === "low_confidence";
+  const showNoSources = result.synth_skipped_reason === "no_sources";
 
   // Build markdown for copy
   const buildMarkdown = (): string => {
@@ -180,7 +183,7 @@ export default function AssistantOutput({
             local (ollama)
           </span>
         )}
-        {!hasLLM && sources.length > 0 && (
+        {!hasLLM && sources.length > 0 && !showNoSources && (
           <span style={{
             fontSize: 11,
             padding: '2px 6px',
@@ -189,6 +192,28 @@ export default function AssistantOutput({
             color: '#6b7280',
           }}>
             Top matches below
+          </span>
+        )}
+        {showLowConfidence && (
+          <span style={{
+            fontSize: 11,
+            padding: '2px 6px',
+            borderRadius: 999,
+            background: '#fef3c7',
+            color: '#92400e',
+          }}>
+            Low confidence — showing top matches only
+          </span>
+        )}
+        {showNoSources && (
+          <span style={{
+            fontSize: 11,
+            padding: '2px 6px',
+            borderRadius: 999,
+            background: '#fef3c7',
+            color: '#92400e',
+          }}>
+            No matching sources found
           </span>
         )}
         {(mainText || sources.length > 0) && (
@@ -211,12 +236,19 @@ export default function AssistantOutput({
       </div>
       {/* Scope Label */}
       {scope && (
-        <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 16, color: '#6b7280' }}>
-          {scope === 'doc' && activeDocFilename
-            ? `Using document: ${activeDocFilename}`
-            : scope === 'doc'
-            ? 'Using document: (no active document)'
-            : 'Using all indexed documents'}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4, color: '#6b7280' }}>
+            {scope === 'doc' && activeDocFilename
+              ? `Using document: ${activeDocFilename}`
+              : scope === 'doc'
+              ? 'Using document: (no active document)'
+              : 'Using all indexed documents'}
+          </div>
+          {scope === 'all' && (
+            <div style={{ fontSize: 11, color: '#f59e0b', opacity: 0.8 }}>
+              Global mode can mix unrelated files. Switch to 'This document' for precise answers.
+            </div>
+          )}
         </div>
       )}
 

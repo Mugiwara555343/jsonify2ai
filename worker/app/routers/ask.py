@@ -72,7 +72,7 @@ def _search(q: str, k: int, document_id: str = None, path_prefix: str = None):
 
 def _format_prompt(q: str, text_hits: List[dict], img_hits: List[dict]):
     lines = [
-        "You are a concise assistant. Answer using ONLY the provided sources. If insufficient, say you don't know.",
+        'You are a concise assistant. Answer using ONLY the provided sources. Do not use any knowledge outside these sources. If insufficient, reply: "I don\'t have enough in the indexed sources to answer that yet."',
         f"Question: {q}",
         "---- SOURCES ----",
     ]
@@ -185,8 +185,8 @@ def _build_prompt(question: str, snippets: list[str]) -> str:
     """Build concise, grounded prompt for small models."""
     joined = "\n".join(f"{i+1}) {snip}" for i, snip in enumerate(snippets))
     return (
-        "You are a concise assistant. Answer using ONLY the snippets below.\n"
-        'If information is missing, reply: "Not enough information."\n\n'
+        "You are a concise assistant. Answer using ONLY the snippets below. Do not use any knowledge outside these snippets.\n"
+        'If information is missing, reply: "I don\'t have enough in the indexed sources to answer that yet."\n\n'
         f"Question: {question}\n\n"
         "Snippets:\n"
         f"{joined}\n\n"
@@ -258,6 +258,17 @@ def _try_llm_synthesis(query: str, result: dict, log) -> dict:
     # Check if we have sources to synthesize
     sources = result.get("sources", [])
     if not sources or len(sources) == 0:
+        result["synth_skipped_reason"] = "no_sources"
+        log.info("[ask] synthesis skipped: no sources")
+        return result
+
+    # Compute top_score from sources
+    top_score = max((s.get("score", 0.0) for s in sources), default=0.0)
+    if top_score < settings.MIN_SYNTH_SCORE:
+        result["synth_skipped_reason"] = "low_confidence"
+        log.info(
+            f"[ask] synthesis skipped: top_score {top_score:.3f} < {settings.MIN_SYNTH_SCORE}"
+        )
         return result
 
     try:

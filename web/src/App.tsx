@@ -788,6 +788,9 @@ These toggles make it easy to test different features without changing code.`
           // Set as active document
           setActiveDocId(requestedDocId);
           saveActiveDocId(requestedDocId);
+          // Auto-switch to document scope
+          setAskScope('doc');
+          saveAskScope('doc');
           setPreviewLoading(true);
           setPreviewError(null);
           setPreviewLines(null);
@@ -943,6 +946,9 @@ These toggles make it easy to test different features without changing code.`
             // Set as active document
             setActiveDocId(requestedDocId);
             saveActiveDocId(requestedDocId);
+            // Auto-switch to document scope
+            setAskScope('doc');
+            saveAskScope('doc');
             setPreviewLoading(true);
             setPreviewError(null);
             setPreviewLines(null);
@@ -1908,6 +1914,9 @@ These toggles make it easy to test different features without changing code.`
                     onClick={() => {
                       setActiveDocId(doc.document_id);
                       saveActiveDocId(doc.document_id);
+                      // Auto-switch to document scope
+                      setAskScope('doc');
+                      saveAskScope('doc');
                       showToast('Document set as active');
                     }}
                     title="Click to set as active document"
@@ -2004,6 +2013,9 @@ These toggles make it easy to test different features without changing code.`
                       // Set as active document
                       setActiveDocId(requestedDocId);
                       saveActiveDocId(requestedDocId);
+                      // Auto-switch to document scope
+                      setAskScope('doc');
+                      saveAskScope('doc');
                       setPreviewLoading(true);
                       setPreviewError(null);
                       setPreviewLines(null);

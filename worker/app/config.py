@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     ASK_MAX_TOKENS: int = 512
     ASK_TEMP: float = 0.3
     ASK_TOP_P: float = 0.9
+    MIN_SYNTH_SCORE: float = 0.55  # Minimum confidence score to run LLM synthesis
 
     # --- LLM Provider for synthesis -------------------------------------------
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "none")  # none|ollama
