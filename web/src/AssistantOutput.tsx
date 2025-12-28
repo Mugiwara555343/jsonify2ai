@@ -308,6 +308,9 @@ export default function AssistantOutput({
 
         return (
           <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8, fontStyle: 'italic' }}>
+              Select a document to unlock actions like summaries and checklists.
+            </div>
             <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>
               Top matching documents
             </div>

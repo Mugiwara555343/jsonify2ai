@@ -86,6 +86,7 @@ This project is meant to feel like a small product: clone → start → click th
    - **Answer mode**: Choose "Retrieve" (shows top matching sources only, no LLM synthesis) or "Synthesize" (uses LLM to generate answer from sources, if confidence is high enough)
      - Global mode ("All documents") defaults to "Retrieve" to avoid mixing unrelated documents
      - Document mode ("This document") defaults to "Synthesize" if LLM is available, else "Retrieve"
+   - **Quick Actions**: Available in "This document" mode only. Use "Use this doc" in Global mode results to switch and enable Quick Actions.
    - Click one of the context-aware suggestion questions or type your own
    - Press **Ask** or Enter to search
    - View results:

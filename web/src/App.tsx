@@ -1866,19 +1866,25 @@ These toggles make it easy to test different features without changing code.`
           }
           return null;
         })()}
-        <QuickActions
-          previewDocId={previewDocId}
-          documents={docs}
-          status={s}
-          onActionComplete={handleQuickActionComplete}
-          onActionError={handleQuickActionError}
-          loading={quickActionsLoading}
-          setLoading={setQuickActionsLoading}
-          showToast={showToast}
-          activeDocId={activeDocId}
-          askScope={askScope}
-          answerMode={answerMode}
-        />
+        {askScope === 'doc' ? (
+          <QuickActions
+            previewDocId={previewDocId}
+            documents={docs}
+            status={s}
+            onActionComplete={handleQuickActionComplete}
+            onActionError={handleQuickActionError}
+            loading={quickActionsLoading}
+            setLoading={setQuickActionsLoading}
+            showToast={showToast}
+            activeDocId={activeDocId}
+            askScope={askScope}
+            answerMode={answerMode}
+          />
+        ) : (
+          <div style={{ marginTop: 16, marginBottom: 16, fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>
+            Global mode is for finding relevant documents. Use 'Use this doc' above to enable Quick Actions.
+          </div>
+        )}
         <AssistantOutput
           result={quickActionResult}
           status={s}
