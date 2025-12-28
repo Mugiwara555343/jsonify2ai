@@ -82,11 +82,20 @@ This project is meant to feel like a small product: clone → start → click th
 
 6. **Ask your data:**
    - Scroll down to the **Ask** section
-   - Click one of the example questions (e.g., "What is Qdrant used for in this repo?") or type your own
+   - **Scope**: Choose between "This document" (searches only the active/previewed document) or "All documents" (searches across all indexed documents)
+   - **Answer mode**: Choose "Retrieve" (shows top matching sources only, no LLM synthesis) or "Synthesize" (uses LLM to generate answer from sources, if confidence is high enough)
+     - Global mode ("All documents") defaults to "Retrieve" to avoid mixing unrelated documents
+     - Document mode ("This document") defaults to "Synthesize" if LLM is available, else "Retrieve"
+   - Click one of the context-aware suggestion questions or type your own
    - Press **Ask** or Enter to search
    - View results:
-     - **Answer** block (if LLM synthesis is enabled) - shows a synthesized answer with an "local (ollama)" badge
+     - **Top matching documents** (Global mode only) - shows which documents contributed sources, with "Use this doc" buttons to switch to document scope
+     - **Answer** block (if synthesis is enabled and confident) - shows a synthesized answer with an "local (ollama)" badge
      - **Sources** section - always shows matching snippets with filenames, document IDs, and scores
+   - **"Use this doc" workflow**: In Global mode results, click "Use this doc" on any document to:
+     - Switch to "This document" scope
+     - Set that document as active
+     - Optionally switch to "Synthesize" mode (if LLM is available)
    - In `AUTH_MODE=local`, Ask works without any API token
    - **Note**: The "Answer" block appears only if `LLM_PROVIDER=ollama` and Ollama is reachable. Otherwise, Ask still returns sources/snippets, which is the baseline behavior.
 

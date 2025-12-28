@@ -17,6 +17,7 @@ class AskBody(BaseModel):
     mode: str = None
     document_id: str = None
     path_prefix: str = None
+    answer_mode: str = None
 
 
 def _search(q: str, k: int, document_id: str = None, path_prefix: str = None):
@@ -141,7 +142,7 @@ def ask(body: AskBody):
 
         # Optional LLM synthesis if enabled
         if settings.LLM_PROVIDER == "ollama" and snippets:
-            result = _try_llm_synthesis(body.query, result, log)
+            result = _try_llm_synthesis(body.query, result, log, body.answer_mode)
 
         return result
     else:
@@ -169,7 +170,7 @@ def ask(body: AskBody):
 
         # Optional LLM synthesis if enabled
         if settings.LLM_PROVIDER == "ollama" and snippets:
-            result = _try_llm_synthesis(body.query, result, log)
+            result = _try_llm_synthesis(body.query, result, log, body.answer_mode)
 
         return result
 
@@ -247,11 +248,17 @@ def _select_snippets(
     return out
 
 
-def _try_llm_synthesis(query: str, result: dict, log) -> dict:
+def _try_llm_synthesis(query: str, result: dict, log, answer_mode: str = None) -> dict:
     """
     Try optional LLM synthesis using Ollama if enabled and sources exist.
     Adds 'final' field to result on success.
     """
+    # If answer_mode is "retrieve", skip synthesis entirely
+    if answer_mode == "retrieve":
+        result["synth_skipped_reason"] = "retrieve_only"
+        log.info("[ask] synthesis skipped: retrieve_only mode")
+        return result
+
     if settings.LLM_PROVIDER != "ollama":
         return result
 

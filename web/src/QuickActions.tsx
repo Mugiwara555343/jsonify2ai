@@ -53,6 +53,7 @@ type QuickActionsProps = {
   showToast: (msg: string, isError?: boolean) => void;
   activeDocId: string | null;
   askScope: 'doc' | 'all';
+  answerMode: 'retrieve' | 'synthesize';
 };
 
 export default function QuickActions({
@@ -66,6 +67,7 @@ export default function QuickActions({
   showToast,
   activeDocId,
   askScope,
+  answerMode,
 }: QuickActionsProps) {
   const getTargetDocument = (): Document | null => {
     // If scope is "all", return null (no document targeting)
@@ -103,7 +105,7 @@ export default function QuickActions({
     try {
       // Determine documentId based on scope
       const documentId = askScope === 'doc' ? getTargetDocument()?.document_id : undefined;
-      const result: AskResp = await askQuestion(prompt, 6, documentId);
+      const result: AskResp = await askQuestion(prompt, 6, documentId, answerMode);
       if (result.ok === false) {
         const errorMsg = result.error === 'rate_limited'
           ? 'Rate limited — try again in a few seconds.'

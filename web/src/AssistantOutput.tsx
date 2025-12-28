@@ -38,6 +38,8 @@ type AssistantOutputProps = {
   showToast?: (msg: string, isError?: boolean) => void;
   scope?: 'doc' | 'all';
   activeDocFilename?: string;
+  onUseDoc?: (documentId: string, llmReachable: boolean) => void;
+  documents?: Array<{ document_id: string; paths: string[] }>;
 };
 
 function copyToClipboard(text: string) {
@@ -73,6 +75,8 @@ export default function AssistantOutput({
   showToast,
   scope,
   activeDocFilename,
+  onUseDoc,
+  documents,
 }: AssistantOutputProps) {
   // Empty state
   if (!loading && !error && !result) {
@@ -133,6 +137,7 @@ export default function AssistantOutput({
   const hasLLM = status?.llm?.provider === 'ollama' && status?.llm?.reachable === true;
   const showLowConfidence = result.synth_skipped_reason === "low_confidence";
   const showNoSources = result.synth_skipped_reason === "no_sources";
+  const showRetrieveOnly = result.synth_skipped_reason === "retrieve_only";
 
   // Build markdown for copy
   const buildMarkdown = (): string => {
@@ -274,6 +279,105 @@ export default function AssistantOutput({
           </div>
         </div>
       )}
+
+      {/* Top Matching Documents (Global scope only) */}
+      {scope === 'all' && sources.length > 0 && (() => {
+        // Group sources by document_id
+        const grouped = new Map<string, { sources: typeof sources; bestScore: number; filename: string }>();
+        sources.forEach((source) => {
+          const docId = source.document_id || 'unknown';
+          const filename = source.path ? source.path.split('/').pop() || source.path : 'Unknown';
+          const score = source.score || 0;
+
+          if (!grouped.has(docId)) {
+            grouped.set(docId, { sources: [], bestScore: score, filename });
+          }
+          const group = grouped.get(docId)!;
+          group.sources.push(source);
+          if (score > group.bestScore) {
+            group.bestScore = score;
+          }
+        });
+
+        const groupedArray = Array.from(grouped.entries())
+          .map(([docId, data]) => ({ docId, ...data }))
+          .sort((a, b) => b.bestScore - a.bestScore)
+          .slice(0, 5); // Top 5 documents
+
+        if (groupedArray.length === 0) return null;
+
+        return (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>
+              Top matching documents
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {groupedArray.map((group) => {
+                const docExists = documents?.some(d => d.document_id === group.docId);
+                const llmReachable = status?.llm?.reachable === true;
+                return (
+                  <div
+                    key={group.docId}
+                    style={{
+                      padding: 12,
+                      border: '1px solid #e5e7eb',
+                      borderRadius: 8,
+                      background: '#fff',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: 8,
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      <div style={{ fontWeight: 500, fontSize: 13, marginBottom: 4 }}>
+                        {group.filename}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 11, color: '#6b7280' }}>
+                          {group.sources.length} {group.sources.length === 1 ? 'source' : 'sources'}
+                        </span>
+                        <span style={{
+                          fontSize: 11,
+                          padding: '2px 6px',
+                          borderRadius: 4,
+                          background: '#f0f9ff',
+                          color: '#0369a1',
+                        }}>
+                          best: {group.bestScore.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                    {docExists && onUseDoc && (
+                      <button
+                        onClick={() => {
+                          onUseDoc(group.docId, llmReachable);
+                          if (showToast) {
+                            showToast('Switched to document mode');
+                          }
+                        }}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: 6,
+                          border: '1px solid #1976d2',
+                          background: '#1976d2',
+                          color: '#fff',
+                          cursor: 'pointer',
+                          fontSize: 12,
+                          fontWeight: 500,
+                        }}
+                      >
+                        Use this doc
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Citations */}
       {sources.length > 0 && (

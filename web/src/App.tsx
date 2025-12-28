@@ -259,6 +259,7 @@ function App() {
   const [showDropzoneHelp, setShowDropzoneHelp] = useState(false)
   const [activeDocId, setActiveDocId] = useState<string | null>(null)
   const [askScope, setAskScope] = useState<'doc' | 'all'>('all')
+  const [answerMode, setAnswerMode] = useState<'retrieve' | 'synthesize'>('retrieve')
   const currentFetchDocIdRef = useRef<string | null>(null)
   const askInputRef = useRef<HTMLInputElement>(null)
 
@@ -334,6 +335,7 @@ function App() {
   // Active document localStorage helpers
   const ACTIVE_DOC_STORAGE_KEY = "jsonify2ai.activeDoc";
   const ASK_SCOPE_STORAGE_KEY = "jsonify2ai.askScope";
+  const ANSWER_MODE_STORAGE_KEY = "jsonify2ai.answerMode";
 
   function loadActiveDocId(): string | null {
     try {
@@ -368,6 +370,36 @@ function App() {
   function saveAskScope(scope: 'doc' | 'all') {
     try {
       localStorage.setItem(ASK_SCOPE_STORAGE_KEY, scope);
+    } catch {}
+  }
+
+  function loadAnswerMode(llmReachable: boolean, scope: 'doc' | 'all'): 'retrieve' | 'synthesize' {
+    try {
+      // Use scope-specific key to store preferences per scope
+      const scopeKey = `${ANSWER_MODE_STORAGE_KEY}.${scope}`;
+      const raw = localStorage.getItem(scopeKey);
+      if (raw === 'retrieve' || raw === 'synthesize') {
+        // If LLM is off, force retrieve
+        if (!llmReachable && raw === 'synthesize') {
+          return 'retrieve';
+        }
+        return raw;
+      }
+    } catch {}
+    // Default behavior based on scope and LLM
+    if (scope === 'all') {
+      return 'retrieve';
+    } else {
+      // Doc scope: synthesize if LLM is on, else retrieve
+      return llmReachable ? 'synthesize' : 'retrieve';
+    }
+  }
+
+  function saveAnswerMode(mode: 'retrieve' | 'synthesize', scope: 'doc' | 'all') {
+    try {
+      // Store preference per scope
+      const scopeKey = `${ANSWER_MODE_STORAGE_KEY}.${scope}`;
+      localStorage.setItem(scopeKey, mode);
     } catch {}
   }
 
@@ -423,7 +455,23 @@ function App() {
     const savedScope = loadAskScope();
     setActiveDocId(savedActiveDoc);
     setAskScope(savedScope);
+    // Load answerMode (will be updated when status loads)
+    const llmReachable = s?.llm?.reachable === true;
+    const initialAnswerMode = loadAnswerMode(llmReachable, savedScope);
+    setAnswerMode(initialAnswerMode);
   }, [])
+
+  // Update answerMode when scope or LLM status changes
+  useEffect(() => {
+    const llmReachable = s?.llm?.reachable === true;
+    const newMode = loadAnswerMode(llmReachable, askScope);
+    // Only update if different to avoid unnecessary saves
+    if (newMode !== answerMode) {
+      setAnswerMode(newMode);
+      saveAnswerMode(newMode, askScope);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [askScope, s?.llm?.reachable])
 
   // Validate activeDocId exists in docs list after docs load
   useEffect(() => {
@@ -533,7 +581,7 @@ function App() {
     try {
       // Determine documentId based on scope
       const documentId = askScope === 'doc' ? getActiveDocument(true)?.document_id : undefined; // strictMode = true for doc scope
-      const j: AskResp = await askQuestion(askQ, 6, documentId);
+      const j: AskResp = await askQuestion(askQ, 6, documentId, answerMode);
       if (j.ok === false) {
         const errorMsg = j.error === "rate_limited"
           ? "Rate limited — try again in a few seconds."
@@ -1582,63 +1630,118 @@ These toggles make it easy to test different features without changing code.`
         background: '#fafafa',
       }}>
         <h2 style={{ fontSize: 18, marginBottom: 8 }}>Ask</h2>
-        {/* Scope Toggle */}
-        <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>Scope:</div>
-          <div style={{ display: 'flex', gap: 4, border: '1px solid #ddd', borderRadius: 6, padding: 2 }}>
-            <button
-              onClick={() => {
-                setAskScope('doc');
-                saveAskScope('doc');
-              }}
-              style={{
-                padding: '4px 12px',
-                borderRadius: 4,
-                border: 'none',
-                background: askScope === 'doc' ? '#1976d2' : 'transparent',
-                color: askScope === 'doc' ? '#fff' : '#666',
-                cursor: 'pointer',
-                fontSize: 12,
-                fontWeight: askScope === 'doc' ? 500 : 400
-              }}
-            >
-              This document
-            </button>
-            <button
-              onClick={() => {
-                setAskScope('all');
-                saveAskScope('all');
-              }}
-              style={{
-                padding: '4px 12px',
-                borderRadius: 4,
-                border: 'none',
-                background: askScope === 'all' ? '#1976d2' : 'transparent',
-                color: askScope === 'all' ? '#fff' : '#666',
-                cursor: 'pointer',
-                fontSize: 12,
-                fontWeight: askScope === 'all' ? 500 : 400
-              }}
-            >
-              All documents
-            </button>
-          </div>
-          {askScope === 'doc' && (() => {
-            const activeDoc = getActiveDocument(true); // strictMode = true for doc scope
-            if (activeDoc) {
-              const filename = activeDoc.paths[0] ? activeDoc.paths[0].split('/').pop() || activeDoc.paths[0] : 'Unknown';
+        {/* Scope and Answer Mode Toggles */}
+        <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>Scope:</div>
+            <div style={{ display: 'flex', gap: 4, border: '1px solid #ddd', borderRadius: 6, padding: 2 }}>
+              <button
+                onClick={() => {
+                  setAskScope('doc');
+                  saveAskScope('doc');
+                }}
+                style={{
+                  padding: '4px 12px',
+                  borderRadius: 4,
+                  border: 'none',
+                  background: askScope === 'doc' ? '#1976d2' : 'transparent',
+                  color: askScope === 'doc' ? '#fff' : '#666',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  fontWeight: askScope === 'doc' ? 500 : 400
+                }}
+              >
+                This document
+              </button>
+              <button
+                onClick={() => {
+                  setAskScope('all');
+                  saveAskScope('all');
+                }}
+                style={{
+                  padding: '4px 12px',
+                  borderRadius: 4,
+                  border: 'none',
+                  background: askScope === 'all' ? '#1976d2' : 'transparent',
+                  color: askScope === 'all' ? '#fff' : '#666',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  fontWeight: askScope === 'all' ? 500 : 400
+                }}
+              >
+                All documents
+              </button>
+            </div>
+            {askScope === 'doc' && (() => {
+              const activeDoc = getActiveDocument(true); // strictMode = true for doc scope
+              if (activeDoc) {
+                const filename = activeDoc.paths[0] ? activeDoc.paths[0].split('/').pop() || activeDoc.paths[0] : 'Unknown';
+                return (
+                  <span style={{ fontSize: 11, opacity: 0.7, fontStyle: 'italic' }}>
+                    ({filename})
+                  </span>
+                );
+              }
               return (
-                <span style={{ fontSize: 11, opacity: 0.7, fontStyle: 'italic' }}>
-                  ({filename})
+                <span style={{ fontSize: 11, color: '#dc2626', fontStyle: 'italic' }}>
+                  (No active document)
                 </span>
               );
-            }
-            return (
-              <span style={{ fontSize: 11, color: '#dc2626', fontStyle: 'italic' }}>
-                (No active document)
+            })()}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>Answer:</div>
+            <div style={{ display: 'flex', gap: 4, border: '1px solid #ddd', borderRadius: 6, padding: 2 }}>
+              <button
+                onClick={() => {
+                  setAnswerMode('retrieve');
+                  saveAnswerMode('retrieve', askScope);
+                }}
+                style={{
+                  padding: '4px 12px',
+                  borderRadius: 4,
+                  border: 'none',
+                  background: answerMode === 'retrieve' ? '#1976d2' : 'transparent',
+                  color: answerMode === 'retrieve' ? '#fff' : '#666',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  fontWeight: answerMode === 'retrieve' ? 500 : 400
+                }}
+              >
+                Retrieve
+              </button>
+              <button
+                onClick={() => {
+                  const llmReachable = s?.llm?.reachable === true;
+                  if (!llmReachable) {
+                    showToast('LLM unavailable — Retrieve only', true);
+                    return;
+                  }
+                  setAnswerMode('synthesize');
+                  saveAnswerMode('synthesize', askScope);
+                }}
+                disabled={s?.llm?.reachable !== true}
+                style={{
+                  padding: '4px 12px',
+                  borderRadius: 4,
+                  border: 'none',
+                  background: answerMode === 'synthesize' ? '#1976d2' : 'transparent',
+                  color: answerMode === 'synthesize' ? '#fff' : (s?.llm?.reachable !== true ? '#999' : '#666'),
+                  cursor: s?.llm?.reachable !== true ? 'not-allowed' : 'pointer',
+                  fontSize: 12,
+                  fontWeight: answerMode === 'synthesize' ? 500 : 400,
+                  opacity: s?.llm?.reachable !== true ? 0.5 : 1
+                }}
+              >
+                Synthesize
+              </button>
+            </div>
+            {s?.llm?.reachable !== true && (
+              <span style={{ fontSize: 11, color: '#92400e', fontStyle: 'italic' }}>
+                LLM unavailable — Retrieve only
               </span>
-            );
-          })()}
+            )}
+          </div>
         </div>
         {(() => {
           const activeDoc = askScope === 'doc' ? getActiveDocument(true) : null;
@@ -1774,6 +1877,7 @@ These toggles make it easy to test different features without changing code.`
           showToast={showToast}
           activeDocId={activeDocId}
           askScope={askScope}
+          answerMode={answerMode}
         />
         <AssistantOutput
           result={quickActionResult}
@@ -1792,6 +1896,17 @@ These toggles make it easy to test different features without changing code.`
             }
             return undefined;
           })()}
+          onUseDoc={(documentId, llmReachable) => {
+            setActiveDocId(documentId);
+            saveActiveDocId(documentId);
+            setAskScope('doc');
+            saveAskScope('doc');
+            if (llmReachable) {
+              setAnswerMode('synthesize');
+              saveAnswerMode('synthesize', 'doc');
+            }
+          }}
+          documents={docs}
         />
       </div>
       {/* Existing Ask results (for backward compatibility) */}

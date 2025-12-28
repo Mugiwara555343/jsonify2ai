@@ -194,17 +194,22 @@ export async function doSearch(q: string, kind: string, k = 5): Promise<any> {
   }
 }
 
-export async function askQuestion(query: string, k = 6, documentId?: string): Promise<any> {
+export async function askQuestion(query: string, k = 6, documentId?: string, answerMode?: 'retrieve' | 'synthesize'): Promise<any> {
   // Build URL with optional document_id query parameter
   let url = "/ask";
   if (documentId) {
     url += `?document_id=${encodeURIComponent(documentId)}`;
   }
 
+  const body: any = { query, k };
+  if (answerMode) {
+    body.answer_mode = answerMode;
+  }
+
   const r = await apiRequest(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ query, k })
+    body: JSON.stringify(body)
   }, true);
 
   if (!r.ok) {
