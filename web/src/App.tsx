@@ -641,8 +641,10 @@ function App() {
     }
   }
 
-  async function loadDemoData() {
-    setDemoLoading(true);
+  async function loadDemoData(skipLoadingState: boolean = false) {
+    if (!skipLoadingState) {
+      setDemoLoading(true);
+    }
     const demoFiles = [
       {
         name: 'demo_qdrant.md',
@@ -934,7 +936,9 @@ These toggles make it easy to test different features without changing code.`
       }
       showToast(`Demo load failed: ${errorMsg}. Check API/worker logs for details.`, true);
     } finally {
-      setDemoLoading(false);
+      if (!skipLoadingState) {
+        setDemoLoading(false);
+      }
     }
   }
 
@@ -953,7 +957,8 @@ These toggles make it easy to test different features without changing code.`
         showToast("Using existing demo data");
       } else {
         // No demo docs, load them
-        await loadDemoData();
+        // Pass skipLoadingState=true so handleStartHere manages the loading state
+        await loadDemoData(true);
         // After loadDemoData completes, refresh docs to get the new ones
         const refreshedDocs = await loadDocuments();
         const newDemoDocs = refreshedDocs.filter(d => d.paths.some(p => p.includes('demo_')));
@@ -1468,7 +1473,7 @@ These toggles make it easy to test different features without changing code.`
           </span>
         )}
         <button
-          onClick={loadDemoData}
+          onClick={() => loadDemoData()}
           disabled={uploadBusy || demoLoading}
           title="Inject a few tiny example docs."
           style={{
