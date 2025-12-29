@@ -1787,385 +1787,61 @@ These toggles make it easy to test different features without changing code.`
         status={s}
         onStatusRefresh={loadStatus}
       />
-      <div style={{
-        marginTop: 24,
-        padding: 20,
-        border: '1px solid #e5e7eb',
-        borderRadius: 12,
-        background: '#fafafa',
-      }}>
-        <h2 style={{ fontSize: 18, marginBottom: 8 }}>Ask</h2>
-        {/* Scope and Answer Mode Toggles */}
-        <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: 12, opacity: 0.7 }}>Scope:</div>
-            <div style={{ display: 'flex', gap: 4, border: '1px solid #ddd', borderRadius: 6, padding: 2 }}>
-              <button
-                onClick={() => {
-                  setAskScope('doc');
-                  saveAskScope('doc');
-                }}
-                style={{
-                  padding: '4px 12px',
-                  borderRadius: 4,
-                  border: 'none',
-                  background: askScope === 'doc' ? '#1976d2' : 'transparent',
-                  color: askScope === 'doc' ? '#fff' : '#666',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  fontWeight: askScope === 'doc' ? 500 : 400
-                }}
-              >
-                This document
-              </button>
-              <button
-                onClick={() => {
-                  setAskScope('all');
-                  saveAskScope('all');
-                }}
-                style={{
-                  padding: '4px 12px',
-                  borderRadius: 4,
-                  border: 'none',
-                  background: askScope === 'all' ? '#1976d2' : 'transparent',
-                  color: askScope === 'all' ? '#fff' : '#666',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  fontWeight: askScope === 'all' ? 500 : 400
-                }}
-              >
-                All documents
-              </button>
-            </div>
-            {askScope === 'doc' && (() => {
-              const activeDoc = getActiveDocument(true); // strictMode = true for doc scope
-              if (activeDoc) {
-                const filename = activeDoc.paths[0] ? activeDoc.paths[0].split('/').pop() || activeDoc.paths[0] : 'Unknown';
-                return (
-                  <span style={{ fontSize: 11, opacity: 0.7, fontStyle: 'italic' }}>
-                    ({filename})
-                  </span>
-                );
-              }
-              return (
-                <span style={{ fontSize: 11, color: '#dc2626', fontStyle: 'italic' }}>
-                  (No active document)
-                </span>
-              );
-            })()}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: 12, opacity: 0.7 }}>Answer:</div>
-            <div style={{ display: 'flex', gap: 4, border: '1px solid #ddd', borderRadius: 6, padding: 2 }}>
-              <button
-                onClick={() => {
-                  setAnswerMode('retrieve');
-                  saveAnswerMode('retrieve', askScope);
-                }}
-                style={{
-                  padding: '4px 12px',
-                  borderRadius: 4,
-                  border: 'none',
-                  background: answerMode === 'retrieve' ? '#1976d2' : 'transparent',
-                  color: answerMode === 'retrieve' ? '#fff' : '#666',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  fontWeight: answerMode === 'retrieve' ? 500 : 400
-                }}
-              >
-                Retrieve
-              </button>
-              <button
-                onClick={() => {
-                  const llmReachable = s?.llm?.reachable === true;
-                  if (!llmReachable) {
-                    showToast('LLM unavailable — Retrieve only', true);
-                    return;
-                  }
-                  setAnswerMode('synthesize');
-                  saveAnswerMode('synthesize', askScope);
-                }}
-                disabled={s?.llm?.reachable !== true}
-                style={{
-                  padding: '4px 12px',
-                  borderRadius: 4,
-                  border: 'none',
-                  background: answerMode === 'synthesize' ? '#1976d2' : 'transparent',
-                  color: answerMode === 'synthesize' ? '#fff' : (s?.llm?.reachable !== true ? '#999' : '#666'),
-                  cursor: s?.llm?.reachable !== true ? 'not-allowed' : 'pointer',
-                  fontSize: 12,
-                  fontWeight: answerMode === 'synthesize' ? 500 : 400,
-                  opacity: s?.llm?.reachable !== true ? 0.5 : 1
-                }}
-              >
-                Synthesize
-              </button>
-            </div>
-            {s?.llm?.reachable !== true && (
-              <span style={{ fontSize: 11, color: '#92400e', fontStyle: 'italic' }}>
-                LLM unavailable — Retrieve only
-              </span>
-            )}
-          </div>
-        </div>
-        {/* Active Document Action Bar */}
-        {askScope === 'doc' && (() => {
-          const activeDoc = getActiveDocument(true);
-          if (!activeDoc) return null;
-
-          const filename = activeDoc.paths[0] ? activeDoc.paths[0].split('/').pop() || activeDoc.paths[0] : 'Unknown';
-          const kind = activeDoc.kinds.includes('image') ? 'image' : 'text';
-          const collection = collectionForDoc(activeDoc);
-
-          return (
-            <div style={{
-              marginBottom: 12,
-              padding: 12,
-              background: '#f0f9ff',
-              border: '1px solid #bae6fd',
-              borderRadius: 8,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              flexWrap: 'wrap'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 auto' }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>{filename}</span>
-                <span style={{
-                  fontSize: 11,
-                  padding: '2px 6px',
-                  borderRadius: 12,
-                  background: '#e3f2fd',
-                  color: '#1976d2'
-                }}>
-                  {kind}
-                </span>
-              </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                <button
-                  onClick={async () => {
-                    const requestedDocId = activeDoc.document_id;
-                    currentFetchDocIdRef.current = requestedDocId;
-                    setPreviewDocId(requestedDocId);
-                    setActiveDocId(requestedDocId);
-                    saveActiveDocId(requestedDocId);
-                    setAskScope('doc');
-                    saveAskScope('doc');
-                    setPreviewLoading(true);
-                    setPreviewError(null);
-                    setPreviewLines(null);
-                    try {
-                      const result = await fetchJsonPreview(requestedDocId, collection, 5);
-                      if (currentFetchDocIdRef.current === requestedDocId) {
-                        setPreviewLines(result.lines);
-                      }
-                    } catch (err: any) {
-                      if (currentFetchDocIdRef.current === requestedDocId) {
-                        setPreviewError(err?.message || 'Failed to load JSON preview');
-                      }
-                    } finally {
-                      if (currentFetchDocIdRef.current === requestedDocId) {
-                        setPreviewLoading(false);
-                      }
-                    }
-                  }}
-                  style={{
-                    fontSize: 12,
-                    padding: '4px 8px',
-                    borderRadius: 6,
-                    border: '1px solid #ddd',
-                    background: '#fff',
-                    color: '#1976d2',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Preview JSON
-                </button>
-                <button
-                  onClick={() => {
-                    copyToClipboard(activeDoc.document_id);
-                    showToast('Document ID copied');
-                  }}
-                  style={{
-                    fontSize: 12,
-                    padding: '4px 8px',
-                    borderRadius: 6,
-                    border: '1px solid #ddd',
-                    background: '#fff',
-                    color: '#1976d2',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Copy ID
-                </button>
-                <button
-                  onClick={async () => {
-                    try {
-                      await exportJson(activeDoc.document_id, kind);
-                    } catch (err: any) {
-                      showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
-                    }
-                  }}
-                  style={{
-                    fontSize: 12,
-                    padding: '4px 8px',
-                    borderRadius: 6,
-                    border: '1px solid #ddd',
-                    background: '#fff',
-                    color: '#1976d2',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Export JSON
-                </button>
-                <button
-                  onClick={async () => {
-                    try {
-                      await exportZip(activeDoc.document_id, kind);
-                    } catch (err: any) {
-                      showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
-                    }
-                  }}
-                  style={{
-                    fontSize: 12,
-                    padding: '4px 8px',
-                    borderRadius: 6,
-                    border: '1px solid #ddd',
-                    background: '#fff',
-                    color: '#1976d2',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Export ZIP
-                </button>
-              </div>
-            </div>
-          );
-        })()}
-        {(() => {
-          const activeDoc = askScope === 'doc' ? getActiveDocument(true) : null;
-          const chips = generateSuggestionChips(askScope, activeDoc);
-          return (
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
-                {askScope === 'doc' && activeDoc
-                  ? `Try these questions about ${activeDoc.paths[0]?.split('/').pop() || 'this document'}:`
-                  : 'Try these questions (retrieval-first):'}
-              </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {chips.map((example, i) => (
-                  <button
-                    key={i}
-                    onClick={() => {
-                      setAskQ(example);
-                      // Focus the input after setting the value
-                      setTimeout(() => {
-                        if (askInputRef.current) {
-                          askInputRef.current.focus();
-                        }
-                      }, 0);
-                    }}
-                    style={{
-                      fontSize: 12,
-                      padding: '4px 8px',
-                      borderRadius: 6,
-                      border: '1px solid #ddd',
-                      background: '#fff',
-                      color: '#1976d2',
-                      cursor: 'pointer',
-                      textDecoration: 'none'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = '#f0f9ff';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = '#fff';
-                    }}
-                  >
-                    {example}
-                  </button>
-                ))}
-              </div>
-            </div>
-          );
-        })()}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input
-            ref={askInputRef}
-            value={askQ}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAskQ(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !askLoading && askQ.trim()) {
-                e.preventDefault();
-                handleAsk();
-              }
-            }}
-            placeholder="ask your data…"
-            style={{ flex: 1, padding: 12, borderRadius: 8, border: '1px solid #ddd' }}
-          />
-          <button
-            onClick={handleAsk}
-            disabled={askLoading}
-            style={{
-              padding: '12px 16px',
-              borderRadius: 8,
-              border: '1px solid #ddd',
-              opacity: askLoading ? 0.6 : 1,
-              cursor: askLoading ? 'not-allowed' : 'pointer'
-            }}
-          >
-            {askLoading ? 'Asking...' : 'Ask'}
-          </button>
-        </div>
-        {(() => {
-          const llm = s?.llm;
-          const provider = llm?.provider || 'none';
-          const reachable = llm?.reachable === true;
-
-          if (!llm || provider === 'none') {
-            return (
-              <div style={{
-                marginTop: 8,
-                padding: 8,
-                fontSize: 12,
-                color: '#6b7280',
-                fontStyle: 'italic',
-              }}>
-                Synthesis is optional. You'll still get top matching sources + exports.
-              </div>
-            );
-          } else if (provider === 'ollama' && !reachable) {
-            return (
-              <div style={{
-                marginTop: 8,
-                padding: 8,
-                fontSize: 12,
-                color: '#92400e',
-                background: '#fef3c7',
-                borderRadius: 6,
-                border: '1px solid #fde68a',
-              }}>
-                Ollama configured but unreachable. Open the panel for steps.
-              </div>
-            );
-          } else if (provider === 'ollama' && reachable) {
-            return (
-              <div style={{
-                marginTop: 8,
-                padding: 8,
-                fontSize: 12,
-                color: '#0369a1',
-                background: '#e0f2fe',
-                borderRadius: 6,
-                border: '1px solid #bae6fd',
-              }}>
-                Answer generated locally with Ollama. Sources below.
-              </div>
-            );
+      <AskPanel
+        askScope={askScope}
+        answerMode={answerMode}
+        askQ={askQ}
+        askLoading={askLoading}
+        activeDocId={activeDocId}
+        docs={docs}
+        status={s}
+        askInputRef={askInputRef}
+        onSetAskScope={setAskScope}
+        saveAskScope={saveAskScope}
+        onSetAnswerMode={setAnswerMode}
+        saveAnswerMode={saveAnswerMode}
+        onSetAskQ={setAskQ}
+        onAsk={handleAsk}
+        onClearActive={() => {
+          setActiveDocId(null);
+          saveActiveDocId(null);
+          setAskScope('all');
+          saveAskScope('all');
+        }}
+        onPreviewDoc={async (docId: string, collection: string) => {
+          currentFetchDocIdRef.current = docId;
+          setPreviewDocId(docId);
+          setActiveDocId(docId);
+          saveActiveDocId(docId);
+          setAskScope('doc');
+          saveAskScope('doc');
+          setPreviewLoading(true);
+          setPreviewError(null);
+          setPreviewLines(null);
+          try {
+            const result = await fetchJsonPreview(docId, collection, 5);
+            if (currentFetchDocIdRef.current === docId) {
+              setPreviewLines(result.lines);
+            }
+          } catch (err: any) {
+            if (currentFetchDocIdRef.current === docId) {
+              setPreviewError(err?.message || 'Failed to load JSON preview');
+            }
+          } finally {
+            if (currentFetchDocIdRef.current === docId) {
+              setPreviewLoading(false);
+            }
           }
-          return null;
-        })()}
-        {askScope === 'doc' ? (
+        }}
+        exportJson={exportJson}
+        exportZip={exportZip}
+        copyToClipboard={copyToClipboard}
+        showToast={showToast}
+        getActiveDocument={getActiveDocument}
+        collectionForDoc={collectionForDoc}
+        generateSuggestionChips={generateSuggestionChips}
+      />
+      {askScope === 'doc' ? (
           <QuickActions
             previewDocId={previewDocId}
             documents={docs}
@@ -2213,7 +1889,6 @@ These toggles make it easy to test different features without changing code.`
           }}
           documents={docs}
         />
-      </div>
       {/* Existing Ask results (for backward compatibility) */}
       {askLoading && (
           <div style={{ marginTop: 12, padding: 12, color: '#666', fontSize: 14 }}>
@@ -2370,511 +2045,128 @@ These toggles make it easy to test different features without changing code.`
           ))}
         </div>
       )}
-      <div style={{ marginTop: 24 }}>
-        <h2 style={{ fontSize: 18, marginBottom: 8 }}>Documents</h2>
-        <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 12 }}>
-          When you upload a file, jsonify2ai splits it into text chunks. Each line in the exported .jsonl is one chunk with fields like id, document_id, text, and meta.
-        </div>
-        <div style={{ marginBottom: 12 }}>
-          <button
-            onClick={loadDocuments}
-            style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14 }}
-          >
-            Refresh documents
-          </button>
-        </div>
-        {docs.length > 0 && (
-          <>
-            {/* Bulk Action Bar */}
-            {selectedDocIds.size > 0 && (
-              <div style={{
-                marginBottom: 12,
-                padding: 12,
-                background: '#f0f9ff',
-                border: '1px solid #bae6fd',
-                borderRadius: 8,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                flexWrap: 'wrap'
-              }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>
-                  {selectedDocIds.size} {selectedDocIds.size === 1 ? 'document' : 'documents'} selected
-                </span>
-                <button
-                  onClick={async () => {
-                    if (selectedDocIds.size === 1) {
-                      const docId = Array.from(selectedDocIds)[0];
-                      const doc = docs.find(d => d.document_id === docId);
-                      if (doc) {
-                        setActiveDocId(docId);
-                        saveActiveDocId(docId);
-                        setAskScope('doc');
-                        saveAskScope('doc');
-                        showToast('Document set as active');
-                        setSelectedDocIds(new Set());
-                      }
-                    }
-                  }}
-                  disabled={selectedDocIds.size !== 1}
-                  style={{
-                    padding: '6px 12px',
-                    border: '1px solid #ddd',
-                    borderRadius: 6,
-                    background: selectedDocIds.size === 1 ? '#fff' : '#f5f5f5',
-                    cursor: selectedDocIds.size === 1 ? 'pointer' : 'not-allowed',
-                    fontSize: 12,
-                    opacity: selectedDocIds.size === 1 ? 1 : 0.5
-                  }}
-                >
-                  Set Active
-                </button>
-                <button
-                  disabled
-                  title="Export ZIP works per-document. Select one document."
-                  style={{
-                    padding: '6px 12px',
-                    border: '1px solid #ddd',
-                    borderRadius: 6,
-                    background: '#f5f5f5',
-                    cursor: 'not-allowed',
-                    fontSize: 12,
-                    opacity: 0.5
-                  }}
-                >
-                  Export ZIP
-                </button>
-                <button
-                  onClick={handleBulkDelete}
-                  style={{
-                    padding: '6px 12px',
-                    border: '1px solid #dc2626',
-                    borderRadius: 6,
-                    background: '#fff',
-                    cursor: 'pointer',
-                    fontSize: 12,
-                    color: '#dc2626'
-                  }}
-                >
-                  Delete selected…
-                </button>
-                <button
-                  onClick={() => setSelectedDocIds(new Set())}
-                  style={{
-                    padding: '6px 12px',
-                    border: '1px solid #ddd',
-                    borderRadius: 6,
-                    background: '#fff',
-                    cursor: 'pointer',
-                    fontSize: 12
-                  }}
-                >
-                  Clear selection
-                </button>
-              </div>
-            )}
-            {/* Filter and Sort Toolbar */}
-            <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <input
-                type="text"
-                placeholder="Search by filename..."
-                value={docSearchFilter}
-                onChange={(e) => setDocSearchFilter(e.target.value)}
-                style={{
-                  flex: '1 1 200px',
-                  minWidth: 150,
-                  padding: '6px 12px',
-                  borderRadius: 6,
-                  border: '1px solid #ddd',
-                  fontSize: 13
-                }}
-              />
-              <select
-                value={docSortBy}
-                onChange={(e) => setDocSortBy(e.target.value as 'newest' | 'oldest' | 'most-chunks')}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 6,
-                  border: '1px solid #ddd',
-                  fontSize: 13
-                }}
-              >
-                <option value="newest">Newest first</option>
-                <option value="oldest">Oldest first</option>
-                <option value="most-chunks">Most chunks</option>
-              </select>
-            </div>
-            {(() => {
-              // Filter documents
-              let filteredDocs = docs;
-              if (docSearchFilter.trim()) {
-                const filterLower = docSearchFilter.toLowerCase();
-                filteredDocs = docs.filter(doc => {
-                  const path = doc.paths[0] || '';
-                  const filename = path.split('/').pop() || path;
-                  return filename.toLowerCase().includes(filterLower) || path.toLowerCase().includes(filterLower);
-                });
+      <DocumentList
+        docs={docs}
+        activeDocId={activeDocId}
+        previewDocId={previewDocId}
+        selectedDocIds={selectedDocIds}
+        openMenuDocId={openMenuDocId}
+        docSearchFilter={docSearchFilter}
+        docSortBy={docSortBy}
+        onSetActiveDoc={(docId: string) => {
+          setActiveDocId(docId);
+          saveActiveDocId(docId);
+          setAskScope('doc');
+          saveAskScope('doc');
+          showToast('Document set as active');
+        }}
+        saveActiveDocId={saveActiveDocId}
+        setAskScope={setAskScope}
+        saveAskScope={saveAskScope}
+        onOpenDrawer={setDrawerDocId}
+        onPreviewDoc={async (docId: string, collection: string) => {
+          currentFetchDocIdRef.current = docId;
+          setPreviewDocId(docId);
+          setActiveDocId(docId);
+          saveActiveDocId(docId);
+          setAskScope('doc');
+          saveAskScope('doc');
+          setPreviewLoading(true);
+          setPreviewError(null);
+          setPreviewLines(null);
+          try {
+            const result = await fetchJsonPreview(docId, collection, 5);
+            if (currentFetchDocIdRef.current === docId) {
+              setPreviewLines(result.lines);
+            }
+          } catch (err: any) {
+            if (currentFetchDocIdRef.current === docId) {
+              setPreviewError(err?.message || 'Failed to load JSON preview');
+            }
+          } finally {
+            if (currentFetchDocIdRef.current === docId) {
+              setPreviewLoading(false);
+            }
+          }
+        }}
+        onExportJson={async (docId: string, kind: string) => {
+          try {
+            await exportJson(docId, kind);
+          } catch (err: any) {
+            showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+          }
+        }}
+        onExportZip={async (docId: string, kind: string) => {
+          try {
+            await exportZip(docId, kind);
+          } catch (err: any) {
+            showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+          }
+        }}
+        onDeleteDoc={async (docId: string) => {
+          const doc = docs.find(d => d.document_id === docId);
+          const filename = doc?.paths[0] ? doc.paths[0].split('/').pop() || doc.paths[0] : docId;
+          const confirmed = window.confirm(`Are you sure you want to delete "${filename}"?\n\nThis will remove all chunks and images for this document from the index.`);
+          if (!confirmed) return;
+
+          try {
+            await deleteDocument(docId);
+            showToast('Document deleted successfully');
+            setSelectedDocIds(prev => {
+              const next = new Set(prev);
+              next.delete(docId);
+              return next;
+            });
+            await loadDocuments();
+            if (activeDocId === docId) {
+              setActiveDocId(null);
+              saveActiveDocId(null);
+              if (askScope === 'doc') {
+                setAskScope('all');
+                saveAskScope('all');
               }
-
-              // Sort documents
-              const sortedDocs = [...filteredDocs].sort((a, b) => {
-                if (docSortBy === 'newest') {
-                  // Sort by document_id descending (UUIDs sort chronologically)
-                  return b.document_id.localeCompare(a.document_id);
-                } else if (docSortBy === 'oldest') {
-                  // Sort by document_id ascending
-                  return a.document_id.localeCompare(b.document_id);
-                } else if (docSortBy === 'most-chunks') {
-                  // Sort by total chunks descending
-                  const totalA = Object.values(a.counts || {}).reduce((sum: number, count: unknown) => sum + (typeof count === 'number' ? count : 0), 0);
-                  const totalB = Object.values(b.counts || {}).reduce((sum: number, count: unknown) => sum + (typeof count === 'number' ? count : 0), 0);
-                  return totalB - totalA;
-                }
-                return 0;
-              });
-
-              return (
-                <div style={{ display: 'grid', gap: 8 }}>
-                  {sortedDocs.map((doc, i) => {
-              const status = getDocumentStatus(doc);
-              const totalChunks = Object.values(doc.counts || {}).reduce((sum: number, count: unknown) => sum + (typeof count === 'number' ? count : 0), 0);
-              const isActive = activeDocId === doc.document_id || (previewDocId === doc.document_id && !activeDocId);
-              return (
-                <div
-                  key={i}
-                  style={{
-                    padding: 12,
-                    border: '1px solid #eee',
-                    borderRadius: 8,
-                    position: 'relative',
-                    cursor: 'pointer'
-                  }}
-                  onClick={() => {
-                    setDrawerDocId(doc.document_id);
-                  }}
-                >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedDocIds.has(doc.document_id)}
-                    onChange={(e) => {
-                      e.stopPropagation();
-                      setSelectedDocIds(prev => {
-                        const next = new Set(prev);
-                        if (next.has(doc.document_id)) {
-                          next.delete(doc.document_id);
-                        } else {
-                          next.add(doc.document_id);
-                        }
-                        return next;
-                      });
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ cursor: 'pointer' }}
-                  />
-                  <code
-                    style={{
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                      background: '#f5f5f5',
-                      padding: '2px 6px',
-                      borderRadius: 4,
-                      cursor: 'pointer'
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveDocId(doc.document_id);
-                      saveActiveDocId(doc.document_id);
-                      // Auto-switch to document scope
-                      setAskScope('doc');
-                      saveAskScope('doc');
-                      showToast('Document set as active');
-                    }}
-                    title="Click to set as active document"
-                  >
-                    {doc.document_id}
-                  </code>
-                  {isActive && (
-                    <span style={{
-                      padding: '3px 8px',
-                      borderRadius: 6,
-                      fontSize: 11,
-                      fontWeight: 500,
-                      background: '#dbeafe',
-                      color: '#1e40af'
-                    }}>
-                      Active
-                    </span>
-                  )}
-                  <span style={{
-                    padding: '3px 8px',
-                    borderRadius: 6,
-                    fontSize: 11,
-                    fontWeight: 500,
-                    background: status === 'indexed' ? '#c6f6d5' : '#fef3c7',
-                    color: status === 'indexed' ? '#166534' : '#78350f'
-                  }}>
-                    {status === 'indexed' ? `Indexed (${totalChunks} ${totalChunks === 1 ? 'chunk' : 'chunks'})` : 'Pending / not indexed yet'}
-                  </span>
-                  <div style={{ marginLeft: 'auto', position: 'relative' }} data-menu-container>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setOpenMenuDocId(openMenuDocId === doc.document_id ? null : doc.document_id);
-                      }}
-                      style={{
-                        fontSize: 18,
-                        padding: '2px 8px',
-                        border: 'none',
-                        background: 'transparent',
-                        cursor: 'pointer',
-                        opacity: 0.6,
-                        color: '#666'
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.6'; }}
-                      title="More options"
-                    >
-                      ⋯
-                    </button>
-                    {openMenuDocId === doc.document_id && (
-                      <div data-menu-container style={{
-                        position: 'absolute',
-                        right: 0,
-                        top: '100%',
-                        marginTop: 4,
-                        background: '#fff',
-                        border: '1px solid #ddd',
-                        borderRadius: 6,
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-                        zIndex: 1000,
-                        minWidth: 150,
-                        padding: '4px 0'
-                      }}>
-                        <button
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            setOpenMenuDocId(null);
-                            setActiveDocId(doc.document_id);
-                            saveActiveDocId(doc.document_id);
-                            setAskScope('doc');
-                            saveAskScope('doc');
-                            showToast('Document set as active');
-                          }}
-                          style={{
-                            width: '100%',
-                            textAlign: 'left',
-                            padding: '6px 12px',
-                            border: 'none',
-                            background: 'transparent',
-                            cursor: 'pointer',
-                            fontSize: 13
-                          }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                        >
-                          Set Active
-                        </button>
-                        <button
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            setOpenMenuDocId(null);
-                            const collection = collectionForDoc(doc);
-                            const requestedDocId = doc.document_id;
-                            currentFetchDocIdRef.current = requestedDocId;
-                            setPreviewDocId(requestedDocId);
-                            setActiveDocId(requestedDocId);
-                            saveActiveDocId(requestedDocId);
-                            setAskScope('doc');
-                            saveAskScope('doc');
-                            setPreviewLoading(true);
-                            setPreviewError(null);
-                            setPreviewLines(null);
-                            try {
-                              const result = await fetchJsonPreview(requestedDocId, collection, 5);
-                              if (currentFetchDocIdRef.current === requestedDocId) {
-                                setPreviewLines(result.lines);
-                              }
-                            } catch (err: any) {
-                              if (currentFetchDocIdRef.current === requestedDocId) {
-                                setPreviewError(err?.message || 'Failed to load JSON preview');
-                              }
-                            } finally {
-                              if (currentFetchDocIdRef.current === requestedDocId) {
-                                setPreviewLoading(false);
-                              }
-                            }
-                          }}
-                          style={{
-                            width: '100%',
-                            textAlign: 'left',
-                            padding: '6px 12px',
-                            border: 'none',
-                            background: 'transparent',
-                            cursor: 'pointer',
-                            fontSize: 13
-                          }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                        >
-                          Preview JSON
-                        </button>
-                        <button
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            setOpenMenuDocId(null);
-                            const kind = doc.kinds.includes('image') ? 'image' : 'text';
-                            try {
-                              await exportJson(doc.document_id, kind);
-                            } catch (err: any) {
-                              showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
-                            }
-                          }}
-                          style={{
-                            width: '100%',
-                            textAlign: 'left',
-                            padding: '6px 12px',
-                            border: 'none',
-                            background: 'transparent',
-                            cursor: 'pointer',
-                            fontSize: 13
-                          }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                        >
-                          Export JSON
-                        </button>
-                        <button
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            setOpenMenuDocId(null);
-                            const kind = doc.kinds.includes('image') ? 'image' : 'text';
-                            try {
-                              await exportZip(doc.document_id, kind);
-                            } catch (err: any) {
-                              showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
-                            }
-                          }}
-                          style={{
-                            width: '100%',
-                            textAlign: 'left',
-                            padding: '6px 12px',
-                            border: 'none',
-                            background: 'transparent',
-                            cursor: 'pointer',
-                            fontSize: 13
-                          }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                        >
-                          Export ZIP
-                        </button>
-                        <div style={{ borderTop: '1px solid #eee', margin: '4px 0' }} />
-                        <button
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            setOpenMenuDocId(null);
-                            const filename = doc.paths[0] ? doc.paths[0].split('/').pop() || doc.paths[0] : doc.document_id;
-                            const confirmed = window.confirm(`Are you sure you want to delete "${filename}"?\n\nThis will remove all chunks and images for this document from the index.`);
-                            if (!confirmed) return;
-
-                            try {
-                              await deleteDocument(doc.document_id);
-                              showToast('Document deleted successfully');
-                              // Remove from selectedDocIds if present
-                              setSelectedDocIds(prev => {
-                                const next = new Set(prev);
-                                next.delete(doc.document_id);
-                                return next;
-                              });
-                              await loadDocuments();
-                              if (activeDocId === doc.document_id) {
-                                setActiveDocId(null);
-                                saveActiveDocId(null);
-                                if (askScope === 'doc') {
-                                  setAskScope('all');
-                                  saveAskScope('all');
-                                }
-                              }
-                              if (previewDocId === doc.document_id) {
-                                setPreviewDocId(null);
-                                setPreviewLines(null);
-                                setPreviewError(null);
-                              }
-                              if (drawerDocId === doc.document_id) {
-                                setDrawerDocId(null);
-                              }
-                              if (openMenuDocId === doc.document_id) {
-                                setOpenMenuDocId(null);
-                              }
-                            } catch (err: any) {
-                              const errorMsg = err?.message || err;
-                              if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
-                                showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
-                              } else {
-                                showToast(`Delete failed: ${errorMsg}`, true);
-                              }
-                            }
-                          }}
-                          style={{
-                            width: '100%',
-                            textAlign: 'left',
-                            padding: '6px 12px',
-                            border: 'none',
-                            background: 'transparent',
-                            cursor: 'pointer',
-                            fontSize: 13,
-                            color: '#dc2626'
-                          }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = '#fef2f2'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                        >
-                          Delete…
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
-                  {doc.kinds.map((kind, j) => (
-                    <span key={j} style={{ fontSize: 12, background: '#e3f2fd', color: '#1976d2', padding: '2px 6px', borderRadius: 12 }}>
-                      {kind}
-                    </span>
-                  ))}
-                </div>
-                <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
-                  {doc.paths[0] && <div>Path: {doc.paths[0]}</div>}
-                  <div>Counts: {Object.entries(doc.counts).map(([k, v]) => `${k}: ${v}`).join(', ')}</div>
-                </div>
-                </div>
-              );
-                  })}
-                </div>
-              );
-            })()}
-          </>
-        )}
-        {docs.length === 0 && (
-          <div style={{
-            padding: 24,
-            textAlign: 'center',
-            background: '#f9fafb',
-            border: '1px solid #e5e7eb',
-            borderRadius: 8,
-            color: '#6b7280'
-          }}>
-            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: '#374151' }}>
-              No documents yet
-            </div>
-            <div style={{ fontSize: 14, marginBottom: 16 }}>
-              Get started by uploading files or using the "Start here" button above.
-            </div>
-            <div style={{ fontSize: 12, opacity: 0.8 }}>
-              Supported formats: .md, .txt, .pdf, .csv, .json, and more
-            </div>
-          </div>
-        )}
-      </div>
+            }
+            if (previewDocId === docId) {
+              setPreviewDocId(null);
+              setPreviewLines(null);
+              setPreviewError(null);
+            }
+            if (drawerDocId === docId) {
+              setDrawerDocId(null);
+            }
+            if (openMenuDocId === docId) {
+              setOpenMenuDocId(null);
+            }
+          } catch (err: any) {
+            const errorMsg = err?.message || err;
+            if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
+              showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
+            } else {
+              showToast(`Delete failed: ${errorMsg}`, true);
+            }
+          }
+        }}
+        onToggleSelection={(docId: string) => {
+          setSelectedDocIds(prev => {
+            const next = new Set(prev);
+            if (next.has(docId)) {
+              next.delete(docId);
+            } else {
+              next.add(docId);
+            }
+            return next;
+          });
+        }}
+        onSetOpenMenu={setOpenMenuDocId}
+        onSetFilter={setDocSearchFilter}
+        onSetSort={setDocSortBy}
+        onBulkDelete={handleBulkDelete}
+        onClearSelection={() => setSelectedDocIds(new Set())}
+        onLoadDocuments={loadDocuments}
+        showToast={showToast}
+        getDocumentStatus={getDocumentStatus}
+        collectionForDoc={collectionForDoc}
+      />
       {previewDocId && (() => {
         const previewedDoc = docs.find(d => d.document_id === previewDocId);
         const collection = previewedDoc ? collectionForDoc(previewedDoc) : '';
@@ -2950,385 +2242,125 @@ These toggles make it easy to test different features without changing code.`
           </section>
         );
       })()}
-      {/* Document Details Drawer */}
-      {drawerDocId && (() => {
-        const drawerDoc = docs.find(d => d.document_id === drawerDocId);
-        if (!drawerDoc) {
-          return null;
-        }
-        const filename = drawerDoc.paths[0] ? drawerDoc.paths[0].split('/').pop() || drawerDoc.paths[0] : 'Unknown';
-        const kind = drawerDoc.kinds.includes('image') ? 'image' : 'text';
-        const collection = collectionForDoc(drawerDoc);
-        const status = getDocumentStatus(drawerDoc);
-        const totalChunks = Object.values(drawerDoc.counts || {}).reduce((sum: number, count: unknown) => sum + (typeof count === 'number' ? count : 0), 0);
-
-        // Extract snippet - prioritize last Ask result, then previewLines
-        let snippet = '';
-        let snippetSource: 'ask_result' | 'preview' | 'none' = 'none';
-
-        // Strategy 1: Use last Ask result if it's a global retrieve
-        if (ans && ans.sources && ans.sources.length > 0) {
-          // Find best matching source for this doc
-          const matchingHits = ans.sources.filter(hit => hit.document_id === drawerDocId);
-          if (matchingHits.length > 0) {
-            // Sort by score, take highest
-            matchingHits.sort((a, b) => (b.score || 0) - (a.score || 0));
-            const bestHit = matchingHits[0];
-            const fullText = bestHit.text || bestHit.caption || '';
-            snippet = fullText.substring(0, 500);
-            if (snippet.length < fullText.length) {
-              snippet += '...';
-            }
-            snippetSource = 'ask_result';
+      <DocumentDrawer
+        drawerDocId={drawerDocId}
+        docs={docs}
+        previewDocId={previewDocId}
+        previewLines={previewLines}
+        ans={ans}
+        askScope={askScope}
+        activeDocId={activeDocId}
+        llmReachable={s?.llm?.reachable === true}
+        askInputRef={askInputRef}
+        openMenuDocId={openMenuDocId}
+        onClose={() => setDrawerDocId(null)}
+        onUseThisDoc={(docId: string) => {
+          setDrawerDocId(null);
+          setActiveDocId(docId);
+          saveActiveDocId(docId);
+          setAskScope('doc');
+          saveAskScope('doc');
+          const llmReachable = s?.llm?.reachable === true;
+          if (llmReachable) {
+            setAnswerMode('synthesize');
+            saveAnswerMode('synthesize', 'doc');
           }
-        }
+          showToast('Document ready — Ask panel focused');
 
-        // Strategy 2: Fallback to previewLines
-        if (!snippet && previewDocId === drawerDocId && previewLines && previewLines.length > 0) {
+          // Scroll to Ask and focus input
+          setTimeout(() => {
+            askInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            setTimeout(() => {
+              askInputRef.current?.focus();
+            }, 300);
+          }, 100);
+        }}
+        onPreviewDoc={async (docId: string, collection: string) => {
+          setDrawerDocId(null);
+          currentFetchDocIdRef.current = docId;
+          setPreviewDocId(docId);
+          setActiveDocId(docId);
+          saveActiveDocId(docId);
+          setAskScope('doc');
+          saveAskScope('doc');
+          setPreviewLoading(true);
+          setPreviewError(null);
+          setPreviewLines(null);
           try {
-            const firstLine = previewLines[0];
-            const obj = JSON.parse(firstLine);
-            const fullText = obj.text || obj.caption || '';
-            snippet = fullText.substring(0, 500);
-            if (snippet.length < fullText.length) {
-              snippet += '...';
+            const result = await fetchJsonPreview(docId, collection, 5);
+            if (currentFetchDocIdRef.current === docId) {
+              setPreviewLines(result.lines);
             }
-            snippetSource = 'preview';
-          } catch {
-            // Leave snippet empty
+          } catch (err: any) {
+            if (currentFetchDocIdRef.current === docId) {
+              setPreviewError(err?.message || 'Failed to load JSON preview');
+            }
+          } finally {
+            if (currentFetchDocIdRef.current === docId) {
+              setPreviewLoading(false);
+            }
           }
-        }
+        }}
+        onExportJson={async (docId: string, kind: string) => {
+          setDrawerDocId(null);
+          try {
+            await exportJson(docId, kind);
+          } catch (err: any) {
+            showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+          }
+        }}
+        onExportZip={async (docId: string, kind: string) => {
+          setDrawerDocId(null);
+          try {
+            await exportZip(docId, kind);
+          } catch (err: any) {
+            showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+          }
+        }}
+        onDeleteDoc={async (docId: string, filename: string) => {
+          setDrawerDocId(null);
+          const confirmed = window.confirm(`Are you sure you want to delete "${filename}"?\n\nThis will remove all chunks and images for this document from the index.`);
+          if (!confirmed) return;
 
-        // Strategy 3: Show hint if no snippet
-        if (!snippet) {
-          snippetSource = 'none';
-        }
-
-        return (
-          <>
-            <div
-              style={{
-                position: 'fixed',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                background: 'rgba(0, 0, 0, 0.5)',
-                zIndex: 1000
-              }}
-              onClick={() => setDrawerDocId(null)}
-            />
-            <div
-              style={{
-                position: 'fixed',
-                right: 0,
-                top: 0,
-                bottom: 0,
-                width: '400px',
-                maxWidth: '90vw',
-                background: '#fff',
-                boxShadow: '-2px 0 8px rgba(0,0,0,0.15)',
-                zIndex: 1001,
-                overflowY: 'auto',
-                padding: 24
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <h2 style={{ fontSize: 18, margin: 0 }}>Document Details</h2>
-                <button
-                  onClick={() => setDrawerDocId(null)}
-                  style={{
-                    fontSize: 24,
-                    border: 'none',
-                    background: 'transparent',
-                    cursor: 'pointer',
-                    padding: '4px 8px',
-                    lineHeight: 1
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{filename}</div>
-                <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
-                  {drawerDoc.paths[0]}
-                </div>
-                <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-                  {drawerDoc.kinds.map((k, j) => (
-                    <span key={j} style={{
-                      fontSize: 11,
-                      padding: '2px 6px',
-                      borderRadius: 12,
-                      background: '#e3f2fd',
-                      color: '#1976d2'
-                    }}>
-                      {k}
-                    </span>
-                  ))}
-                  <span style={{
-                    padding: '3px 8px',
-                    borderRadius: 6,
-                    fontSize: 11,
-                    fontWeight: 500,
-                    background: status === 'indexed' ? '#c6f6d5' : '#fef3c7',
-                    color: status === 'indexed' ? '#166534' : '#78350f'
-                  }}>
-                    {status === 'indexed' ? `Indexed (${totalChunks} ${totalChunks === 1 ? 'chunk' : 'chunks'})` : 'Pending'}
-                  </span>
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Document ID</div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <code style={{
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                    background: '#f5f5f5',
-                    padding: '4px 8px',
-                    borderRadius: 4,
-                    flex: 1
-                  }}>
-                    {drawerDoc.document_id}
-                  </code>
-                  <button
-                    onClick={() => {
-                      copyToClipboard(drawerDoc.document_id);
-                      showToast('Document ID copied');
-                    }}
-                    style={{
-                      fontSize: 12,
-                      padding: '4px 8px',
-                      border: '1px solid #ddd',
-                      borderRadius: 4,
-                      background: '#fff',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Copy
-                  </button>
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Chunk Counts</div>
-                <div style={{ fontSize: 12, color: '#666' }}>
-                  {Object.entries(drawerDoc.counts).map(([k, v]) => (
-                    <div key={k}>{k}: {v}</div>
-                  ))}
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
-                  {snippetSource === 'ask_result' && 'Relevant excerpt (from last search)'}
-                  {snippetSource === 'preview' && 'Sample content'}
-                  {snippetSource === 'none' && 'Sample Content'}
-                </div>
-                {snippetSource === 'none' ? (
-                  <div style={{
-                    padding: 12,
-                    background: '#f9fafb',
-                    borderRadius: 6,
-                    fontSize: 12,
-                    color: '#6b7280',
-                    fontStyle: 'italic'
-                  }}>
-                    Preview JSON to see sample content
-                  </div>
-                ) : (
-                  <div style={{
-                    padding: 12,
-                    background: '#f9fafb',
-                    borderRadius: 6,
-                    fontSize: 12,
-                    color: '#374151',
-                    maxHeight: '200px',
-                    overflowY: 'auto',
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word'
-                  }}>
-                    {snippet}
-                  </div>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <button
-                  onClick={async () => {
-                    setDrawerDocId(null);
-                    setActiveDocId(drawerDoc.document_id);
-                    saveActiveDocId(drawerDoc.document_id);
-                    setAskScope('doc');
-                    saveAskScope('doc');
-                    const llmReachable = s?.llm?.reachable === true;
-                    if (llmReachable) {
-                      setAnswerMode('synthesize');
-                      saveAnswerMode('synthesize', 'doc');
-                    }
-                    showToast('Document ready — Ask panel focused');
-
-                    // Scroll to Ask and focus input
-                    setTimeout(() => {
-                      askInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                      setTimeout(() => {
-                        askInputRef.current?.focus();
-                      }, 300);
-                    }, 100);
-                  }}
-                  style={{
-                    padding: '12px 16px',
-                    border: 'none',
-                    borderRadius: 6,
-                    background: '#1976d2',
-                    color: '#fff',
-                    cursor: 'pointer',
-                    fontSize: 14,
-                    fontWeight: 600
-                  }}
-                >
-                  Use this doc
-                </button>
-                <button
-                  onClick={async () => {
-                    setDrawerDocId(null);
-                    const requestedDocId = drawerDoc.document_id;
-                    currentFetchDocIdRef.current = requestedDocId;
-                    setPreviewDocId(requestedDocId);
-                    setActiveDocId(requestedDocId);
-                    saveActiveDocId(requestedDocId);
-                    setAskScope('doc');
-                    saveAskScope('doc');
-                    setPreviewLoading(true);
-                    setPreviewError(null);
-                    setPreviewLines(null);
-                    try {
-                      const result = await fetchJsonPreview(requestedDocId, collection, 5);
-                      if (currentFetchDocIdRef.current === requestedDocId) {
-                        setPreviewLines(result.lines);
-                      }
-                    } catch (err: any) {
-                      if (currentFetchDocIdRef.current === requestedDocId) {
-                        setPreviewError(err?.message || 'Failed to load JSON preview');
-                      }
-                    } finally {
-                      if (currentFetchDocIdRef.current === requestedDocId) {
-                        setPreviewLoading(false);
-                      }
-                    }
-                  }}
-                  style={{
-                    padding: '8px 16px',
-                    border: '1px solid #ddd',
-                    borderRadius: 6,
-                    background: '#fff',
-                    cursor: 'pointer',
-                    fontSize: 13
-                  }}
-                >
-                  Preview JSON
-                </button>
-                <button
-                  onClick={async () => {
-                    setDrawerDocId(null);
-                    try {
-                      await exportJson(drawerDoc.document_id, kind);
-                    } catch (err: any) {
-                      showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
-                    }
-                  }}
-                  style={{
-                    padding: '8px 16px',
-                    border: '1px solid #ddd',
-                    borderRadius: 6,
-                    background: '#fff',
-                    cursor: 'pointer',
-                    fontSize: 13
-                  }}
-                >
-                  Export JSON
-                </button>
-                <button
-                  onClick={async () => {
-                    setDrawerDocId(null);
-                    try {
-                      await exportZip(drawerDoc.document_id, kind);
-                    } catch (err: any) {
-                      showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
-                    }
-                  }}
-                  style={{
-                    padding: '8px 16px',
-                    border: '1px solid #ddd',
-                    borderRadius: 6,
-                    background: '#fff',
-                    cursor: 'pointer',
-                    fontSize: 13
-                  }}
-                >
-                  Export ZIP
-                </button>
-                <button
-                  onClick={async () => {
-                    setDrawerDocId(null);
-                    const confirmed = window.confirm(`Are you sure you want to delete "${filename}"?\n\nThis will remove all chunks and images for this document from the index.`);
-                    if (!confirmed) return;
-
-                    try {
-                      await deleteDocument(drawerDoc.document_id);
-                      showToast('Document deleted successfully');
-                      // Remove from selectedDocIds if present
-                      setSelectedDocIds(prev => {
-                        const next = new Set(prev);
-                        next.delete(drawerDoc.document_id);
-                        return next;
-                      });
-                      await loadDocuments();
-                      if (activeDocId === drawerDoc.document_id) {
-                        setActiveDocId(null);
-                        saveActiveDocId(null);
-                        if (askScope === 'doc') {
-                          setAskScope('all');
-                          saveAskScope('all');
-                        }
-                      }
-                      if (previewDocId === drawerDoc.document_id) {
-                        setPreviewDocId(null);
-                        setPreviewLines(null);
-                        setPreviewError(null);
-                      }
-                      if (openMenuDocId === drawerDoc.document_id) {
-                        setOpenMenuDocId(null);
-                      }
-                    } catch (err: any) {
-                      const errorMsg = err?.message || err;
-                      if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
-                        showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
-                      } else {
-                        showToast(`Delete failed: ${errorMsg}`, true);
-                      }
-                    }
-                  }}
-                  style={{
-                    padding: '8px 16px',
-                    border: '1px solid #dc2626',
-                    borderRadius: 6,
-                    background: '#fff',
-                    cursor: 'pointer',
-                    fontSize: 13,
-                    color: '#dc2626'
-                  }}
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          </>
-        );
-      })()}
+          try {
+            await deleteDocument(docId);
+            showToast('Document deleted successfully');
+            setSelectedDocIds(prev => {
+              const next = new Set(prev);
+              next.delete(docId);
+              return next;
+            });
+            await loadDocuments();
+            if (activeDocId === docId) {
+              setActiveDocId(null);
+              saveActiveDocId(null);
+              if (askScope === 'doc') {
+                setAskScope('all');
+                saveAskScope('all');
+              }
+            }
+            if (previewDocId === docId) {
+              setPreviewDocId(null);
+              setPreviewLines(null);
+              setPreviewError(null);
+            }
+            if (openMenuDocId === docId) {
+              setOpenMenuDocId(null);
+            }
+          } catch (err: any) {
+            const errorMsg = err?.message || err;
+            if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
+              showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
+            } else {
+              showToast(`Delete failed: ${errorMsg}`, true);
+            }
+          }
+        }}
+        copyToClipboard={copyToClipboard}
+        showToast={showToast}
+        getDocumentStatus={getDocumentStatus}
+        collectionForDoc={collectionForDoc}
+      />
       <div style={{ marginTop: 16, opacity: .7, fontSize: 12 }}>API: {apiBase}</div>
     </div>
   )
