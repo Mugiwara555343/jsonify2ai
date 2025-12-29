@@ -260,6 +260,7 @@ function App() {
   const [activeDocId, setActiveDocId] = useState<string | null>(null)
   const [askScope, setAskScope] = useState<'doc' | 'all'>('all')
   const [answerMode, setAnswerMode] = useState<'retrieve' | 'synthesize'>('retrieve')
+  const [showWhatIsThis, setShowWhatIsThis] = useState(false)
   const currentFetchDocIdRef = useRef<string | null>(null)
   const askInputRef = useRef<HTMLInputElement>(null)
 
@@ -937,6 +938,86 @@ These toggles make it easy to test different features without changing code.`
     }
   }
 
+  async function handleStartHere() {
+    setDemoLoading(true);
+    try {
+      // Check if demo docs already exist
+      const currentDocs = await loadDocuments();
+      const demoDocs = currentDocs.filter(d => d.paths.some(p => p.includes('demo_')));
+
+      let targetDocId: string | null = null;
+
+      if (demoDocs.length > 0) {
+        // Demo docs exist, use the most recent one (first in list)
+        targetDocId = demoDocs[0].document_id;
+        showToast("Using existing demo data");
+      } else {
+        // No demo docs, load them
+        await loadDemoData();
+        // After loadDemoData completes, refresh docs to get the new ones
+        const refreshedDocs = await loadDocuments();
+        const newDemoDocs = refreshedDocs.filter(d => d.paths.some(p => p.includes('demo_')));
+        if (newDemoDocs.length > 0) {
+          targetDocId = newDemoDocs[0].document_id;
+        }
+      }
+
+      // Set up the active document, preview, scope, and answer mode
+      if (targetDocId) {
+        const targetDoc = (await loadDocuments()).find(d => d.document_id === targetDocId);
+        if (targetDoc) {
+          const collection = collectionForDoc(targetDoc);
+          currentFetchDocIdRef.current = targetDocId;
+          setPreviewDocId(targetDocId);
+          setActiveDocId(targetDocId);
+          saveActiveDocId(targetDocId);
+          setAskScope('doc');
+          saveAskScope('doc');
+
+          // Set answer mode based on LLM availability
+          const llmReachable = s?.llm?.reachable === true;
+          const newAnswerMode = llmReachable ? 'synthesize' : 'retrieve';
+          setAnswerMode(newAnswerMode);
+          saveAnswerMode(newAnswerMode, 'doc');
+
+          // Load preview
+          setPreviewLoading(true);
+          setPreviewError(null);
+          setPreviewLines(null);
+          try {
+            const result = await fetchJsonPreview(targetDocId, collection, 5);
+            if (currentFetchDocIdRef.current === targetDocId) {
+              setPreviewLines(result.lines);
+            }
+          } catch (err: any) {
+            if (currentFetchDocIdRef.current === targetDocId) {
+              setPreviewError(err?.message || 'Failed to load JSON preview');
+            }
+          } finally {
+            if (currentFetchDocIdRef.current === targetDocId) {
+              setPreviewLoading(false);
+            }
+          }
+
+          // Scroll to Ask panel and focus input
+          setTimeout(() => {
+            askInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            setTimeout(() => {
+              askInputRef.current?.focus();
+            }, 300);
+          }, 100);
+        }
+      } else {
+        showToast("No demo document found", true);
+      }
+    } catch (err: any) {
+      const errorMsg = err?.message || String(err);
+      showToast(`Start Here failed: ${errorMsg}`, true);
+    } finally {
+      setDemoLoading(false);
+    }
+  }
+
   async function onUploadChange(e: React.ChangeEvent<HTMLInputElement>) {
     if (!e.target.files?.length) return
     const file = e.target.files[0]
@@ -1136,6 +1217,93 @@ These toggles make it easy to test different features without changing code.`
       <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 8, fontStyle: 'italic' }}>
         Upload files → JSONL chunks → semantic search → exports
       </div>
+
+      {/* 3-Step How it Works Strip */}
+      <div style={{ marginBottom: 16, display: 'flex', gap: 16, flexWrap: 'wrap', padding: 12, background: '#f9fafb', borderRadius: 8, border: '1px solid #e5e7eb' }}>
+        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: '#1976d2' }}>1) Upload</div>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>Drop files anywhere or use the optional hot folder.</div>
+        </div>
+        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: '#1976d2' }}>2) Ask</div>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>Use This document for precise answers.</div>
+        </div>
+        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: '#1976d2' }}>3) Export</div>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>Download JSONL or a ZIP snapshot.</div>
+        </div>
+      </div>
+
+      {/* Start Here Button */}
+      <div style={{ marginBottom: 16 }}>
+        <button
+          onClick={handleStartHere}
+          disabled={demoLoading || uploadBusy}
+          style={{
+            fontSize: 14,
+            fontWeight: 600,
+            padding: '12px 24px',
+            borderRadius: 8,
+            border: 'none',
+            background: demoLoading || uploadBusy ? '#9ca3af' : '#1976d2',
+            color: '#fff',
+            cursor: demoLoading || uploadBusy ? 'not-allowed' : 'pointer',
+            boxShadow: demoLoading || uploadBusy ? 'none' : '0 2px 4px rgba(0,0,0,0.1)',
+            transition: 'all 0.2s'
+          }}
+          onMouseEnter={(e) => {
+            if (!demoLoading && !uploadBusy) {
+              e.currentTarget.style.background = '#1565c0';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!demoLoading && !uploadBusy) {
+              e.currentTarget.style.background = '#1976d2';
+            }
+          }}
+        >
+          {demoLoading ? 'Loading demo…' : 'Start here'}
+        </button>
+      </div>
+
+      {/* What is this? Collapsible */}
+      <div style={{ marginBottom: 16 }}>
+        <button
+          onClick={() => setShowWhatIsThis(!showWhatIsThis)}
+          style={{
+            fontSize: 13,
+            fontWeight: 500,
+            padding: '8px 12px',
+            borderRadius: 6,
+            border: '1px solid #e5e7eb',
+            background: '#fff',
+            color: '#374151',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            width: '100%',
+            textAlign: 'left'
+          }}
+        >
+          <span style={{ transform: showWhatIsThis ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>▶</span>
+          <span>What is this?</span>
+        </button>
+        {showWhatIsThis && (
+          <div style={{ marginTop: 8, padding: 12, background: '#f9fafb', borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13, lineHeight: 1.6 }}>
+            <ul style={{ margin: 0, paddingLeft: 20, color: '#374151' }}>
+              <li style={{ marginBottom: 6 }}>Local-first indexing into JSONL chunks</li>
+              <li style={{ marginBottom: 6 }}>Vectors stored in Qdrant for semantic search</li>
+              <li style={{ marginBottom: 6 }}>Optional local LLM synthesis (Ollama)</li>
+              <li style={{ marginBottom: 8 }}>Export JSON / ZIP for portability</li>
+            </ul>
+            <div style={{ marginTop: 8, padding: 8, background: '#fef3c7', borderRadius: 4, fontSize: 12, color: '#92400e' }}>
+              <strong>Privacy note:</strong> data stays on your machine unless you expose ports publicly.
+            </div>
+          </div>
+        )}
+      </div>
+
       <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 16, fontFamily: 'monospace' }}>
         Build: {BUILD_STAMP}
       </div>
@@ -1882,7 +2050,7 @@ These toggles make it easy to test different features without changing code.`
           />
         ) : (
           <div style={{ marginTop: 16, marginBottom: 16, fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>
-            Global mode is for finding relevant documents. Use 'Use this doc' above to enable Quick Actions.
+            Global mode is for finding relevant documents. Use 'Use this doc' in the results below to enable Quick Actions.
           </div>
         )}
         <AssistantOutput

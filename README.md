@@ -70,10 +70,11 @@ This project is meant to feel like a small product: clone → start → click th
 3. **Open the web UI:**
    - http://localhost:5173
 
-4. **Load demo data (fastest path):**
-   - Click **"Load demo data"** button in the upload section
-   - This instantly loads 3 example documents (Qdrant info, Export features, Environment toggles)
-   - Or follow the step-by-step guide in [DEMO_SCRIPT.md](DEMO_SCRIPT.md)
+4. **Get started (fastest path):**
+   - Click the **"Start here"** button at the top of the page
+   - This automatically loads demo data (if needed), sets up an active document, switches to "This document" scope, and scrolls to the Ask panel
+   - The button checks for existing demo documents and reuses them if available
+   - Or manually click **"Load demo data"** in the upload section and follow the step-by-step guide in [DEMO_SCRIPT.md](DEMO_SCRIPT.md)
 
 5. **Inspect the JSON:**
    - In the **Documents** section, find a document
