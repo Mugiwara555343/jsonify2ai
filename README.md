@@ -212,6 +212,21 @@ See [docs/DEPLOY.md](docs/DEPLOY.md) for more details on deployment modes.
 - **Idempotent processing**: Safe to re-run, no duplicates
 - **Export formats**: JSONL and ZIP archives with manifests
 
+## Document Workflow
+
+jsonify2ai supports a document-centric workflow for focused Q&A:
+
+1. **Find documents**: Use Global (Retrieve) mode to search across all documents and find relevant files
+2. **Activate document**: Click "Use this doc" in search results to switch to document scope
+3. **Ask questions**: In "This document" mode with Synthesize enabled, ask specific questions about the active document
+4. **Quick Actions**: Document-scoped Quick Actions (summarize, extract, etc.) are only available in "This document" mode
+5. **Export & manage**: Use the document details drawer or overflow menu to export, preview, or delete documents
+
+**Delete functionality**: Document deletion is gated for safety:
+- Enabled by default in `AUTH_MODE=local` (development mode)
+- In `AUTH_MODE=strict`, set `ENABLE_DOC_DELETE=true` to enable
+- Delete removes indexed data (vectors/chunks) from Qdrant, but does NOT delete source files from disk
+
 ---
 
 ## Support Matrix

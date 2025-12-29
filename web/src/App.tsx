@@ -263,6 +263,9 @@ function App() {
   const [showWhatIsThis, setShowWhatIsThis] = useState(false)
   const [docSearchFilter, setDocSearchFilter] = useState('')
   const [docSortBy, setDocSortBy] = useState<'newest' | 'oldest' | 'most-chunks'>('newest')
+  const [openMenuDocId, setOpenMenuDocId] = useState<string | null>(null)
+  const [drawerDocId, setDrawerDocId] = useState<string | null>(null)
+  const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set())
   const currentFetchDocIdRef = useRef<string | null>(null)
   const askInputRef = useRef<HTMLInputElement>(null)
 
@@ -504,6 +507,30 @@ function App() {
     }
   }, [docs, activeDocId, askScope])
 
+  // Close overflow menu on outside click
+  useEffect(() => {
+    if (openMenuDocId) {
+      const handleClickOutside = (e: MouseEvent) => {
+        const target = e.target as HTMLElement;
+        if (!target.closest('[data-menu-container]')) {
+          setOpenMenuDocId(null);
+        }
+      };
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [openMenuDocId])
+
+  // Close drawer if document no longer exists
+  useEffect(() => {
+    if (drawerDocId) {
+      const docExists = docs.some(d => d.document_id === drawerDocId);
+      if (!docExists) {
+        setDrawerDocId(null);
+      }
+    }
+  }, [drawerDocId, docs])
+
   const loadStatus = async () => {
     const j = await fetchStatus()
     setS(j)
@@ -640,6 +667,62 @@ function App() {
       setRes([]);
     } finally {
       setSearchLoading(false);
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    const userInput = window.prompt(`Type "DELETE" to confirm deletion of ${selectedDocIds.size} document(s):`);
+    if (userInput !== 'DELETE') {
+      return;
+    }
+
+    const ids = Array.from(selectedDocIds);
+    let successCount = 0;
+    let failCount = 0;
+    let deleteDisabled = false;
+
+    for (let i = 0; i < ids.length; i++) {
+      const docId = ids[i];
+      const doc = docs.find(d => d.document_id === docId);
+      const filename = doc?.paths[0] ? doc.paths[0].split('/').pop() || doc.paths[0] : docId;
+      try {
+        showToast(`Deleting ${filename}... (${i + 1}/${ids.length})`);
+        await deleteDocument(docId);
+        successCount++;
+        if (activeDocId === docId) {
+          setActiveDocId(null);
+          saveActiveDocId(null);
+          if (askScope === 'doc') {
+            setAskScope('all');
+            saveAskScope('all');
+          }
+        }
+        if (previewDocId === docId) {
+          setPreviewDocId(null);
+          setPreviewLines(null);
+          setPreviewError(null);
+        }
+      } catch (err: any) {
+        failCount++;
+        const errorMsg = err?.message || err;
+        if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
+          showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
+          deleteDisabled = true;
+          break; // Stop if delete is not enabled
+        } else {
+          showToast(`Failed to delete ${filename}: ${errorMsg}`, true);
+        }
+      }
+    }
+    // Refresh documents list once after all deletions complete
+    if (successCount > 0 || failCount > 0) {
+      await loadDocuments();
+    }
+    if (successCount > 0) {
+      showToast(`Deleted ${successCount} document(s)${failCount > 0 ? `, ${failCount} failed` : ''}`);
+    }
+    if (!deleteDisabled) {
+      setSelectedDocIds(new Set());
     }
   }
 
@@ -1610,12 +1693,53 @@ These toggles make it easy to test different features without changing code.`
                 return event.skip_message || event.error || event.skip_reason || 'Skipped';
               };
               return (
-                <div key={idx} style={{
-                  padding: 12,
-                  borderRadius: 8,
-                  border: '1px solid #e5e7eb',
-                  background: '#fafafa'
-                }}>
+                <div
+                  key={idx}
+                  style={{
+                    padding: 12,
+                    borderRadius: 8,
+                    border: '1px solid #e5e7eb',
+                    background: '#fafafa',
+                    cursor: event.document_id ? 'pointer' : 'default'
+                  }}
+                  onClick={async () => {
+                    if (!event.document_id) return;
+                    const eventDocId = event.document_id;
+                    // Find document - handle case where document_id might be shortened (first 8 chars)
+                    const doc = docs.find(d =>
+                      d.document_id === eventDocId ||
+                      d.document_id.startsWith(eventDocId) ||
+                      (eventDocId.length <= 8 && d.document_id.startsWith(eventDocId))
+                    );
+                    if (doc) {
+                      setActiveDocId(doc.document_id);
+                      saveActiveDocId(doc.document_id);
+                      setAskScope('doc');
+                      saveAskScope('doc');
+                      // Scroll to Ask section
+                      setTimeout(() => {
+                        askInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        setTimeout(() => {
+                          askInputRef.current?.focus();
+                        }, 300);
+                      }, 100);
+                    } else {
+                      showToast('Document no longer exists.', true);
+                    }
+                  }}
+                  onMouseEnter={(e) => {
+                    if (event.document_id) {
+                      e.currentTarget.style.background = '#f0f9ff';
+                      e.currentTarget.style.borderColor = '#bae6fd';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (event.document_id) {
+                      e.currentTarget.style.background = '#fafafa';
+                      e.currentTarget.style.borderColor = '#e5e7eb';
+                    }
+                  }}
+                >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
@@ -2395,6 +2519,94 @@ These toggles make it easy to test different features without changing code.`
         </div>
         {docs.length > 0 && (
           <>
+            {/* Bulk Action Bar */}
+            {selectedDocIds.size > 0 && (
+              <div style={{
+                marginBottom: 12,
+                padding: 12,
+                background: '#f0f9ff',
+                border: '1px solid #bae6fd',
+                borderRadius: 8,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                flexWrap: 'wrap'
+              }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>
+                  {selectedDocIds.size} {selectedDocIds.size === 1 ? 'document' : 'documents'} selected
+                </span>
+                <button
+                  onClick={async () => {
+                    if (selectedDocIds.size === 1) {
+                      const docId = Array.from(selectedDocIds)[0];
+                      const doc = docs.find(d => d.document_id === docId);
+                      if (doc) {
+                        setActiveDocId(docId);
+                        saveActiveDocId(docId);
+                        setAskScope('doc');
+                        saveAskScope('doc');
+                        showToast('Document set as active');
+                        setSelectedDocIds(new Set());
+                      }
+                    }
+                  }}
+                  disabled={selectedDocIds.size !== 1}
+                  style={{
+                    padding: '6px 12px',
+                    border: '1px solid #ddd',
+                    borderRadius: 6,
+                    background: selectedDocIds.size === 1 ? '#fff' : '#f5f5f5',
+                    cursor: selectedDocIds.size === 1 ? 'pointer' : 'not-allowed',
+                    fontSize: 12,
+                    opacity: selectedDocIds.size === 1 ? 1 : 0.5
+                  }}
+                >
+                  Set Active
+                </button>
+                <button
+                  disabled
+                  title="Export ZIP works per-document. Select one document."
+                  style={{
+                    padding: '6px 12px',
+                    border: '1px solid #ddd',
+                    borderRadius: 6,
+                    background: '#f5f5f5',
+                    cursor: 'not-allowed',
+                    fontSize: 12,
+                    opacity: 0.5
+                  }}
+                >
+                  Export ZIP
+                </button>
+                <button
+                  onClick={handleBulkDelete}
+                  style={{
+                    padding: '6px 12px',
+                    border: '1px solid #dc2626',
+                    borderRadius: 6,
+                    background: '#fff',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    color: '#dc2626'
+                  }}
+                >
+                  Delete selected…
+                </button>
+                <button
+                  onClick={() => setSelectedDocIds(new Set())}
+                  style={{
+                    padding: '6px 12px',
+                    border: '1px solid #ddd',
+                    borderRadius: 6,
+                    background: '#fff',
+                    cursor: 'pointer',
+                    fontSize: 12
+                  }}
+                >
+                  Clear selection
+                </button>
+              </div>
+            )}
             {/* Filter and Sort Toolbar */}
             <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <input
@@ -2462,8 +2674,38 @@ These toggles make it easy to test different features without changing code.`
               const totalChunks = Object.values(doc.counts || {}).reduce((sum: number, count: unknown) => sum + (typeof count === 'number' ? count : 0), 0);
               const isActive = activeDocId === doc.document_id || (previewDocId === doc.document_id && !activeDocId);
               return (
-                <div key={i} style={{ padding: 12, border: '1px solid #eee', borderRadius: 8 }}>
+                <div
+                  key={i}
+                  style={{
+                    padding: 12,
+                    border: '1px solid #eee',
+                    borderRadius: 8,
+                    position: 'relative',
+                    cursor: 'pointer'
+                  }}
+                  onClick={() => {
+                    setDrawerDocId(doc.document_id);
+                  }}
+                >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedDocIds.has(doc.document_id)}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      setSelectedDocIds(prev => {
+                        const next = new Set(prev);
+                        if (next.has(doc.document_id)) {
+                          next.delete(doc.document_id);
+                        } else {
+                          next.add(doc.document_id);
+                        }
+                        return next;
+                      });
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ cursor: 'pointer' }}
+                  />
                   <code
                     style={{
                       fontSize: 12,
@@ -2473,7 +2715,8 @@ These toggles make it easy to test different features without changing code.`
                       borderRadius: 4,
                       cursor: 'pointer'
                     }}
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       setActiveDocId(doc.document_id);
                       saveActiveDocId(doc.document_id);
                       // Auto-switch to document scope
@@ -2507,50 +2750,218 @@ These toggles make it easy to test different features without changing code.`
                   }}>
                     {status === 'indexed' ? `Indexed (${totalChunks} ${totalChunks === 1 ? 'chunk' : 'chunks'})` : 'Pending / not indexed yet'}
                   </span>
-                  <button
-                    onClick={() => {
-                      copyToClipboard(doc.document_id);
-                      showToast('Document ID copied');
-                    }}
-                    style={{ fontSize: 12, color: '#666', textDecoration: 'underline' }}
-                  >
-                    Copy ID
-                  </button>
-                  <button
-                    onClick={async () => {
-                      const filename = doc.paths[0] ? doc.paths[0].split('/').pop() || doc.paths[0] : doc.document_id;
-                      const confirmed = window.confirm(`Are you sure you want to delete "${filename}"?\n\nThis will remove all chunks and images for this document from the index.`);
-                      if (!confirmed) return;
+                  <div style={{ marginLeft: 'auto', position: 'relative' }} data-menu-container>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenMenuDocId(openMenuDocId === doc.document_id ? null : doc.document_id);
+                      }}
+                      style={{
+                        fontSize: 18,
+                        padding: '2px 8px',
+                        border: 'none',
+                        background: 'transparent',
+                        cursor: 'pointer',
+                        opacity: 0.6,
+                        color: '#666'
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.6'; }}
+                      title="More options"
+                    >
+                      ⋯
+                    </button>
+                    {openMenuDocId === doc.document_id && (
+                      <div data-menu-container style={{
+                        position: 'absolute',
+                        right: 0,
+                        top: '100%',
+                        marginTop: 4,
+                        background: '#fff',
+                        border: '1px solid #ddd',
+                        borderRadius: 6,
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                        zIndex: 1000,
+                        minWidth: 150,
+                        padding: '4px 0'
+                      }}>
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            setOpenMenuDocId(null);
+                            setActiveDocId(doc.document_id);
+                            saveActiveDocId(doc.document_id);
+                            setAskScope('doc');
+                            saveAskScope('doc');
+                            showToast('Document set as active');
+                          }}
+                          style={{
+                            width: '100%',
+                            textAlign: 'left',
+                            padding: '6px 12px',
+                            border: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                            fontSize: 13
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                        >
+                          Set Active
+                        </button>
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            setOpenMenuDocId(null);
+                            const collection = collectionForDoc(doc);
+                            const requestedDocId = doc.document_id;
+                            currentFetchDocIdRef.current = requestedDocId;
+                            setPreviewDocId(requestedDocId);
+                            setActiveDocId(requestedDocId);
+                            saveActiveDocId(requestedDocId);
+                            setAskScope('doc');
+                            saveAskScope('doc');
+                            setPreviewLoading(true);
+                            setPreviewError(null);
+                            setPreviewLines(null);
+                            try {
+                              const result = await fetchJsonPreview(requestedDocId, collection, 5);
+                              if (currentFetchDocIdRef.current === requestedDocId) {
+                                setPreviewLines(result.lines);
+                              }
+                            } catch (err: any) {
+                              if (currentFetchDocIdRef.current === requestedDocId) {
+                                setPreviewError(err?.message || 'Failed to load JSON preview');
+                              }
+                            } finally {
+                              if (currentFetchDocIdRef.current === requestedDocId) {
+                                setPreviewLoading(false);
+                              }
+                            }
+                          }}
+                          style={{
+                            width: '100%',
+                            textAlign: 'left',
+                            padding: '6px 12px',
+                            border: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                            fontSize: 13
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                        >
+                          Preview JSON
+                        </button>
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            setOpenMenuDocId(null);
+                            const kind = doc.kinds.includes('image') ? 'image' : 'text';
+                            try {
+                              await exportJson(doc.document_id, kind);
+                            } catch (err: any) {
+                              showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+                            }
+                          }}
+                          style={{
+                            width: '100%',
+                            textAlign: 'left',
+                            padding: '6px 12px',
+                            border: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                            fontSize: 13
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                        >
+                          Export JSON
+                        </button>
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            setOpenMenuDocId(null);
+                            const kind = doc.kinds.includes('image') ? 'image' : 'text';
+                            try {
+                              await exportZip(doc.document_id, kind);
+                            } catch (err: any) {
+                              showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+                            }
+                          }}
+                          style={{
+                            width: '100%',
+                            textAlign: 'left',
+                            padding: '6px 12px',
+                            border: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                            fontSize: 13
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                        >
+                          Export ZIP
+                        </button>
+                        <div style={{ borderTop: '1px solid #eee', margin: '4px 0' }} />
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            setOpenMenuDocId(null);
+                            const filename = doc.paths[0] ? doc.paths[0].split('/').pop() || doc.paths[0] : doc.document_id;
+                            const confirmed = window.confirm(`Are you sure you want to delete "${filename}"?\n\nThis will remove all chunks and images for this document from the index.`);
+                            if (!confirmed) return;
 
-                      try {
-                        await deleteDocument(doc.document_id);
-                        showToast('Document deleted successfully');
-                        // Refresh documents list
-                        await loadDocuments();
-                        // Clear active doc if it was deleted
-                        if (activeDocId === doc.document_id) {
-                          setActiveDocId(null);
-                          saveActiveDocId(null);
-                          if (askScope === 'doc') {
-                            setAskScope('all');
-                            saveAskScope('all');
-                          }
-                        }
-                        // Clear preview if it was deleted
-                        if (previewDocId === doc.document_id) {
-                          setPreviewDocId(null);
-                          setPreviewLines(null);
-                          setPreviewError(null);
-                        }
-                      } catch (err: any) {
-                        showToast(`Delete failed: ${err?.message || err}`, true);
-                      }
-                    }}
-                    style={{ fontSize: 12, color: '#dc2626', textDecoration: 'underline' }}
-                    title="Delete this document from the index"
-                  >
-                    Delete
-                  </button>
+                            try {
+                              await deleteDocument(doc.document_id);
+                              showToast('Document deleted successfully');
+                              // Remove from selectedDocIds if present
+                              setSelectedDocIds(prev => {
+                                const next = new Set(prev);
+                                next.delete(doc.document_id);
+                                return next;
+                              });
+                              await loadDocuments();
+                              if (activeDocId === doc.document_id) {
+                                setActiveDocId(null);
+                                saveActiveDocId(null);
+                                if (askScope === 'doc') {
+                                  setAskScope('all');
+                                  saveAskScope('all');
+                                }
+                              }
+                              if (previewDocId === doc.document_id) {
+                                setPreviewDocId(null);
+                                setPreviewLines(null);
+                                setPreviewError(null);
+                              }
+                            } catch (err: any) {
+                              const errorMsg = err?.message || err;
+                              if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
+                                showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
+                              } else {
+                                showToast(`Delete failed: ${errorMsg}`, true);
+                              }
+                            }
+                          }}
+                          style={{
+                            width: '100%',
+                            textAlign: 'left',
+                            padding: '6px 12px',
+                            border: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                            fontSize: 13,
+                            color: '#dc2626'
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = '#fef2f2'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                        >
+                          Delete…
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
                   {doc.kinds.map((kind, j) => (
@@ -2562,83 +2973,6 @@ These toggles make it easy to test different features without changing code.`
                 <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
                   {doc.paths[0] && <div>Path: {doc.paths[0]}</div>}
                   <div>Counts: {Object.entries(doc.counts).map(([k, v]) => `${k}: ${v}`).join(', ')}</div>
-                </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button
-                    onClick={async () => {
-                      const kind = doc.kinds.includes('image') ? 'image' : 'text';
-                      try {
-                        await exportJson(doc.document_id, kind);
-                      } catch (err: any) {
-                        showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
-                      }
-                    }}
-                    style={{ fontSize: 12, color: '#1976d2', textDecoration: 'underline' }}
-                  >
-                    Export JSON ({collectionForDoc(doc).includes('images') ? 'images.jsonl' : 'chunks.jsonl'})
-                  </button>
-                  <button
-                    onClick={async () => {
-                      const kind = doc.kinds.includes('image') ? 'image' : 'text';
-                      try {
-                        await exportZip(doc.document_id, kind);
-                      } catch (err: any) {
-                        showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
-                      }
-                    }}
-                    style={{ fontSize: 12, color: '#1976d2', textDecoration: 'underline' }}
-                  >
-                    Export ZIP (manifest + JSON)
-                  </button>
-                  <button
-                    onClick={() => {
-                      const collection = collectionForDoc(doc);
-                      const cmd = `Invoke-WebRequest "http://localhost:8082/export?document_id=${doc.document_id}&collection=${collection}" -OutFile "export_${doc.document_id}.jsonl"`;
-                      copyToClipboard(cmd);
-                      showToast('Export command copied');
-                    }}
-                    style={{ fontSize: 12, color: '#1976d2', textDecoration: 'underline' }}
-                  >
-                    Copy export cmd
-                  </button>
-                  <button
-                    onClick={async () => {
-                      const collection = collectionForDoc(doc);
-                      const requestedDocId = doc.document_id;
-                      currentFetchDocIdRef.current = requestedDocId;
-                      setPreviewDocId(requestedDocId);
-                      // Set as active document
-                      setActiveDocId(requestedDocId);
-                      saveActiveDocId(requestedDocId);
-                      // Auto-switch to document scope
-                      setAskScope('doc');
-                      saveAskScope('doc');
-                      setPreviewLoading(true);
-                      setPreviewError(null);
-                      setPreviewLines(null);
-                      try {
-                        const result = await fetchJsonPreview(requestedDocId, collection, 5);
-                        // Only update state if this fetch is still the current one
-                        if (currentFetchDocIdRef.current === requestedDocId) {
-                          setPreviewLines(result.lines);
-                        }
-                      } catch (err: any) {
-                        // Only update error if this fetch is still the current one
-                        if (currentFetchDocIdRef.current === requestedDocId) {
-                          setPreviewError(err?.message || 'Failed to load JSON preview');
-                        }
-                      } finally {
-                        // Only update loading state if this fetch is still the current one
-                        if (currentFetchDocIdRef.current === requestedDocId) {
-                          setPreviewLoading(false);
-                        }
-                      }
-                    }}
-                    style={{ fontSize: 12, color: '#1976d2', textDecoration: 'underline' }}
-                    title="Show a sample of the JSONL chunks for this document"
-                  >
-                    Preview JSON
-                  </button>
                 </div>
                 </div>
               );
@@ -2742,6 +3076,344 @@ These toggles make it easy to test different features without changing code.`
               Close
             </button>
           </section>
+        );
+      })()}
+      {/* Document Details Drawer */}
+      {drawerDocId && (() => {
+        const drawerDoc = docs.find(d => d.document_id === drawerDocId);
+        if (!drawerDoc) {
+          return null;
+        }
+        const filename = drawerDoc.paths[0] ? drawerDoc.paths[0].split('/').pop() || drawerDoc.paths[0] : 'Unknown';
+        const kind = drawerDoc.kinds.includes('image') ? 'image' : 'text';
+        const collection = collectionForDoc(drawerDoc);
+        const status = getDocumentStatus(drawerDoc);
+        const totalChunks = Object.values(drawerDoc.counts || {}).reduce((sum: number, count: unknown) => sum + (typeof count === 'number' ? count : 0), 0);
+
+        // Extract snippet from previewLines if available
+        let snippet = '';
+        let snippetHint = false;
+        if (previewDocId === drawerDocId && previewLines && previewLines.length > 0) {
+          try {
+            const firstLine = previewLines[0];
+            const obj = JSON.parse(firstLine);
+            snippet = (obj.text || obj.caption || '').substring(0, 500);
+            if (snippet.length < (obj.text || obj.caption || '').length) {
+              snippet += '...';
+            }
+          } catch {
+            snippetHint = true;
+          }
+        } else {
+          snippetHint = true;
+        }
+
+        return (
+          <>
+            <div
+              style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                background: 'rgba(0, 0, 0, 0.5)',
+                zIndex: 1000
+              }}
+              onClick={() => setDrawerDocId(null)}
+            />
+            <div
+              style={{
+                position: 'fixed',
+                right: 0,
+                top: 0,
+                bottom: 0,
+                width: '400px',
+                maxWidth: '90vw',
+                background: '#fff',
+                boxShadow: '-2px 0 8px rgba(0,0,0,0.15)',
+                zIndex: 1001,
+                overflowY: 'auto',
+                padding: 24
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <h2 style={{ fontSize: 18, margin: 0 }}>Document Details</h2>
+                <button
+                  onClick={() => setDrawerDocId(null)}
+                  style={{
+                    fontSize: 24,
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    padding: '4px 8px',
+                    lineHeight: 1
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{filename}</div>
+                <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
+                  {drawerDoc.paths[0]}
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                  {drawerDoc.kinds.map((k, j) => (
+                    <span key={j} style={{
+                      fontSize: 11,
+                      padding: '2px 6px',
+                      borderRadius: 12,
+                      background: '#e3f2fd',
+                      color: '#1976d2'
+                    }}>
+                      {k}
+                    </span>
+                  ))}
+                  <span style={{
+                    padding: '3px 8px',
+                    borderRadius: 6,
+                    fontSize: 11,
+                    fontWeight: 500,
+                    background: status === 'indexed' ? '#c6f6d5' : '#fef3c7',
+                    color: status === 'indexed' ? '#166534' : '#78350f'
+                  }}>
+                    {status === 'indexed' ? `Indexed (${totalChunks} ${totalChunks === 1 ? 'chunk' : 'chunks'})` : 'Pending'}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Document ID</div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <code style={{
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    background: '#f5f5f5',
+                    padding: '4px 8px',
+                    borderRadius: 4,
+                    flex: 1
+                  }}>
+                    {drawerDoc.document_id}
+                  </code>
+                  <button
+                    onClick={() => {
+                      copyToClipboard(drawerDoc.document_id);
+                      showToast('Document ID copied');
+                    }}
+                    style={{
+                      fontSize: 12,
+                      padding: '4px 8px',
+                      border: '1px solid #ddd',
+                      borderRadius: 4,
+                      background: '#fff',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Chunk Counts</div>
+                <div style={{ fontSize: 12, color: '#666' }}>
+                  {Object.entries(drawerDoc.counts).map(([k, v]) => (
+                    <div key={k}>{k}: {v}</div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Sample Content</div>
+                {snippetHint ? (
+                  <div style={{
+                    padding: 12,
+                    background: '#f9fafb',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    color: '#6b7280',
+                    fontStyle: 'italic'
+                  }}>
+                    Preview JSON to see sample content
+                  </div>
+                ) : (
+                  <div style={{
+                    padding: 12,
+                    background: '#f9fafb',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    color: '#374151',
+                    maxHeight: '200px',
+                    overflowY: 'auto',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word'
+                  }}>
+                    {snippet}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <button
+                  onClick={async () => {
+                    setDrawerDocId(null);
+                    setActiveDocId(drawerDoc.document_id);
+                    saveActiveDocId(drawerDoc.document_id);
+                    setAskScope('doc');
+                    saveAskScope('doc');
+                    const llmReachable = s?.llm?.reachable === true;
+                    if (llmReachable) {
+                      setAnswerMode('synthesize');
+                      saveAnswerMode('synthesize', 'doc');
+                    }
+                    showToast('Document set as active');
+                  }}
+                  style={{
+                    padding: '8px 16px',
+                    border: '1px solid #ddd',
+                    borderRadius: 6,
+                    background: '#fff',
+                    cursor: 'pointer',
+                    fontSize: 13
+                  }}
+                >
+                  Set Active
+                </button>
+                <button
+                  onClick={async () => {
+                    setDrawerDocId(null);
+                    const requestedDocId = drawerDoc.document_id;
+                    currentFetchDocIdRef.current = requestedDocId;
+                    setPreviewDocId(requestedDocId);
+                    setActiveDocId(requestedDocId);
+                    saveActiveDocId(requestedDocId);
+                    setAskScope('doc');
+                    saveAskScope('doc');
+                    setPreviewLoading(true);
+                    setPreviewError(null);
+                    setPreviewLines(null);
+                    try {
+                      const result = await fetchJsonPreview(requestedDocId, collection, 5);
+                      if (currentFetchDocIdRef.current === requestedDocId) {
+                        setPreviewLines(result.lines);
+                      }
+                    } catch (err: any) {
+                      if (currentFetchDocIdRef.current === requestedDocId) {
+                        setPreviewError(err?.message || 'Failed to load JSON preview');
+                      }
+                    } finally {
+                      if (currentFetchDocIdRef.current === requestedDocId) {
+                        setPreviewLoading(false);
+                      }
+                    }
+                  }}
+                  style={{
+                    padding: '8px 16px',
+                    border: '1px solid #ddd',
+                    borderRadius: 6,
+                    background: '#fff',
+                    cursor: 'pointer',
+                    fontSize: 13
+                  }}
+                >
+                  Preview JSON
+                </button>
+                <button
+                  onClick={async () => {
+                    setDrawerDocId(null);
+                    try {
+                      await exportJson(drawerDoc.document_id, kind);
+                    } catch (err: any) {
+                      showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+                    }
+                  }}
+                  style={{
+                    padding: '8px 16px',
+                    border: '1px solid #ddd',
+                    borderRadius: 6,
+                    background: '#fff',
+                    cursor: 'pointer',
+                    fontSize: 13
+                  }}
+                >
+                  Export JSON
+                </button>
+                <button
+                  onClick={async () => {
+                    setDrawerDocId(null);
+                    try {
+                      await exportZip(drawerDoc.document_id, kind);
+                    } catch (err: any) {
+                      showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+                    }
+                  }}
+                  style={{
+                    padding: '8px 16px',
+                    border: '1px solid #ddd',
+                    borderRadius: 6,
+                    background: '#fff',
+                    cursor: 'pointer',
+                    fontSize: 13
+                  }}
+                >
+                  Export ZIP
+                </button>
+                <button
+                  onClick={async () => {
+                    setDrawerDocId(null);
+                    const confirmed = window.confirm(`Are you sure you want to delete "${filename}"?\n\nThis will remove all chunks and images for this document from the index.`);
+                    if (!confirmed) return;
+
+                    try {
+                      await deleteDocument(drawerDoc.document_id);
+                      showToast('Document deleted successfully');
+                      // Remove from selectedDocIds if present
+                      setSelectedDocIds(prev => {
+                        const next = new Set(prev);
+                        next.delete(drawerDoc.document_id);
+                        return next;
+                      });
+                      await loadDocuments();
+                      if (activeDocId === drawerDoc.document_id) {
+                        setActiveDocId(null);
+                        saveActiveDocId(null);
+                        if (askScope === 'doc') {
+                          setAskScope('all');
+                          saveAskScope('all');
+                        }
+                      }
+                      if (previewDocId === drawerDoc.document_id) {
+                        setPreviewDocId(null);
+                        setPreviewLines(null);
+                        setPreviewError(null);
+                      }
+                    } catch (err: any) {
+                      const errorMsg = err?.message || err;
+                      if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
+                        showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
+                      } else {
+                        showToast(`Delete failed: ${errorMsg}`, true);
+                      }
+                    }
+                  }}
+                  style={{
+                    padding: '8px 16px',
+                    border: '1px solid #dc2626',
+                    borderRadius: 6,
+                    background: '#fff',
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    color: '#dc2626'
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </>
         );
       })()}
       <div style={{ marginTop: 16, opacity: .7, fontSize: 12 }}>API: {apiBase}</div>
