@@ -7,6 +7,10 @@ import { API_BASE } from './api';
 import QuickActions from './QuickActions';
 import AssistantOutput from './AssistantOutput';
 import LLMOnboardingPanel from './LLMOnboardingPanel';
+import IngestionActivity from './components/IngestionActivity';
+import AskPanel from './components/AskPanel';
+import DocumentList from './components/DocumentList';
+import DocumentDrawer from './components/DocumentDrawer';
 
 const BUILD_STAMP = "beast-2 / 2025-12-23 / commit 39ed9bb";
 
@@ -701,6 +705,12 @@ function App() {
           setPreviewDocId(null);
           setPreviewLines(null);
           setPreviewError(null);
+        }
+        if (drawerDocId === docId) {
+          setDrawerDocId(null);
+        }
+        if (openMenuDocId === docId) {
+          setOpenMenuDocId(null);
         }
       } catch (err: any) {
         failCount++;
@@ -1647,161 +1657,17 @@ These toggles make it easy to test different features without changing code.`
       )}
 
       {/* Ingestion Activity Feed */}
-      <div style={{
-        padding: 16,
-        borderRadius: 12,
-        boxShadow: '0 1px 4px rgba(0,0,0,.08)',
-        marginBottom: 16,
-        background: 'var(--bg)',
-        border: '1px solid rgba(0,0,0,.1)'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.7 }}>
-            Ingestion activity
-          </div>
-          {activityFeed.length > 0 && (
-            <button
-              onClick={clearActivityFeed}
-              style={{
-                fontSize: 11,
-                padding: '4px 8px',
-                borderRadius: 6,
-                border: '1px solid #ddd',
-                background: '#fff',
-                color: '#666',
-                cursor: 'pointer'
-              }}
-            >
-              Clear activity
-            </button>
-          )}
-        </div>
-        {activityFeed.length === 0 ? (
-          <div style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>
-            No ingestion activity yet. Upload files to see activity here.
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {activityFeed.map((event, idx) => {
-              const timestamp = new Date(event.timestamp);
-              const timeStr = timestamp.toLocaleTimeString();
-              const getSkipMessage = () => {
-                if (event.skip_reason === 'unsupported_extension') return 'Unsupported file type. Try .txt/.md/.pdf/.csv/.json';
-                if (event.skip_reason === 'empty_file') return 'File is empty';
-                if (event.skip_reason === 'extraction_failed') return `Extraction failed: ${event.error || 'Check worker logs'}`;
-                if (event.skip_reason === 'processing_failed') return `Processing failed: ${event.error || 'Check worker logs'}`;
-                return event.skip_message || event.error || event.skip_reason || 'Skipped';
-              };
-              return (
-                <div
-                  key={idx}
-                  style={{
-                    padding: 12,
-                    borderRadius: 8,
-                    border: '1px solid #e5e7eb',
-                    background: '#fafafa',
-                    cursor: event.document_id ? 'pointer' : 'default'
-                  }}
-                  onClick={async () => {
-                    if (!event.document_id) return;
-                    const eventDocId = event.document_id;
-                    // Find document - handle case where document_id might be shortened (first 8 chars)
-                    const doc = docs.find(d =>
-                      d.document_id === eventDocId ||
-                      d.document_id.startsWith(eventDocId) ||
-                      (eventDocId.length <= 8 && d.document_id.startsWith(eventDocId))
-                    );
-                    if (doc) {
-                      setActiveDocId(doc.document_id);
-                      saveActiveDocId(doc.document_id);
-                      setAskScope('doc');
-                      saveAskScope('doc');
-                      // Scroll to Ask section
-                      setTimeout(() => {
-                        askInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        setTimeout(() => {
-                          askInputRef.current?.focus();
-                        }, 300);
-                      }, 100);
-                    } else {
-                      showToast('Document no longer exists.', true);
-                    }
-                  }}
-                  onMouseEnter={(e) => {
-                    if (event.document_id) {
-                      e.currentTarget.style.background = '#f0f9ff';
-                      e.currentTarget.style.borderColor = '#bae6fd';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (event.document_id) {
-                      e.currentTarget.style.background = '#fafafa';
-                      e.currentTarget.style.borderColor = '#e5e7eb';
-                    }
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-                        {event.filename}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <span style={{
-                          padding: '3px 8px',
-                          borderRadius: 6,
-                          fontSize: 11,
-                          fontWeight: 500,
-                          background:
-                            event.status === 'processed' ? '#c6f6d5' :
-                            event.status === 'uploading' ? '#dbeafe' :
-                            event.status === 'indexing' ? '#fed7aa' :
-                            event.status === 'skipped' ? '#fef3c7' :
-                            '#fed7d7',
-                          color:
-                            event.status === 'processed' ? '#166534' :
-                            event.status === 'uploading' ? '#1e40af' :
-                            event.status === 'indexing' ? '#92400e' :
-                            event.status === 'skipped' ? '#78350f' :
-                            '#991b1b'
-                        }}>
-                          {event.status === 'processed' ? 'Processed' :
-                           event.status === 'uploading' ? 'Uploading…' :
-                           event.status === 'indexing' ? 'Indexing…' :
-                           event.status === 'skipped' ? 'Skipped' :
-                           'Error'}
-                        </span>
-                        {event.chunks !== undefined && event.status === 'processed' && (
-                          <span style={{ fontSize: 11, opacity: 0.7 }}>
-                            {event.chunks} {event.chunks === 1 ? 'chunk' : 'chunks'}
-                          </span>
-                        )}
-                        {event.document_id && (
-                          <code style={{ fontSize: 10, fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
-                            {event.document_id}
-                          </code>
-                        )}
-                      </div>
-                      {event.skip_reason && (
-                        <div style={{ fontSize: 11, marginTop: 6, color: '#92400e' }}>
-                          {getSkipMessage()}
-                        </div>
-                      )}
-                      {event.error && event.status === 'error' && (
-                        <div style={{ fontSize: 11, marginTop: 6, color: '#dc2626' }}>
-                          {event.error}
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 10, color: '#9ca3af', marginLeft: 8 }}>
-                      {timeStr}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      <IngestionActivity
+        activityFeed={activityFeed}
+        docs={docs}
+        askInputRef={askInputRef}
+        onClearActivity={clearActivityFeed}
+        onSetActiveDoc={setActiveDocId}
+        saveActiveDocId={saveActiveDocId}
+        setAskScope={setAskScope}
+        saveAskScope={saveAskScope}
+        showToast={showToast}
+      />
 
       <div style={{ display: 'flex', gap: 8 }}>
           {(() => {
@@ -2935,6 +2801,12 @@ These toggles make it easy to test different features without changing code.`
                                 setPreviewLines(null);
                                 setPreviewError(null);
                               }
+                              if (drawerDocId === doc.document_id) {
+                                setDrawerDocId(null);
+                              }
+                              if (openMenuDocId === doc.document_id) {
+                                setOpenMenuDocId(null);
+                              }
                             } catch (err: any) {
                               const errorMsg = err?.message || err;
                               if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
@@ -3090,22 +2962,46 @@ These toggles make it easy to test different features without changing code.`
         const status = getDocumentStatus(drawerDoc);
         const totalChunks = Object.values(drawerDoc.counts || {}).reduce((sum: number, count: unknown) => sum + (typeof count === 'number' ? count : 0), 0);
 
-        // Extract snippet from previewLines if available
+        // Extract snippet - prioritize last Ask result, then previewLines
         let snippet = '';
-        let snippetHint = false;
-        if (previewDocId === drawerDocId && previewLines && previewLines.length > 0) {
+        let snippetSource: 'ask_result' | 'preview' | 'none' = 'none';
+
+        // Strategy 1: Use last Ask result if it's a global retrieve
+        if (ans && ans.sources && ans.sources.length > 0) {
+          // Find best matching source for this doc
+          const matchingHits = ans.sources.filter(hit => hit.document_id === drawerDocId);
+          if (matchingHits.length > 0) {
+            // Sort by score, take highest
+            matchingHits.sort((a, b) => (b.score || 0) - (a.score || 0));
+            const bestHit = matchingHits[0];
+            const fullText = bestHit.text || bestHit.caption || '';
+            snippet = fullText.substring(0, 500);
+            if (snippet.length < fullText.length) {
+              snippet += '...';
+            }
+            snippetSource = 'ask_result';
+          }
+        }
+
+        // Strategy 2: Fallback to previewLines
+        if (!snippet && previewDocId === drawerDocId && previewLines && previewLines.length > 0) {
           try {
             const firstLine = previewLines[0];
             const obj = JSON.parse(firstLine);
-            snippet = (obj.text || obj.caption || '').substring(0, 500);
-            if (snippet.length < (obj.text || obj.caption || '').length) {
+            const fullText = obj.text || obj.caption || '';
+            snippet = fullText.substring(0, 500);
+            if (snippet.length < fullText.length) {
               snippet += '...';
             }
+            snippetSource = 'preview';
           } catch {
-            snippetHint = true;
+            // Leave snippet empty
           }
-        } else {
-          snippetHint = true;
+        }
+
+        // Strategy 3: Show hint if no snippet
+        if (!snippet) {
+          snippetSource = 'none';
         }
 
         return (
@@ -3227,8 +3123,12 @@ These toggles make it easy to test different features without changing code.`
               </div>
 
               <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Sample Content</div>
-                {snippetHint ? (
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                  {snippetSource === 'ask_result' && 'Relevant excerpt (from last search)'}
+                  {snippetSource === 'preview' && 'Sample content'}
+                  {snippetSource === 'none' && 'Sample Content'}
+                </div>
+                {snippetSource === 'none' ? (
                   <div style={{
                     padding: 12,
                     background: '#f9fafb',
@@ -3269,18 +3169,28 @@ These toggles make it easy to test different features without changing code.`
                       setAnswerMode('synthesize');
                       saveAnswerMode('synthesize', 'doc');
                     }
-                    showToast('Document set as active');
+                    showToast('Document ready — Ask panel focused');
+
+                    // Scroll to Ask and focus input
+                    setTimeout(() => {
+                      askInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      setTimeout(() => {
+                        askInputRef.current?.focus();
+                      }, 300);
+                    }, 100);
                   }}
                   style={{
-                    padding: '8px 16px',
-                    border: '1px solid #ddd',
+                    padding: '12px 16px',
+                    border: 'none',
                     borderRadius: 6,
-                    background: '#fff',
+                    background: '#1976d2',
+                    color: '#fff',
                     cursor: 'pointer',
-                    fontSize: 13
+                    fontSize: 14,
+                    fontWeight: 600
                   }}
                 >
-                  Set Active
+                  Use this doc
                 </button>
                 <button
                   onClick={async () => {
@@ -3389,6 +3299,9 @@ These toggles make it easy to test different features without changing code.`
                         setPreviewDocId(null);
                         setPreviewLines(null);
                         setPreviewError(null);
+                      }
+                      if (openMenuDocId === drawerDoc.document_id) {
+                        setOpenMenuDocId(null);
                       }
                     } catch (err: any) {
                       const errorMsg = err?.message || err;
