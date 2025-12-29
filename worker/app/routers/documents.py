@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
+import os
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Depends
 from qdrant_client import QdrantClient
 from worker.app.config import settings
-from worker.app.services.qdrant_client import get_qdrant_client
+from worker.app.services.qdrant_client import get_qdrant_client, delete_by_document_id
+from worker.app.dependencies.auth import require_auth
 from collections import defaultdict
 from typing import Dict, List, Any
 
@@ -142,3 +144,38 @@ def get_documents():
 
     # Limit to last 200 documents
     return result[:200]
+
+
+@router.delete("/documents/{document_id}")
+def delete_document(document_id: str, _: bool = Depends(require_auth)):
+    """Delete a document from both collections. Gated by AUTH_MODE or ENABLE_DOC_DELETE."""
+    # Check gating: AUTH_MODE=local OR ENABLE_DOC_DELETE=true
+    auth_mode = os.getenv("AUTH_MODE", "local")
+    enable_delete = os.getenv("ENABLE_DOC_DELETE", "").lower() == "true"
+
+    if auth_mode != "local" and not enable_delete:
+        raise HTTPException(
+            status_code=403,
+            detail="Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true",
+        )
+
+    client = get_qdrant_client()
+
+    # Delete from both collections
+    deleted_chunks = delete_by_document_id(
+        document_id, client=client, collection_name=settings.QDRANT_COLLECTION
+    )
+    deleted_images = delete_by_document_id(
+        document_id, client=client, collection_name=settings.QDRANT_COLLECTION_IMAGES
+    )
+
+    logger.info(
+        f"Deleted document {document_id}: chunks={deleted_chunks}, images={deleted_images}"
+    )
+
+    return {
+        "ok": True,
+        "document_id": document_id,
+        "deleted_chunks": deleted_chunks,
+        "deleted_images": deleted_images,
+    }

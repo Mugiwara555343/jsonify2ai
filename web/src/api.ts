@@ -329,3 +329,16 @@ export async function fetchJsonPreview(
   const lines = text.split('\n').filter(Boolean).slice(0, maxLines);
   return { lines };
 }
+
+export async function deleteDocument(documentId: string): Promise<void> {
+  const response = await apiRequest(
+    `/documents/${encodeURIComponent(documentId)}`,
+    { method: 'DELETE' },
+    true
+  );
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    const errorMsg = errorData?.detail || errorData?.error || `Delete failed: ${response.status}`;
+    throw new Error(errorMsg);
+  }
+}

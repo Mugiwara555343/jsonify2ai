@@ -269,6 +269,31 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 		forwardResp(c, resp)
 	})
 
+	// DELETE /documents/:id → forward to worker /documents/:id (protected)
+	r.DELETE("/documents/:id", middleware.AuthMiddleware(cfg), func(c *gin.Context) {
+		documentID := c.Param("id")
+		target := getWorkerBase() + "/documents/" + documentID
+		req, err := http.NewRequestWithContext(c.Request.Context(), "DELETE", target, nil)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "request build failed", "detail": err.Error()})
+			return
+		}
+		// Forward Request-ID to worker
+		if requestID := c.GetString("request_id"); requestID != "" {
+			req.Header.Set("X-Request-Id", requestID)
+		}
+		// Forward worker auth token if configured
+		if cfg.WorkerAuthToken != "" {
+			req.Header.Set("Authorization", "Bearer "+cfg.WorkerAuthToken)
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "worker unreachable", "detail": err.Error()})
+			return
+		}
+		forwardResp(c, resp)
+	})
+
 	// Add ask/search routes with config
 	// addAskSearchRoutes(r, getWorkerBase(), cfg) // Commented out due to duplicate /search route
 

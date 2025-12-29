@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import ThemeControls from "./ThemeControls";
 import { applyTheme, loadTheme } from "./theme";
 import './App.css'
-import { uploadFile, doSearch, askQuestion, fetchStatus, fetchDocuments, exportJson, exportZip, apiRequest, fetchJsonPreview, collectionForKind } from './api'
+import { uploadFile, doSearch, askQuestion, fetchStatus, fetchDocuments, exportJson, exportZip, apiRequest, fetchJsonPreview, collectionForKind, deleteDocument } from './api'
 import { API_BASE } from './api';
 import QuickActions from './QuickActions';
 import AssistantOutput from './AssistantOutput';
@@ -261,6 +261,8 @@ function App() {
   const [askScope, setAskScope] = useState<'doc' | 'all'>('all')
   const [answerMode, setAnswerMode] = useState<'retrieve' | 'synthesize'>('retrieve')
   const [showWhatIsThis, setShowWhatIsThis] = useState(false)
+  const [docSearchFilter, setDocSearchFilter] = useState('')
+  const [docSortBy, setDocSortBy] = useState<'newest' | 'oldest' | 'most-chunks'>('newest')
   const currentFetchDocIdRef = useRef<string | null>(null)
   const askInputRef = useRef<HTMLInputElement>(null)
 
@@ -1916,6 +1918,140 @@ These toggles make it easy to test different features without changing code.`
             )}
           </div>
         </div>
+        {/* Active Document Action Bar */}
+        {askScope === 'doc' && (() => {
+          const activeDoc = getActiveDocument(true);
+          if (!activeDoc) return null;
+
+          const filename = activeDoc.paths[0] ? activeDoc.paths[0].split('/').pop() || activeDoc.paths[0] : 'Unknown';
+          const kind = activeDoc.kinds.includes('image') ? 'image' : 'text';
+          const collection = collectionForDoc(activeDoc);
+
+          return (
+            <div style={{
+              marginBottom: 12,
+              padding: 12,
+              background: '#f0f9ff',
+              border: '1px solid #bae6fd',
+              borderRadius: 8,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              flexWrap: 'wrap'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 auto' }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>{filename}</span>
+                <span style={{
+                  fontSize: 11,
+                  padding: '2px 6px',
+                  borderRadius: 12,
+                  background: '#e3f2fd',
+                  color: '#1976d2'
+                }}>
+                  {kind}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <button
+                  onClick={async () => {
+                    const requestedDocId = activeDoc.document_id;
+                    currentFetchDocIdRef.current = requestedDocId;
+                    setPreviewDocId(requestedDocId);
+                    setActiveDocId(requestedDocId);
+                    saveActiveDocId(requestedDocId);
+                    setAskScope('doc');
+                    saveAskScope('doc');
+                    setPreviewLoading(true);
+                    setPreviewError(null);
+                    setPreviewLines(null);
+                    try {
+                      const result = await fetchJsonPreview(requestedDocId, collection, 5);
+                      if (currentFetchDocIdRef.current === requestedDocId) {
+                        setPreviewLines(result.lines);
+                      }
+                    } catch (err: any) {
+                      if (currentFetchDocIdRef.current === requestedDocId) {
+                        setPreviewError(err?.message || 'Failed to load JSON preview');
+                      }
+                    } finally {
+                      if (currentFetchDocIdRef.current === requestedDocId) {
+                        setPreviewLoading(false);
+                      }
+                    }
+                  }}
+                  style={{
+                    fontSize: 12,
+                    padding: '4px 8px',
+                    borderRadius: 6,
+                    border: '1px solid #ddd',
+                    background: '#fff',
+                    color: '#1976d2',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Preview JSON
+                </button>
+                <button
+                  onClick={() => {
+                    copyToClipboard(activeDoc.document_id);
+                    showToast('Document ID copied');
+                  }}
+                  style={{
+                    fontSize: 12,
+                    padding: '4px 8px',
+                    borderRadius: 6,
+                    border: '1px solid #ddd',
+                    background: '#fff',
+                    color: '#1976d2',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Copy ID
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      await exportJson(activeDoc.document_id, kind);
+                    } catch (err: any) {
+                      showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+                    }
+                  }}
+                  style={{
+                    fontSize: 12,
+                    padding: '4px 8px',
+                    borderRadius: 6,
+                    border: '1px solid #ddd',
+                    background: '#fff',
+                    color: '#1976d2',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Export JSON
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      await exportZip(activeDoc.document_id, kind);
+                    } catch (err: any) {
+                      showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+                    }
+                  }}
+                  style={{
+                    fontSize: 12,
+                    padding: '4px 8px',
+                    borderRadius: 6,
+                    border: '1px solid #ddd',
+                    background: '#fff',
+                    color: '#1976d2',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Export ZIP
+                </button>
+              </div>
+            </div>
+          );
+        })()}
         {(() => {
           const activeDoc = askScope === 'doc' ? getActiveDocument(true) : null;
           const chips = generateSuggestionChips(askScope, activeDoc);
@@ -2258,8 +2394,70 @@ These toggles make it easy to test different features without changing code.`
           </button>
         </div>
         {docs.length > 0 && (
-          <div style={{ display: 'grid', gap: 8 }}>
-            {docs.map((doc, i) => {
+          <>
+            {/* Filter and Sort Toolbar */}
+            <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                type="text"
+                placeholder="Search by filename..."
+                value={docSearchFilter}
+                onChange={(e) => setDocSearchFilter(e.target.value)}
+                style={{
+                  flex: '1 1 200px',
+                  minWidth: 150,
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  border: '1px solid #ddd',
+                  fontSize: 13
+                }}
+              />
+              <select
+                value={docSortBy}
+                onChange={(e) => setDocSortBy(e.target.value as 'newest' | 'oldest' | 'most-chunks')}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  border: '1px solid #ddd',
+                  fontSize: 13
+                }}
+              >
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="most-chunks">Most chunks</option>
+              </select>
+            </div>
+            {(() => {
+              // Filter documents
+              let filteredDocs = docs;
+              if (docSearchFilter.trim()) {
+                const filterLower = docSearchFilter.toLowerCase();
+                filteredDocs = docs.filter(doc => {
+                  const path = doc.paths[0] || '';
+                  const filename = path.split('/').pop() || path;
+                  return filename.toLowerCase().includes(filterLower) || path.toLowerCase().includes(filterLower);
+                });
+              }
+
+              // Sort documents
+              const sortedDocs = [...filteredDocs].sort((a, b) => {
+                if (docSortBy === 'newest') {
+                  // Sort by document_id descending (UUIDs sort chronologically)
+                  return b.document_id.localeCompare(a.document_id);
+                } else if (docSortBy === 'oldest') {
+                  // Sort by document_id ascending
+                  return a.document_id.localeCompare(b.document_id);
+                } else if (docSortBy === 'most-chunks') {
+                  // Sort by total chunks descending
+                  const totalA = Object.values(a.counts || {}).reduce((sum: number, count: unknown) => sum + (typeof count === 'number' ? count : 0), 0);
+                  const totalB = Object.values(b.counts || {}).reduce((sum: number, count: unknown) => sum + (typeof count === 'number' ? count : 0), 0);
+                  return totalB - totalA;
+                }
+                return 0;
+              });
+
+              return (
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {sortedDocs.map((doc, i) => {
               const status = getDocumentStatus(doc);
               const totalChunks = Object.values(doc.counts || {}).reduce((sum: number, count: unknown) => sum + (typeof count === 'number' ? count : 0), 0);
               const isActive = activeDocId === doc.document_id || (previewDocId === doc.document_id && !activeDocId);
@@ -2317,6 +2515,41 @@ These toggles make it easy to test different features without changing code.`
                     style={{ fontSize: 12, color: '#666', textDecoration: 'underline' }}
                   >
                     Copy ID
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const filename = doc.paths[0] ? doc.paths[0].split('/').pop() || doc.paths[0] : doc.document_id;
+                      const confirmed = window.confirm(`Are you sure you want to delete "${filename}"?\n\nThis will remove all chunks and images for this document from the index.`);
+                      if (!confirmed) return;
+
+                      try {
+                        await deleteDocument(doc.document_id);
+                        showToast('Document deleted successfully');
+                        // Refresh documents list
+                        await loadDocuments();
+                        // Clear active doc if it was deleted
+                        if (activeDocId === doc.document_id) {
+                          setActiveDocId(null);
+                          saveActiveDocId(null);
+                          if (askScope === 'doc') {
+                            setAskScope('all');
+                            saveAskScope('all');
+                          }
+                        }
+                        // Clear preview if it was deleted
+                        if (previewDocId === doc.document_id) {
+                          setPreviewDocId(null);
+                          setPreviewLines(null);
+                          setPreviewError(null);
+                        }
+                      } catch (err: any) {
+                        showToast(`Delete failed: ${err?.message || err}`, true);
+                      }
+                    }}
+                    style={{ fontSize: 12, color: '#dc2626', textDecoration: 'underline' }}
+                    title="Delete this document from the index"
+                  >
+                    Delete
                   </button>
                 </div>
                 <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -2409,11 +2642,31 @@ These toggles make it easy to test different features without changing code.`
                 </div>
                 </div>
               );
-            })}
-          </div>
+                  })}
+                </div>
+              );
+            })()}
+          </>
         )}
         {docs.length === 0 && (
-          <div style={{ color: '#666', fontSize: 14 }}>No documents found. Upload some files to see them here.</div>
+          <div style={{
+            padding: 24,
+            textAlign: 'center',
+            background: '#f9fafb',
+            border: '1px solid #e5e7eb',
+            borderRadius: 8,
+            color: '#6b7280'
+          }}>
+            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: '#374151' }}>
+              No documents yet
+            </div>
+            <div style={{ fontSize: 14, marginBottom: 16 }}>
+              Get started by uploading files or using the "Start here" button above.
+            </div>
+            <div style={{ fontSize: 12, opacity: 0.8 }}>
+              Supported formats: .md, .txt, .pdf, .csv, .json, and more
+            </div>
+          </div>
         )}
       </div>
       {previewDocId && (() => {
