@@ -24,7 +24,7 @@ interface DocumentListProps {
   onSetSort: (sort: 'newest' | 'oldest' | 'most-chunks') => void;
   onBulkDelete: () => Promise<void>;
   onClearSelection: () => void;
-  onLoadDocuments: () => Promise<void>;
+  onLoadDocuments: () => Promise<Document[]>;
   showToast: (msg: string, isError?: boolean) => void;
   getDocumentStatus: (doc: Document) => 'indexed' | 'pending';
   collectionForDoc: (doc: Document) => string;
