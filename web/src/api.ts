@@ -331,14 +331,52 @@ export async function fetchJsonPreview(
 }
 
 export async function deleteDocument(documentId: string): Promise<void> {
-  const response = await apiRequest(
-    `/documents/${encodeURIComponent(documentId)}`,
-    { method: 'DELETE' },
-    true
-  );
+  let response: Response;
+  try {
+    response = await apiRequest(
+      `/documents/${encodeURIComponent(documentId)}`,
+      { method: 'DELETE' },
+      true
+    );
+  } catch (err: any) {
+    // Handle network/CORS errors that occur before response
+    if (err?.message?.includes('Failed to fetch') || err?.message?.includes('NetworkError') || err?.name === 'TypeError') {
+      throw new Error('Delete failed: Network error. Check CORS configuration.');
+    }
+    throw err;
+  }
+
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    const errorMsg = errorData?.detail || errorData?.error || `Delete failed: ${response.status}`;
+    let errorData: any = {};
+    let errorMsg = `Delete failed: ${response.status}`;
+
+    try {
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        errorData = await response.json().catch(() => ({}));
+      } else {
+        const text = await response.text().catch(() => "");
+        errorData = { error: text || `HTTP ${response.status}` };
+      }
+    } catch (e) {
+      // If we can't parse the response, use status code
+      errorData = { error: `HTTP ${response.status}` };
+    }
+
+    // Extract error message with priority: detail > error > status
+    errorMsg = errorData?.detail || errorData?.error || errorMsg;
+
+    // Provide specific messages for common status codes
+    if (response.status === 403) {
+      if (errorMsg.includes('not enabled') || errorMsg.includes('Delete not enabled')) {
+        errorMsg = 'Delete is disabled (set AUTH_MODE=local or ENABLE_DOC_DELETE=true)';
+      } else {
+        errorMsg = errorMsg || 'Delete is disabled (set AUTH_MODE=local or ENABLE_DOC_DELETE=true)';
+      }
+    } else if (response.status === 404) {
+      errorMsg = 'Document not found';
+    }
+
     throw new Error(errorMsg);
   }
 }

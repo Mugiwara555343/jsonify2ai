@@ -339,7 +339,12 @@ export default function DocumentList(props: DocumentListProps) {
                             onClick={async (e) => {
                               e.stopPropagation();
                               onSetOpenMenu(null);
-                              await onDeleteDoc(doc.document_id);
+                              try {
+                                await onDeleteDoc(doc.document_id);
+                              } catch (err: any) {
+                                const errorMsg = err?.message || err || 'Delete failed';
+                                showToast(errorMsg, true);
+                              }
                             }}
                             style={{
                               width: '100%',

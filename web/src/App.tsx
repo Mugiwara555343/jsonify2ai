@@ -714,9 +714,18 @@ function App() {
         }
       } catch (err: any) {
         failCount++;
-        const errorMsg = err?.message || err;
-        if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
-          showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
+        const errorMsg = err?.message || err || 'Unknown error';
+
+        // Check for CORS/network errors
+        if (errorMsg.includes('Network error') || errorMsg.includes('CORS')) {
+          showToast(`Delete failed: Network/CORS error. Check browser console.`, true);
+          deleteDisabled = true;
+          break; // Stop on CORS errors
+        }
+
+        // Check for delete disabled (403)
+        if (errorMsg.includes('not enabled') || errorMsg.includes('403') || errorMsg.includes('Delete is disabled')) {
+          showToast('Delete is disabled (set AUTH_MODE=local or ENABLE_DOC_DELETE=true)', true);
           deleteDisabled = true;
           break; // Stop if delete is not enabled
         } else {
@@ -2138,12 +2147,9 @@ These toggles make it easy to test different features without changing code.`
               setOpenMenuDocId(null);
             }
           } catch (err: any) {
-            const errorMsg = err?.message || err;
-            if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
-              showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
-            } else {
-              showToast(`Delete failed: ${errorMsg}`, true);
-            }
+            const errorMsg = err?.message || err || 'Unknown error';
+            // deleteDocument already provides specific messages, so just show them
+            showToast(errorMsg, true);
           }
         }}
         onToggleSelection={(docId: string) => {
@@ -2348,12 +2354,9 @@ These toggles make it easy to test different features without changing code.`
               setOpenMenuDocId(null);
             }
           } catch (err: any) {
-            const errorMsg = err?.message || err;
-            if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
-              showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
-            } else {
-              showToast(`Delete failed: ${errorMsg}`, true);
-            }
+            const errorMsg = err?.message || err || 'Unknown error';
+            // deleteDocument already provides specific messages, so just show them
+            showToast(errorMsg, true);
           }
         }}
         copyToClipboard={copyToClipboard}
