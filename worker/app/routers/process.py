@@ -36,6 +36,131 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/process", tags=["process"])
 
 
+def _get_filename_from_path(path: str) -> str:
+    """Extract filename from path."""
+    if not path:
+        return "unknown"
+    return Path(path).name
+
+
+def _build_meta_with_provenance(
+    base_meta: dict, source_system: str = "filesystem"
+) -> dict:
+    """Add ingested_at and source_system to meta, preserving existing fields."""
+    from datetime import datetime, timezone
+
+    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+
+    meta = base_meta.copy()
+    if not meta.get("ingested_at"):
+        meta["ingested_at"] = now_iso
+    if not meta.get("ingested_at_ts"):
+        meta["ingested_at_ts"] = now_ts
+    if not meta.get("source_system"):
+        meta["source_system"] = source_system
+    return meta
+
+
+def _record_ingest_start(path: str, kind: str) -> str:
+    """Record ingest activity start and return activity_id."""
+    try:
+        filename = _get_filename_from_path(path)
+        return telemetry.record_ingest_activity(
+            path=path,
+            filename=filename,
+            kind=kind,
+            status="processing",
+            reason="",
+            started_at=None,  # Will be set to now
+        )
+    except Exception as e:
+        log.debug(f"Failed to record ingest start: {e}")
+        return str(uuid.uuid4())
+
+
+def _record_ingest_success(
+    activity_id: str,
+    path: str,
+    kind: str,
+    chunks: int,
+    images: int = 0,
+    bytes: int = 0,
+):
+    """Record ingest activity success."""
+    try:
+        filename = _get_filename_from_path(path)
+        from datetime import datetime, timezone
+
+        finished_at = datetime.now(timezone.utc).isoformat()
+        telemetry.record_ingest_activity(
+            activity_id=activity_id,
+            path=path,
+            filename=filename,
+            kind=kind,
+            status="processed",
+            reason="ok",
+            chunks=chunks,
+            images=images,
+            bytes=bytes,
+            finished_at=finished_at,
+        )
+    except Exception as e:
+        log.debug(f"Failed to record ingest success: {e}")
+
+
+def _record_ingest_skip(
+    activity_id: str,
+    path: str,
+    kind: str,
+    reason: str,
+):
+    """Record ingest activity skip."""
+    try:
+        filename = _get_filename_from_path(path)
+        from datetime import datetime, timezone
+
+        finished_at = datetime.now(timezone.utc).isoformat()
+        telemetry.record_ingest_activity(
+            activity_id=activity_id,
+            path=path,
+            filename=filename,
+            kind=kind,
+            status="skipped",
+            reason=reason,
+            finished_at=finished_at,
+        )
+    except Exception as e:
+        log.debug(f"Failed to record ingest skip: {e}")
+
+
+def _record_ingest_error(
+    activity_id: str,
+    path: str,
+    kind: str,
+    reason: str,
+):
+    """Record ingest activity error."""
+    try:
+        filename = _get_filename_from_path(path)
+        from datetime import datetime, timezone
+
+        finished_at = datetime.now(timezone.utc).isoformat()
+        # Keep reason short (no full trace)
+        short_reason = reason[:100] if len(reason) > 100 else reason
+        telemetry.record_ingest_activity(
+            activity_id=activity_id,
+            path=path,
+            filename=filename,
+            kind=kind,
+            status="error",
+            reason=short_reason,
+            finished_at=finished_at,
+        )
+    except Exception as e:
+        log.debug(f"Failed to record ingest error: {e}")
+
+
 def _instrument_process_request(
     request: Request, kind: str, docid: str
 ) -> tuple[str, float]:
@@ -171,12 +296,20 @@ async def process_text(request: Request, _: bool = Depends(require_auth)):
     # Instrument request
     request_id, start_time = _instrument_process_request(request, "text", docid)
 
-    try:
-        # Normalize rel_path (same as CLI)
-        rel_path = payload.path.replace("\\", "/")
-        if rel_path.startswith("data/dropzone/"):
-            rel_path = rel_path[len("data/dropzone/") :]
+    # Normalize rel_path before recording (same as CLI)
+    rel_path = payload.path or ""
+    rel_path = rel_path.replace("\\", "/")
+    if rel_path.startswith("data/dropzone/"):
+        rel_path = rel_path[len("data/dropzone/") :]
 
+    # Record ingest activity start (use normalized path)
+    activity_id = None
+    try:
+        activity_id = _record_ingest_start(rel_path, "text")
+    except Exception as e:
+        log.debug(f"Failed to record ingest start: {e}")
+
+    try:
         # Create absolute path for canonicalize_relpath
         abs_dropzone = Path("data/dropzone").resolve()
         abs_file_path = (abs_dropzone / rel_path).resolve()
@@ -191,9 +324,13 @@ async def process_text(request: Request, _: bool = Depends(require_auth)):
             raw_text = extract_text_auto(abs_path)
         except Exception as e:
             log.warning("[process/text] parse failed: %s", e)
+            if activity_id:
+                _record_ingest_error(activity_id, rel_path, "text", "parse_failed")
             raise HTTPException(status_code=400, detail=f"failed to parse file: {e}")
 
         if not raw_text.strip():
+            if activity_id:
+                _record_ingest_skip(activity_id, rel_path, "text", "empty_file")
             raise HTTPException(status_code=400, detail="no content to process")
 
         # Ensure collection (same as CLI)
@@ -229,17 +366,18 @@ async def process_text(request: Request, _: bool = Depends(require_auth)):
         items = []
         for idx, (text_chunk, vec) in enumerate(zip(chunks, vectors)):
             point_id = str(uuid.uuid4())  # Use same ID scheme as CLI
+            base_meta = {
+                "source_ext": Path(abs_path).suffix.lower(),
+                "content_sig": "",  # Could add file hash if needed
+                "bytes": len(raw_text.encode("utf-8")),
+            }
             payload_data = {
                 "document_id": docid,
                 "path": rel_path,
                 "kind": "text",
                 "idx": idx,
                 "text": text_chunk,
-                "meta": {
-                    "source_ext": Path(abs_path).suffix.lower(),
-                    "content_sig": "",  # Could add file hash if needed
-                    "bytes": len(raw_text.encode("utf-8")),
-                },
+                "meta": _build_meta_with_provenance(base_meta),
             }
             items.append((point_id, vec, payload_data))
 
@@ -257,6 +395,16 @@ async def process_text(request: Request, _: bool = Depends(require_auth)):
         except Exception as e:
             log.debug("[process/text] record_ingest_summary failed: %s", e)
 
+        # Record ingest activity success
+        if activity_id:
+            _record_ingest_success(
+                activity_id=activity_id,
+                path=rel_path,
+                kind="text",
+                chunks=upserted,
+                bytes=len(raw_text.encode("utf-8")),
+            )
+
         # Log success
         duration_ms = int((time.time() - start_time) * 1000)
         _log_process_completion(request_id, "text", docid, True, duration_ms)
@@ -270,10 +418,16 @@ async def process_text(request: Request, _: bool = Depends(require_auth)):
             collection=settings.QDRANT_COLLECTION,
         )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (already recorded skip/error above)
+        raise
     except Exception as e:
         # Log failure
         duration_ms = int((time.time() - start_time) * 1000)
         _log_process_completion(request_id, "text", docid, False, duration_ms, str(e))
+        # Record ingest activity error
+        if activity_id:
+            _record_ingest_error(activity_id, rel_path, "text", "worker_error")
         raise
 
 
@@ -291,12 +445,20 @@ async def process_pdf(request: Request, _: bool = Depends(require_auth)):
     # Instrument request
     request_id, start_time = _instrument_process_request(request, "pdf", docid)
 
-    try:
-        # Normalize rel_path (same as text)
-        rel_path = payload.path.replace("\\", "/")
-        if rel_path.startswith("data/dropzone/"):
-            rel_path = rel_path[len("data/dropzone/") :]
+    # Normalize rel_path before recording (same as text)
+    rel_path = payload.path or ""
+    rel_path = rel_path.replace("\\", "/")
+    if rel_path.startswith("data/dropzone/"):
+        rel_path = rel_path[len("data/dropzone/") :]
 
+    # Record ingest activity start (use normalized path)
+    activity_id = None
+    try:
+        activity_id = _record_ingest_start(rel_path, "pdf")
+    except Exception as e:
+        log.debug(f"Failed to record ingest start: {e}")
+
+    try:
         # Create absolute path for canonicalize_relpath
         abs_dropzone = Path("data/dropzone").resolve()
         abs_file_path = (abs_dropzone / rel_path).resolve()
@@ -311,9 +473,13 @@ async def process_pdf(request: Request, _: bool = Depends(require_auth)):
             raw_text = extract_text_auto(abs_path)
         except Exception as e:
             log.warning("[process/pdf] parse failed: %s", e)
+            if activity_id:
+                _record_ingest_error(activity_id, rel_path, "pdf", "parse_failed")
             raise HTTPException(status_code=400, detail=f"failed to parse PDF: {e}")
 
         if not raw_text.strip():
+            if activity_id:
+                _record_ingest_skip(activity_id, rel_path, "pdf", "empty_file")
             raise HTTPException(status_code=400, detail="no content to process")
 
         # Ensure collection (same as text)
@@ -349,17 +515,18 @@ async def process_pdf(request: Request, _: bool = Depends(require_auth)):
         items = []
         for idx, (text_chunk, vec) in enumerate(zip(chunks, vectors)):
             point_id = str(uuid.uuid4())
+            base_meta = {
+                "source_ext": Path(abs_path).suffix.lower(),
+                "content_sig": "",
+                "bytes": len(raw_text.encode("utf-8")),
+            }
             payload_data = {
                 "document_id": docid,
                 "path": rel_path,
                 "kind": "pdf",
                 "idx": idx,
                 "text": text_chunk,
-                "meta": {
-                    "source_ext": Path(abs_path).suffix.lower(),
-                    "content_sig": "",
-                    "bytes": len(raw_text.encode("utf-8")),
-                },
+                "meta": _build_meta_with_provenance(base_meta),
             }
             items.append((point_id, vec, payload_data))
 
@@ -377,6 +544,16 @@ async def process_pdf(request: Request, _: bool = Depends(require_auth)):
         except Exception as e:
             log.debug("[process/pdf] record_ingest_summary failed: %s", e)
 
+        # Record ingest activity success
+        if activity_id:
+            _record_ingest_success(
+                activity_id=activity_id,
+                path=rel_path,
+                kind="pdf",
+                chunks=upserted,
+                bytes=len(raw_text.encode("utf-8")),
+            )
+
         # Log success
         duration_ms = int((time.time() - start_time) * 1000)
         _log_process_completion(request_id, "pdf", docid, True, duration_ms)
@@ -390,10 +567,16 @@ async def process_pdf(request: Request, _: bool = Depends(require_auth)):
             collection=settings.QDRANT_COLLECTION,
         )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (already recorded skip/error above)
+        raise
     except Exception as e:
         # Log failure
         duration_ms = int((time.time() - start_time) * 1000)
         _log_process_completion(request_id, "pdf", docid, False, duration_ms, str(e))
+        # Record ingest activity error
+        if activity_id:
+            _record_ingest_error(activity_id, rel_path, "pdf", "worker_error")
         raise
 
 
@@ -411,12 +594,20 @@ async def process_image(request: Request, _: bool = Depends(require_auth)):
     # Instrument request
     request_id, start_time = _instrument_process_request(request, "image", docid)
 
-    try:
-        # Normalize rel_path
-        rel_path = payload.path.replace("\\", "/")
-        if rel_path.startswith("data/dropzone/"):
-            rel_path = rel_path[len("data/dropzone/") :]
+    # Normalize rel_path before recording
+    rel_path = payload.path or ""
+    rel_path = rel_path.replace("\\", "/")
+    if rel_path.startswith("data/dropzone/"):
+        rel_path = rel_path[len("data/dropzone/") :]
 
+    # Record ingest activity start (use normalized path)
+    activity_id = None
+    try:
+        activity_id = _record_ingest_start(rel_path, "image")
+    except Exception as e:
+        log.debug(f"Failed to record ingest start: {e}")
+
+    try:
         # Create absolute path for canonicalize_relpath
         abs_dropzone = Path("data/dropzone").resolve()
         abs_file_path = (abs_dropzone / rel_path).resolve()
@@ -457,17 +648,18 @@ async def process_image(request: Request, _: bool = Depends(require_auth)):
         items = []
         for idx, (text_chunk, vec) in enumerate(zip(chunks, vectors)):
             point_id = str(chunk_id_for(uuid.UUID(docid), idx))
+            base_meta = {
+                "source_ext": Path(abs_path).suffix.lower(),
+                "content_sig": "",
+                "bytes": 0,  # Images don't have text bytes
+            }
             payload_data = {
                 "document_id": docid,
                 "path": rel_path,
                 "kind": "image",
                 "idx": idx,
                 "text": text_chunk,
-                "meta": {
-                    "source_ext": Path(abs_path).suffix.lower(),
-                    "content_sig": "",
-                    "bytes": 0,  # Images don't have text bytes
-                },
+                "meta": _build_meta_with_provenance(base_meta),
             }
             items.append((point_id, vec, payload_data))
 
@@ -484,6 +676,17 @@ async def process_image(request: Request, _: bool = Depends(require_auth)):
             record_ingest_summary(document_id=docid, chunks_upserted=upserted)
         except Exception as e:
             log.debug("[process/image] record_ingest_summary failed: %s", e)
+
+        # Record ingest activity success
+        if activity_id:
+            _record_ingest_success(
+                activity_id=activity_id,
+                path=rel_path,
+                kind="image",
+                chunks=0,  # Images go to images collection, not chunks
+                images=upserted,
+                bytes=0,
+            )
 
         # Log success
         duration_ms = int((time.time() - start_time) * 1000)
@@ -502,6 +705,9 @@ async def process_image(request: Request, _: bool = Depends(require_auth)):
         # Log failure
         duration_ms = int((time.time() - start_time) * 1000)
         _log_process_completion(request_id, "image", docid, False, duration_ms, str(e))
+        # Record ingest activity error
+        if activity_id:
+            _record_ingest_error(activity_id, rel_path, "image", "worker_error")
         raise
 
 
@@ -519,8 +725,24 @@ async def process_audio(request: Request, _: bool = Depends(require_auth)):
     # Instrument request
     request_id, start_time = _instrument_process_request(request, "audio", docid)
 
+    # Normalize rel_path before recording
+    rel_path = payload.path or ""
+    rel_path = rel_path.replace("\\", "/")
+    if rel_path.startswith("data/dropzone/"):
+        rel_path = rel_path[len("data/dropzone/") :]
+
+    # Record ingest activity start (use normalized path)
+    activity_id = None
+    try:
+        activity_id = _record_ingest_start(rel_path, "audio")
+    except Exception as e:
+        log.debug(f"Failed to record ingest start: {e}")
+
     # Check for dev mode short-circuit
     if getattr(settings, "AUDIO_DEV_MODE", 0) == 1:
+        # Record skip for dev mode
+        if activity_id:
+            _record_ingest_skip(activity_id, rel_path, "audio", "audio_dev_mode")
         # Log success for dev mode
         duration_ms = int((time.time() - start_time) * 1000)
         _log_process_completion(request_id, "audio", docid, True, duration_ms)
@@ -534,11 +756,6 @@ async def process_audio(request: Request, _: bool = Depends(require_auth)):
         )
 
     try:
-        # Normalize rel_path
-        rel_path = payload.path.replace("\\", "/")
-        if rel_path.startswith("data/dropzone/"):
-            rel_path = rel_path[len("data/dropzone/") :]
-
         # Create absolute path for canonicalize_relpath
         abs_dropzone = Path("data/dropzone").resolve()
         abs_file_path = (abs_dropzone / rel_path).resolve()
@@ -592,17 +809,18 @@ async def process_audio(request: Request, _: bool = Depends(require_auth)):
         items = []
         for idx, (text_chunk, vec) in enumerate(zip(chunks, vectors)):
             point_id = str(chunk_id_for(uuid.UUID(docid), idx))
+            base_meta = {
+                "source_ext": Path(abs_path).suffix.lower(),
+                "content_sig": "",
+                "bytes": len(transcript.encode("utf-8")),
+            }
             payload_data = {
                 "document_id": docid,
                 "path": rel_path,
                 "kind": "audio",
                 "idx": idx,
                 "text": text_chunk,
-                "meta": {
-                    "source_ext": Path(abs_path).suffix.lower(),
-                    "content_sig": "",
-                    "bytes": len(transcript.encode("utf-8")),
-                },
+                "meta": _build_meta_with_provenance(base_meta),
             }
             items.append((point_id, vec, payload_data))
 
@@ -620,6 +838,16 @@ async def process_audio(request: Request, _: bool = Depends(require_auth)):
         except Exception as e:
             log.debug("[process/audio] record_ingest_summary failed: %s", e)
 
+        # Record ingest activity success
+        if activity_id:
+            _record_ingest_success(
+                activity_id=activity_id,
+                path=rel_path,
+                kind="audio",
+                chunks=upserted,
+                bytes=len(transcript.encode("utf-8")),
+            )
+
         # Log success
         duration_ms = int((time.time() - start_time) * 1000)
         _log_process_completion(request_id, "audio", docid, True, duration_ms)
@@ -633,8 +861,21 @@ async def process_audio(request: Request, _: bool = Depends(require_auth)):
             collection=settings.QDRANT_COLLECTION,
         )
 
+    except HTTPException as e:
+        # Record skip/error for HTTP exceptions
+        if activity_id:
+            if "no content" in str(e.detail).lower():
+                _record_ingest_skip(activity_id, rel_path, "audio", "empty_file")
+            elif "transcribe" in str(e.detail).lower():
+                _record_ingest_error(activity_id, rel_path, "audio", "parse_failed")
+            else:
+                _record_ingest_error(activity_id, rel_path, "audio", "worker_error")
+        raise
     except Exception as e:
         # Log failure
         duration_ms = int((time.time() - start_time) * 1000)
         _log_process_completion(request_id, "audio", docid, False, duration_ms, str(e))
+        # Record ingest activity error
+        if activity_id:
+            _record_ingest_error(activity_id, rel_path, "audio", "worker_error")
         raise

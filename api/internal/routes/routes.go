@@ -36,10 +36,12 @@ func withCORS(next http.Handler, cfg *config.Config) http.Handler {
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
-		}
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
+			// Build verification header (for debugging CORS fixes)
+			w.Header().Set("X-Jsonify2ai-Build", "2025-01-02-cors-delete-fix")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -175,6 +177,13 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 		}
 		if v := c.Query("path"); v != "" {
 			qb.Set("path", v)
+		}
+		// optional time filters
+		if v := c.Query("ingested_after"); v != "" {
+			qb.Set("ingested_after", v)
+		}
+		if v := c.Query("ingested_before"); v != "" {
+			qb.Set("ingested_before", v)
 		}
 
 		target := getWorkerBase() + "/search?" + qb.Encode()

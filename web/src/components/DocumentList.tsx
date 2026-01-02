@@ -1,6 +1,25 @@
 import BulkActionBar from './BulkActionBar';
 import { Document } from './IngestionActivity';
 
+function formatRelativeTime(isoString: string): string {
+  try {
+    const date = new Date(isoString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+  } catch {
+    return '';
+  }
+}
+
 interface DocumentListProps {
   docs: Document[];
   activeDocId: string | null;
@@ -375,6 +394,11 @@ export default function DocumentList(props: DocumentListProps) {
                   <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
                     {doc.paths[0] && <div>Path: {doc.paths[0]}</div>}
                     <div>Counts: {Object.entries(doc.counts).map(([k, v]) => `${k}: ${v}`).join(', ')}</div>
+                    {(doc as any).ingested_at && (
+                      <div style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>
+                        Ingested: {formatRelativeTime((doc as any).ingested_at)}
+                      </div>
+                    )}
                   </div>
                 </div>
               );

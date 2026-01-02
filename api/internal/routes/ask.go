@@ -64,8 +64,10 @@ func (h *AskHandler) Post(c *gin.Context) {
 	// Extract optional query params for filters
 	documentID := c.Query("document_id")
 	pathPrefix := c.Query("path_prefix")
+	ingestedAfter := c.Query("ingested_after")
+	ingestedBefore := c.Query("ingested_before")
 
-	// Primary path: call worker /ask with {query, kind, limit, document_id?, path_prefix?}
+	// Primary path: call worker /ask with {query, kind, limit, document_id?, path_prefix?, ingested_after?, ingested_before?}
 	wreq := map[string]any{
 		"query": req.Q,
 		"kind":  req.Kind,
@@ -76,6 +78,12 @@ func (h *AskHandler) Post(c *gin.Context) {
 	}
 	if pathPrefix != "" {
 		wreq["path_prefix"] = pathPrefix
+	}
+	if ingestedAfter != "" {
+		wreq["ingested_after"] = ingestedAfter
+	}
+	if ingestedBefore != "" {
+		wreq["ingested_before"] = ingestedBefore
 	}
 	wbody, _ := json.Marshal(wreq)
 	wurl := fmt.Sprintf("%s/ask", h.workerBaseURL())
@@ -100,13 +108,19 @@ func (h *AskHandler) Post(c *gin.Context) {
 	}
 
 	// Fallback: worker /search -> map to answers
-	// GET /search?kind=&q=&limit=&document_id=&path=
+	// GET /search?kind=&q=&limit=&document_id=&path=&ingested_after=&ingested_before=
 	sURL := fmt.Sprintf("%s/search?kind=%s&q=%s&limit=%d", h.workerBaseURL(), req.Kind, urlQueryEscape(req.Q), req.Limit)
 	if documentID != "" {
 		sURL += "&document_id=" + urlQueryEscape(documentID)
 	}
 	if pathPrefix != "" {
 		sURL += "&path=" + urlQueryEscape(pathPrefix)
+	}
+	if ingestedAfter != "" {
+		sURL += "&ingested_after=" + urlQueryEscape(ingestedAfter)
+	}
+	if ingestedBefore != "" {
+		sURL += "&ingested_before=" + urlQueryEscape(ingestedBefore)
 	}
 	sreq, _ := http.NewRequest(http.MethodGet, sURL, nil)
 	if rid := c.GetHeader("X-Request-Id"); rid != "" {

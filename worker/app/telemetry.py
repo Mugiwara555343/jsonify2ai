@@ -5,9 +5,11 @@ import json
 import os
 import threading
 import time
+import uuid
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import logging
 
@@ -39,6 +41,11 @@ class Telemetry:
             os.getenv("MAX_LOG_MB", os.getenv("WORKER_LOG_MAX_MB", "16"))
         )
         self._max_log_bytes = self._max_log_mb * 1024 * 1024
+
+        # Ingest activity tracking
+        self._ingest_activity_buffer: deque = deque(maxlen=100)  # Ring buffer
+        self._ingest_activity_file = self._log_dir / "ingest_activity.jsonl"
+        self._ingest_activity_max_bytes = self._max_log_bytes  # Same size limit
 
         # Ensure log directory exists
         try:
@@ -147,6 +154,125 @@ class Telemetry:
                 "ask_synth_total": 0,
                 "last_error": None,
             }
+
+    def record_ingest_activity(
+        self,
+        *,
+        path: str,
+        filename: str,
+        kind: str,
+        status: str,
+        reason: str,
+        chunks: int = 0,
+        images: int = 0,
+        bytes: int = 0,
+        started_at: Optional[str] = None,
+        finished_at: Optional[str] = None,
+        activity_id: Optional[str] = None,
+    ) -> str:
+        """
+        Record an ingest activity event.
+
+        Returns the activity_id (newly generated if not provided).
+        """
+        try:
+            activity_id = activity_id or str(uuid.uuid4())
+            now_iso = datetime.now(timezone.utc).isoformat()
+
+            record = {
+                "id": activity_id,
+                "path": path,
+                "filename": filename,
+                "kind": kind,
+                "status": status,
+                "reason": reason,
+                "chunks": chunks,
+                "images": images,
+                "bytes": bytes,
+                "started_at": started_at or now_iso,
+                "finished_at": finished_at
+                or (now_iso if status != "processing" else None),
+            }
+
+            # Add to ring buffer
+            with self._lock:
+                self._ingest_activity_buffer.append(record)
+
+            # Append to JSONL file
+            self._maybe_rotate_ingest_activity_log()
+            try:
+                with self._lock:
+                    with open(self._ingest_activity_file, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            except Exception as e:
+                log.debug(f"Failed to write ingest activity to JSONL: {e}")
+
+            return activity_id
+        except Exception as e:
+            log.debug(f"Telemetry record_ingest_activity failed: {e}")
+            return activity_id or str(uuid.uuid4())
+
+    def _maybe_rotate_ingest_activity_log(self) -> None:
+        """Rotate ingest activity log file if it exceeds size limit (2-deep: .1, .2)."""
+        try:
+            if (
+                self._ingest_activity_file.exists()
+                and self._ingest_activity_file.stat().st_size
+                > self._ingest_activity_max_bytes
+            ):
+                log_file_2 = self._ingest_activity_file.with_suffix(".jsonl.2")
+                log_file_1 = self._ingest_activity_file.with_suffix(".jsonl.1")
+
+                # If .2 exists, delete it (oldest)
+                if log_file_2.exists():
+                    log_file_2.unlink()
+
+                # If .1 exists, rename to .2
+                if log_file_1.exists():
+                    log_file_1.rename(log_file_2)
+
+                # Rename current to .1
+                self._ingest_activity_file.rename(log_file_1)
+
+                # Current file is now gone; next write will create a new one
+        except Exception as e:
+            log.warning(f"Ingest activity log rotation failed: {e}")
+
+    def get_recent_activity(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        Get recent ingest activity records (trimmed for API response).
+
+        Returns list of records with: id, filename, status, reason, chunks, images,
+        started_at, finished_at, kind, path.
+        """
+        try:
+            with self._lock:
+                # Get latest N records (most recent last in deque)
+                recent = list(self._ingest_activity_buffer)[-limit:]
+                # Reverse to show most recent first
+                recent.reverse()
+
+                # Trim to essential fields
+                trimmed = []
+                for record in recent:
+                    trimmed.append(
+                        {
+                            "id": record.get("id"),
+                            "filename": record.get("filename"),
+                            "status": record.get("status"),
+                            "reason": record.get("reason"),
+                            "chunks": record.get("chunks", 0),
+                            "images": record.get("images", 0),
+                            "started_at": record.get("started_at"),
+                            "finished_at": record.get("finished_at"),
+                            "kind": record.get("kind"),
+                            "path": record.get("path"),
+                        }
+                    )
+                return trimmed
+        except Exception as e:
+            log.debug(f"Telemetry get_recent_activity failed: {e}")
+            return []
 
 
 # Singleton instance

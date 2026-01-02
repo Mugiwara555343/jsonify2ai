@@ -176,17 +176,32 @@ export async function postUpload(fd: FormData): Promise<any> {
   return data;
 }
 
-export async function doSearch(q: string, kind: string, k = 5): Promise<any> {
+export async function doSearch(
+  q: string,
+  kind: string,
+  k = 5,
+  ingestedAfter?: string,
+  ingestedBefore?: string
+): Promise<any> {
   try {
-    const url = `/search?q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&k=${k}`;
+    let url = `/search?q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&k=${k}`;
+    if (ingestedAfter) {
+      url += `&ingested_after=${encodeURIComponent(ingestedAfter)}`;
+    }
+    if (ingestedBefore) {
+      url += `&ingested_before=${encodeURIComponent(ingestedBefore)}`;
+    }
     const r = await apiRequest(url, { method: "GET" }, true);
     if (r.ok) return await r.json();
 
     // fallback to POST body if GET not supported
+    const body: any = { q, kind, k };
+    if (ingestedAfter) body.ingested_after = ingestedAfter;
+    if (ingestedBefore) body.ingested_before = ingestedBefore;
     const r2 = await apiRequest("/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ q, kind, k }),
+      body: JSON.stringify(body),
     }, true);
     return await r2.json();
   } catch (e) {
@@ -194,16 +209,39 @@ export async function doSearch(q: string, kind: string, k = 5): Promise<any> {
   }
 }
 
-export async function askQuestion(query: string, k = 6, documentId?: string, answerMode?: 'retrieve' | 'synthesize'): Promise<any> {
-  // Build URL with optional document_id query parameter
+export async function askQuestion(
+  query: string,
+  k = 6,
+  documentId?: string,
+  answerMode?: 'retrieve' | 'synthesize',
+  ingestedAfter?: string,
+  ingestedBefore?: string
+): Promise<any> {
+  // Build URL with optional query parameters
   let url = "/ask";
+  const queryParams: string[] = [];
   if (documentId) {
-    url += `?document_id=${encodeURIComponent(documentId)}`;
+    queryParams.push(`document_id=${encodeURIComponent(documentId)}`);
+  }
+  if (ingestedAfter) {
+    queryParams.push(`ingested_after=${encodeURIComponent(ingestedAfter)}`);
+  }
+  if (ingestedBefore) {
+    queryParams.push(`ingested_before=${encodeURIComponent(ingestedBefore)}`);
+  }
+  if (queryParams.length > 0) {
+    url += `?${queryParams.join('&')}`;
   }
 
   const body: any = { query, k };
   if (answerMode) {
     body.answer_mode = answerMode;
+  }
+  if (ingestedAfter) {
+    body.ingested_after = ingestedAfter;
+  }
+  if (ingestedBefore) {
+    body.ingested_before = ingestedBefore;
   }
 
   const r = await apiRequest(url, {
