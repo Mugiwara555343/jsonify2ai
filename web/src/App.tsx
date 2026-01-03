@@ -2193,6 +2193,7 @@ These toggles make it easy to test different features without changing code.`
           ))}
         </div>
       )}
+
       <div style={{ marginTop: 24, marginBottom: 12 }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{ fontSize: 12, fontWeight: 500, color: '#666' }}>Time filter:</span>
@@ -2323,9 +2324,17 @@ These toggles make it easy to test different features without changing code.`
               setOpenMenuDocId(null);
             }
           } catch (err: any) {
+
             const errorMsg = err?.message || err || 'Unknown error';
             // deleteDocument already provides specific messages, so just show them
             showToast(errorMsg, true);
+            const errorMsg = err?.message || err;
+            if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
+              showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
+            } else {
+              showToast(`Delete failed: ${errorMsg}`, true);
+            }
+
           }
         }}
         onToggleSelection={(docId: string) => {
@@ -2530,9 +2539,17 @@ These toggles make it easy to test different features without changing code.`
               setOpenMenuDocId(null);
             }
           } catch (err: any) {
+
             const errorMsg = err?.message || err || 'Unknown error';
             // deleteDocument already provides specific messages, so just show them
             showToast(errorMsg, true);
+            const errorMsg = err?.message || err;
+            if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
+              showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
+            } else {
+              showToast(`Delete failed: ${errorMsg}`, true);
+            }
+
           }
         }}
         copyToClipboard={copyToClipboard}
