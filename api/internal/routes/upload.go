@@ -39,6 +39,8 @@ func inferKindByExt(name string) string {
 		strings.HasSuffix(lower, ".flac"),
 		strings.HasSuffix(lower, ".ogg"):
 		return "audio"
+	case strings.HasSuffix(lower, ".json"):
+		return "json"
 	default:
 		// txt, md, csv, docx, html, etc. go through text pipeline (auto-detects)
 		return "text"

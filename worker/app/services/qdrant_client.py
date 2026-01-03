@@ -86,7 +86,7 @@ def ensure_collection(
     - `dim`:  defaults to `settings.EMBEDDING_DIM`
     - `recreate_bad`: if True (or env QDRANT_RECREATE_BAD=1), will recreate the
       collection when a dimension mismatch is detected.
-    - Adds payload indexes for {document_id, kind, path} to speed filters.
+    - Adds payload indexes for {document_id, kind, path, meta.ingested_at_ts} to speed filters.
 
     Returns:
         Dict with the final collection configuration.
@@ -225,6 +225,14 @@ def _ensure_payload_indexes(client: QdrantClient, name: str) -> None:
             collection_name=name,
             field_name="path",
             field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+    except Exception:
+        pass
+    try:
+        client.create_payload_index(
+            collection_name=name,
+            field_name="meta.ingested_at_ts",
+            field_schema=models.PayloadSchemaType.INTEGER,
         )
     except Exception:
         pass

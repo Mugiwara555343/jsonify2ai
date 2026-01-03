@@ -213,6 +213,19 @@ export default function DocumentList(props: DocumentListProps) {
                     >
                       {doc.document_id}
                     </code>
+                    {doc.document_id.startsWith('chatgpt:') && (
+                      <span style={{
+                        padding: '2px 6px',
+                        borderRadius: 4,
+                        fontSize: 10,
+                        fontWeight: 500,
+                        background: '#10b981',
+                        color: '#fff',
+                        marginLeft: 6
+                      }}>
+                        ChatGPT
+                      </span>
+                    )}
                     {isActive && (
                       <span style={{
                         padding: '3px 8px',
@@ -394,6 +407,11 @@ export default function DocumentList(props: DocumentListProps) {
                   <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
                     {doc.paths[0] && <div>Path: {doc.paths[0]}</div>}
                     <div>Counts: {Object.entries(doc.counts).map(([k, v]) => `${k}: ${v}`).join(', ')}</div>
+                    {(doc as any).meta?.title && (
+                      <div style={{ fontSize: 11, fontWeight: 500, marginTop: 4, color: '#374151' }}>
+                        Title: {(doc as any).meta.title}
+                      </div>
+                    )}
                     {(doc as any).ingested_at && (
                       <div style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>
                         Ingested: {formatRelativeTime((doc as any).ingested_at)}

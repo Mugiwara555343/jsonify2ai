@@ -1311,6 +1311,32 @@ These toggles make it easy to test different features without changing code.`
       const docId = data?.document_id as string | undefined;
       const coll  = (data?.collection || "") as string;
       const kind  = coll.includes("images") ? "image" : "text"; // images vs chunks
+      const documentsCreated = data?.documents_created as number | undefined;
+      const results = data?.results as Array<{document_id: string, chunks: number}> | undefined;
+
+      // Check for multi-document response (ChatGPT export, etc.)
+      if (documentsCreated && documentsCreated > 1) {
+        // Multi-document upload
+        setUploadResult({
+          filename: file.name,
+          status: 'processed',
+          document_id: docId || '',
+          chunks: data?.chunks || 0
+        });
+
+        // Update activity event
+        updateActivityEvent(file.name, {
+          status: 'processed',
+          chunks: data?.chunks || 0,
+          document_id: docId ? docId.substring(0, 8) : ''
+        });
+
+        showToast(`Created ${documentsCreated} documents from ${file.name} ✓`);
+
+        // Refresh documents list to show all new documents
+        await loadDocuments();
+        return;
+      }
 
       if (docId) {
         setLastDoc({ id: docId, kind });
