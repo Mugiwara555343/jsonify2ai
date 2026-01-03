@@ -131,4 +131,126 @@ def chunk_text(
     return chunks
 
 
-__all__ = ["chunk_text"]
+def chunk_chat_messages(
+    text: str,
+    size: int | None = None,
+    overlap: int | None = None,
+) -> List[str]:
+    """
+    Chunk chat text by message boundaries.
+
+    Messages are formatted as: "[YYYY-MM-DD HH:MM] role: content"
+    or "role: content" (if no timestamp).
+
+    Accumulates message blocks until hitting char budget, then flushes.
+    Ensures each chunk starts with a message header.
+    """
+    # Defaults from config
+    if size is None:
+        size = int(getattr(settings, "CHUNK_SIZE", 800))
+    if overlap is None:
+        overlap = int(getattr(settings, "CHUNK_OVERLAP", 100))
+
+    if not text:
+        return []
+
+    # Guard rails
+    if size <= 0:
+        return []
+
+    # Split by double newline to get message blocks
+    # Messages are separated by "\n\n" in the formatted text
+    message_blocks = text.split("\n\n")
+    if not message_blocks:
+        return []
+
+    chunks: List[str] = []
+    current_chunk_parts: List[str] = []
+    current_chunk_size = 0
+
+    for block in message_blocks:
+        block = block.strip()
+        if not block:
+            continue
+
+        block_size = len(block)
+
+        # If single message exceeds size, split it but keep header
+        if block_size > size:
+            # Extract message header (first line typically has timestamp and role)
+            # Format: "[YYYY-MM-DD HH:MM] role: content" or "role: content"
+            lines = block.split("\n", 1)
+            if len(lines) > 1:
+                header = lines[0] + "\n"
+                content = lines[1]
+            else:
+                # No newline - try to extract header from first line
+                # Look for pattern like "[timestamp] role:" or "role:"
+                block_str = block
+                colon_pos = block_str.find(": ")
+                if colon_pos > 0:
+                    # Extract header up to and including ": "
+                    header = block_str[: colon_pos + 2]
+                    content = block_str[colon_pos + 2 :]
+                else:
+                    # No clear header pattern, use first part as header
+                    header = block_str[: min(50, len(block_str))] + ": "
+                    content = block_str[min(50, len(block_str)) :]
+
+            # Flush current chunk if it has content
+            if current_chunk_parts:
+                chunks.append("\n\n".join(current_chunk_parts))
+                current_chunk_parts = []
+                current_chunk_size = 0
+
+            # Split large content into chunks, repeating header on each chunk
+            header_len = len(header)
+            available_size = max(
+                1, size - header_len
+            )  # Space available for content after header
+
+            content_start = 0
+            while content_start < len(content):
+                # Get chunk of content that fits (accounting for header)
+                chunk_content = content[content_start : content_start + available_size]
+
+                # Try to break at newline if possible (but not too early)
+                if content_start + available_size < len(content):
+                    last_newline = chunk_content.rfind("\n")
+                    if (
+                        last_newline > available_size // 2
+                    ):  # Only break at newline if reasonable
+                        chunk_content = chunk_content[: last_newline + 1]
+                        content_start += last_newline + 1
+                    else:
+                        content_start += available_size
+                else:
+                    # Last chunk - take remaining content
+                    chunk_content = content[content_start:]
+                    content_start = len(content)
+
+                # Always prepend header to each chunk (ensures each chunk starts with message header)
+                chunks.append(header + chunk_content)
+        else:
+            # Check if adding this block would exceed size
+            # Account for "\n\n" separator between blocks
+            separator_size = 2 if current_chunk_parts else 0
+            if current_chunk_size + separator_size + block_size > size:
+                # Flush current chunk
+                if current_chunk_parts:
+                    chunks.append("\n\n".join(current_chunk_parts))
+                    current_chunk_parts = []
+                    current_chunk_size = 0
+
+            # Add block to current chunk
+            current_chunk_parts.append(block)
+            current_chunk_size += separator_size + block_size
+
+    # Flush remaining chunks
+    if current_chunk_parts:
+        chunks.append("\n\n".join(current_chunk_parts))
+
+    return chunks
+
+
+__all__ = ["chunk_text", "chunk_chat_messages"]

@@ -86,7 +86,7 @@ def _search(
 @router.get("/search")
 def search(
     q: str = Query(...),
-    kind: Literal["text", "pdf", "image", "audio"] = "text",
+    kind: Literal["text", "pdf", "image", "audio", "chat"] = "text",
     k: int = 10,
     path: Optional[str] = Query(None),
     document_id: Optional[str] = Query(None),
