@@ -5,6 +5,7 @@ export type IngestionEvent = {
   filename: string;
   status: 'uploading' | 'indexing' | 'processed' | 'skipped' | 'error';
   chunks?: number;
+  images?: number; // For image files
   skip_reason?: string;
   skip_message?: string;
   error?: string;
@@ -81,6 +82,18 @@ export default function IngestionActivity({
             const timestamp = new Date(event.timestamp);
             const timeStr = timestamp.toLocaleTimeString();
             const getSkipMessage = () => {
+              // Map reason codes to human-readable messages
+              const reason = event.skip_reason || event.error || '';
+              if (reason === 'unsupported_extension') return 'Unsupported extension';
+              if (reason === 'empty_file') return 'File is empty';
+              if (reason === 'parse_failed') return 'Extraction failed';
+              if (reason === 'extraction_failed') return 'Extraction failed';
+              if (reason === 'processing_failed') return 'Processing failed';
+              if (reason === 'audio_dev_mode') return 'Audio dev-mode: transcription skipped';
+              if (reason === 'dev_mode_no_embed') return 'Dev-mode: vector embeddings skipped';
+              if (reason === 'ok') return 'Ingested successfully';
+              if (reason === 'worker_error') return 'Processing error';
+              // Fallback to original logic for backward compatibility
               if (event.skip_reason === 'unsupported_extension') return 'Unsupported file type. Try .txt/.md/.pdf/.csv/.json';
               if (event.skip_reason === 'empty_file') return 'File is empty';
               if (event.skip_reason === 'extraction_failed') return `Extraction failed: ${event.error || 'Check worker logs'}`;
@@ -165,10 +178,19 @@ export default function IngestionActivity({
                          event.status === 'skipped' ? 'Skipped' :
                          'Error'}
                       </span>
-                      {event.chunks !== undefined && event.status === 'processed' && (
-                        <span style={{ fontSize: 11, opacity: 0.7 }}>
-                          {event.chunks} {event.chunks === 1 ? 'chunk' : 'chunks'}
-                        </span>
+                      {event.status === 'processed' && (
+                        <>
+                          {event.chunks !== undefined && (
+                            <span style={{ fontSize: 11, opacity: 0.7 }}>
+                              {event.chunks} {event.chunks === 1 ? 'chunk' : 'chunks'}
+                            </span>
+                          )}
+                          {event.images !== undefined && (
+                            <span style={{ fontSize: 11, opacity: 0.7 }}>
+                              {event.images} {event.images === 1 ? 'image' : 'images'}
+                            </span>
+                          )}
+                        </>
                       )}
                       {event.document_id && (
                         <code style={{ fontSize: 10, fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>

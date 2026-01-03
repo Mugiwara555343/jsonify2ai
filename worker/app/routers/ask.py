@@ -1,9 +1,11 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
+from datetime import datetime
 import requests
 import time
 from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchValue, Range
 from worker.app.config import settings
 from worker.app.services.embed_ollama import embed_texts
 from worker.app.telemetry import telemetry
@@ -18,28 +20,60 @@ class AskBody(BaseModel):
     document_id: str = None
     path_prefix: str = None
     answer_mode: str = None
+    ingested_after: Optional[str] = None
+    ingested_before: Optional[str] = None
 
 
-def _search(q: str, k: int, document_id: str = None, path_prefix: str = None):
+def _parse_iso_to_timestamp(iso_str: str) -> Optional[int]:
+    """Parse ISO-8601 string to unix timestamp (seconds). Returns None if invalid."""
+    try:
+        # Handle both 'Z' and '+00:00' formats
+        iso_str = iso_str.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(iso_str)
+        return int(dt.timestamp())
+    except (ValueError, AttributeError):
+        return None
+
+
+def _search(
+    q: str,
+    k: int,
+    document_id: str = None,
+    path_prefix: str = None,
+    ingested_after: Optional[str] = None,
+    ingested_before: Optional[str] = None,
+):
     vec = embed_texts([q])[0]
     qc = QdrantClient(url=settings.QDRANT_URL)
 
-    # Build filter if document_id or path_prefix provided
-    from qdrant_client.models import Filter, FieldCondition, MatchValue
-
+    # Build filter if document_id, path_prefix, or time filters provided
     qf = None
-    if document_id or path_prefix:
-        must = []
-        if document_id:
+    must = []
+    if document_id:
+        must.append(
+            FieldCondition(key="document_id", match=MatchValue(value=document_id))
+        )
+    if path_prefix:
+        # Use prefix match for path_prefix (if supported) or exact match
+        # For now, use exact match on path field
+        must.append(FieldCondition(key="path", match=MatchValue(value=path_prefix)))
+
+    # Time range filters on meta.ingested_at_ts
+    if ingested_after:
+        ts_after = _parse_iso_to_timestamp(ingested_after)
+        if ts_after is not None:
             must.append(
-                FieldCondition(key="document_id", match=MatchValue(value=document_id))
+                FieldCondition(key="meta.ingested_at_ts", range=Range(gte=ts_after))
             )
-        if path_prefix:
-            # Use prefix match for path_prefix (if supported) or exact match
-            # For now, use exact match on path field
-            must.append(FieldCondition(key="path", match=MatchValue(value=path_prefix)))
-        if must:
-            qf = Filter(must=must)
+    if ingested_before:
+        ts_before = _parse_iso_to_timestamp(ingested_before)
+        if ts_before is not None:
+            must.append(
+                FieldCondition(key="meta.ingested_at_ts", range=Range(lt=ts_before))
+            )
+
+    if must:
+        qf = Filter(must=must)
 
     def go(col):
         hits = qc.search(
@@ -116,7 +150,12 @@ def _ollama_generate(prompt: str):
 @router.post("/ask")
 def ask(body: AskBody):
     text_hits, img_hits = _search(
-        body.query, body.k, body.document_id, body.path_prefix
+        body.query,
+        body.k,
+        body.document_id,
+        body.path_prefix,
+        body.ingested_after,
+        body.ingested_before,
     )
     sources = text_hits[: body.k // 2] + img_hits[: body.k - body.k // 2]
 

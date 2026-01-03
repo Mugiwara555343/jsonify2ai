@@ -121,6 +121,9 @@ async def status():
     # Get telemetry stats
     telemetry_stats = telemetry.get_stats()
 
+    # Get recent ingest activity (capped at 50 for lightweight response)
+    ingest_recent = telemetry.get_recent_activity(limit=50)
+
     # Build LLM status
     llm = {
         "provider": settings.LLM_PROVIDER or "none",
@@ -152,6 +155,8 @@ async def status():
         "export_total": telemetry_stats["export_total"],
         "ask_synth_total": telemetry_stats["ask_synth_total"],
         "last_error": telemetry_stats["last_error"],
+        # Recent ingest activity
+        "ingest_recent": ingest_recent,
         # LLM status
         "llm": llm,
     }

@@ -14,6 +14,19 @@ import DocumentDrawer from './components/DocumentDrawer';
 
 const BUILD_STAMP = "beast-2 / 2025-12-23 / commit 39ed9bb";
 
+type IngestActivityItem = {
+  id: string;
+  filename: string;
+  status: 'processed' | 'skipped' | 'error' | 'processing';
+  reason: string;
+  chunks: number;
+  images: number;
+  started_at: string;
+  finished_at?: string;
+  kind: string;
+  path: string;
+}
+
 type Status = {
   ok: boolean;
   counts: { chunks: number; images: number; total?: number };
@@ -24,6 +37,8 @@ type Status = {
   watcher_triggers_total?: number;
   export_total?: number;
   ask_synth_total?: number;
+  // Recent ingest activity (optional)
+  ingest_recent?: IngestActivityItem[];
   // LLM status
   llm?: { provider?: string; model?: string; reachable?: boolean; synth_total?: number };
 }
@@ -267,6 +282,7 @@ function App() {
   const [showWhatIsThis, setShowWhatIsThis] = useState(false)
   const [docSearchFilter, setDocSearchFilter] = useState('')
   const [docSortBy, setDocSortBy] = useState<'newest' | 'oldest' | 'most-chunks'>('newest')
+  const [timeFilter, setTimeFilter] = useState<'all' | '24h' | '7d' | '30d'>('all')
   const [openMenuDocId, setOpenMenuDocId] = useState<string | null>(null)
   const [drawerDocId, setDrawerDocId] = useState<string | null>(null)
   const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set())
@@ -535,10 +551,105 @@ function App() {
     }
   }, [drawerDocId, docs])
 
+  // Re-match document_ids in activityFeed when docs change
+  useEffect(() => {
+    if (docs.length === 0) return;
+    setActivityFeed(prev => {
+      return prev.map(event => {
+        if (event.document_id) return event; // Already matched
+        // Try to match by filename
+        const matchedDoc = docs.find(d =>
+          d.paths.some(p => {
+            const pathParts = p.split('/');
+            const filename = pathParts[pathParts.length - 1];
+            return filename === event.filename;
+          })
+        );
+        if (matchedDoc) {
+          return { ...event, document_id: matchedDoc.document_id };
+        }
+        return event;
+      });
+    });
+  }, [docs])
+
   const loadStatus = async () => {
     const j = await fetchStatus()
     setS(j)
+
+    // Merge ingest_recent from status into activityFeed
+    if (j?.ingest_recent && Array.isArray(j.ingest_recent)) {
+      const newEvents: IngestionEvent[] = j.ingest_recent.map((item: IngestActivityItem) => {
+        // Map worker activity to IngestionEvent format
+        const timestamp = item.finished_at || item.started_at;
+        const timestampMs = timestamp ? new Date(timestamp).getTime() : Date.now();
+
+        // Try to find document_id by matching path with existing documents
+        let document_id: string | undefined;
+        if (item.path && docs.length > 0) {
+          // Try to match by path (remove "data/dropzone/" prefix if present)
+          const cleanPath = item.path.replace(/^data\/dropzone\//, '');
+          const matchedDoc = docs.find(d =>
+            d.paths.some(p => {
+              const docPath = p.replace(/^data\/dropzone\//, '');
+              return docPath === cleanPath || docPath.includes(cleanPath) || cleanPath.includes(docPath);
+            })
+          );
+          if (matchedDoc) {
+            document_id = matchedDoc.document_id;
+          }
+        }
+
+        return {
+          timestamp: timestampMs,
+          filename: item.filename,
+          status: item.status === 'processing' ? 'indexing' : item.status,
+          chunks: item.chunks > 0 ? item.chunks : undefined,
+          images: item.images > 0 ? item.images : undefined, // Add images count for image files
+          skip_reason: item.status === 'skipped' ? item.reason : undefined,
+          error: item.status === 'error' ? item.reason : undefined,
+          document_id: document_id,
+          activity_id: item.id, // Store activity_id for deduplication
+        } as IngestionEvent & { activity_id?: string; images?: number };
+      });
+
+      // Merge with existing activityFeed, avoiding duplicates by activity_id
+      setActivityFeed(prev => {
+        const existingIds = new Set(prev.map(e => (e as any).activity_id).filter(Boolean));
+        const newUnique = newEvents.filter(e => {
+          const aid = (e as any).activity_id;
+          return !aid || !existingIds.has(aid);
+        });
+        // Keep most recent first, limit to last 100
+        const merged = [...newUnique, ...prev].slice(0, 100);
+        // Re-match document_ids now that we have the full list
+        return merged.map(event => {
+          if (event.document_id || !(event as any).activity_id) return event;
+          // Try to match by filename if path matching didn't work
+          const matchedDoc = docs.find(d =>
+            d.paths.some(p => {
+              const pathParts = p.split('/');
+              const filename = pathParts[pathParts.length - 1];
+              return filename === event.filename;
+            })
+          );
+          if (matchedDoc) {
+            return { ...event, document_id: matchedDoc.document_id };
+          }
+          return event;
+        });
+      });
+    }
   }
+
+  // Helper to compute ISO-8601 UTC timestamp for time filters
+  const getTimeFilterISO = (filter: 'all' | '24h' | '7d' | '30d'): string | undefined => {
+    if (filter === 'all') return undefined;
+    const now = new Date();
+    const hoursAgo = filter === '24h' ? 24 : filter === '7d' ? 24 * 7 : 24 * 30;
+    const past = new Date(now.getTime() - hoursAgo * 60 * 60 * 1000);
+    return past.toISOString();
+  };
 
   const loadDocuments = async (): Promise<Document[]> => {
     try {
@@ -592,7 +703,8 @@ function App() {
   }
 
   async function performSearch(q: string, kind: string) {
-    return await doSearch(q, kind);
+    const ingestedAfter = getTimeFilterISO(timeFilter);
+    return await doSearch(q, kind, 5, ingestedAfter, undefined);
   }
 
   const handleAsk = async () => {
@@ -615,7 +727,8 @@ function App() {
     try {
       // Determine documentId based on scope
       const documentId = askScope === 'doc' ? getActiveDocument(true)?.document_id : undefined; // strictMode = true for doc scope
-      const j: AskResp = await askQuestion(askQ, 6, documentId, answerMode);
+      const ingestedAfter = getTimeFilterISO(timeFilter);
+      const j: AskResp = await askQuestion(askQ, 6, documentId, answerMode, ingestedAfter, undefined);
       if (j.ok === false) {
         const errorMsg = j.error === "rate_limited"
           ? "Rate limited — try again in a few seconds."
@@ -714,9 +827,18 @@ function App() {
         }
       } catch (err: any) {
         failCount++;
-        const errorMsg = err?.message || err;
-        if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
-          showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
+        const errorMsg = err?.message || err || 'Unknown error';
+
+        // Check for CORS/network errors
+        if (errorMsg.includes('Network error') || errorMsg.includes('CORS')) {
+          showToast(`Delete failed: Network/CORS error. Check browser console.`, true);
+          deleteDisabled = true;
+          break; // Stop on CORS errors
+        }
+
+        // Check for delete disabled (403)
+        if (errorMsg.includes('not enabled') || errorMsg.includes('403') || errorMsg.includes('Delete is disabled')) {
+          showToast('Delete is disabled (set AUTH_MODE=local or ENABLE_DOC_DELETE=true)', true);
           deleteDisabled = true;
           break; // Stop if delete is not enabled
         } else {
@@ -1189,6 +1311,32 @@ These toggles make it easy to test different features without changing code.`
       const docId = data?.document_id as string | undefined;
       const coll  = (data?.collection || "") as string;
       const kind  = coll.includes("images") ? "image" : "text"; // images vs chunks
+      const documentsCreated = data?.documents_created as number | undefined;
+      const results = data?.results as Array<{document_id: string, chunks: number}> | undefined;
+
+      // Check for multi-document response (ChatGPT export, etc.)
+      if (documentsCreated && documentsCreated > 1) {
+        // Multi-document upload
+        setUploadResult({
+          filename: file.name,
+          status: 'processed',
+          document_id: docId || '',
+          chunks: data?.chunks || 0
+        });
+
+        // Update activity event
+        updateActivityEvent(file.name, {
+          status: 'processed',
+          chunks: data?.chunks || 0,
+          document_id: docId ? docId.substring(0, 8) : ''
+        });
+
+        showToast(`Created ${documentsCreated} documents from ${file.name} ✓`);
+
+        // Refresh documents list to show all new documents
+        await loadDocuments();
+        return;
+      }
 
       if (docId) {
         setLastDoc({ id: docId, kind });
@@ -2045,6 +2193,44 @@ These toggles make it easy to test different features without changing code.`
           ))}
         </div>
       )}
+
+      <div style={{ marginTop: 24, marginBottom: 12 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, fontWeight: 500, color: '#666' }}>Time filter:</span>
+          {(['all', '24h', '7d', '30d'] as const).map((filter) => (
+            <button
+              key={filter}
+              onClick={() => {
+                setTimeFilter(filter);
+                // Reload documents and refresh search if needed
+                loadDocuments();
+              }}
+              style={{
+                padding: '4px 12px',
+                fontSize: 12,
+                border: '1px solid #ddd',
+                borderRadius: 6,
+                background: timeFilter === filter ? '#3b82f6' : '#fff',
+                color: timeFilter === filter ? '#fff' : '#333',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                if (timeFilter !== filter) {
+                  e.currentTarget.style.background = '#f5f5f5';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (timeFilter !== filter) {
+                  e.currentTarget.style.background = '#fff';
+                }
+              }}
+            >
+              {filter === 'all' ? 'All' : filter === '24h' ? 'Last 24h' : filter === '7d' ? 'Last 7d' : 'Last 30d'}
+            </button>
+          ))}
+        </div>
+      </div>
       <DocumentList
         docs={docs}
         activeDocId={activeDocId}
@@ -2138,12 +2324,17 @@ These toggles make it easy to test different features without changing code.`
               setOpenMenuDocId(null);
             }
           } catch (err: any) {
+
+            const errorMsg = err?.message || err || 'Unknown error';
+            // deleteDocument already provides specific messages, so just show them
+            showToast(errorMsg, true);
             const errorMsg = err?.message || err;
             if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
               showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
             } else {
               showToast(`Delete failed: ${errorMsg}`, true);
             }
+
           }
         }}
         onToggleSelection={(docId: string) => {
@@ -2348,12 +2539,17 @@ These toggles make it easy to test different features without changing code.`
               setOpenMenuDocId(null);
             }
           } catch (err: any) {
+
+            const errorMsg = err?.message || err || 'Unknown error';
+            // deleteDocument already provides specific messages, so just show them
+            showToast(errorMsg, true);
             const errorMsg = err?.message || err;
             if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
               showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
             } else {
               showToast(`Delete failed: ${errorMsg}`, true);
             }
+
           }
         }}
         copyToClipboard={copyToClipboard}

@@ -176,17 +176,32 @@ export async function postUpload(fd: FormData): Promise<any> {
   return data;
 }
 
-export async function doSearch(q: string, kind: string, k = 5): Promise<any> {
+export async function doSearch(
+  q: string,
+  kind: string,
+  k = 5,
+  ingestedAfter?: string,
+  ingestedBefore?: string
+): Promise<any> {
   try {
-    const url = `/search?q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&k=${k}`;
+    let url = `/search?q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&k=${k}`;
+    if (ingestedAfter) {
+      url += `&ingested_after=${encodeURIComponent(ingestedAfter)}`;
+    }
+    if (ingestedBefore) {
+      url += `&ingested_before=${encodeURIComponent(ingestedBefore)}`;
+    }
     const r = await apiRequest(url, { method: "GET" }, true);
     if (r.ok) return await r.json();
 
     // fallback to POST body if GET not supported
+    const body: any = { q, kind, k };
+    if (ingestedAfter) body.ingested_after = ingestedAfter;
+    if (ingestedBefore) body.ingested_before = ingestedBefore;
     const r2 = await apiRequest("/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ q, kind, k }),
+      body: JSON.stringify(body),
     }, true);
     return await r2.json();
   } catch (e) {
@@ -194,16 +209,39 @@ export async function doSearch(q: string, kind: string, k = 5): Promise<any> {
   }
 }
 
-export async function askQuestion(query: string, k = 6, documentId?: string, answerMode?: 'retrieve' | 'synthesize'): Promise<any> {
-  // Build URL with optional document_id query parameter
+export async function askQuestion(
+  query: string,
+  k = 6,
+  documentId?: string,
+  answerMode?: 'retrieve' | 'synthesize',
+  ingestedAfter?: string,
+  ingestedBefore?: string
+): Promise<any> {
+  // Build URL with optional query parameters
   let url = "/ask";
+  const queryParams: string[] = [];
   if (documentId) {
-    url += `?document_id=${encodeURIComponent(documentId)}`;
+    queryParams.push(`document_id=${encodeURIComponent(documentId)}`);
+  }
+  if (ingestedAfter) {
+    queryParams.push(`ingested_after=${encodeURIComponent(ingestedAfter)}`);
+  }
+  if (ingestedBefore) {
+    queryParams.push(`ingested_before=${encodeURIComponent(ingestedBefore)}`);
+  }
+  if (queryParams.length > 0) {
+    url += `?${queryParams.join('&')}`;
   }
 
   const body: any = { query, k };
   if (answerMode) {
     body.answer_mode = answerMode;
+  }
+  if (ingestedAfter) {
+    body.ingested_after = ingestedAfter;
+  }
+  if (ingestedBefore) {
+    body.ingested_before = ingestedBefore;
   }
 
   const r = await apiRequest(url, {
@@ -331,14 +369,52 @@ export async function fetchJsonPreview(
 }
 
 export async function deleteDocument(documentId: string): Promise<void> {
-  const response = await apiRequest(
-    `/documents/${encodeURIComponent(documentId)}`,
-    { method: 'DELETE' },
-    true
-  );
+  let response: Response;
+  try {
+    response = await apiRequest(
+      `/documents/${encodeURIComponent(documentId)}`,
+      { method: 'DELETE' },
+      true
+    );
+  } catch (err: any) {
+    // Handle network/CORS errors that occur before response
+    if (err?.message?.includes('Failed to fetch') || err?.message?.includes('NetworkError') || err?.name === 'TypeError') {
+      throw new Error('Delete failed: Network error. Check CORS configuration.');
+    }
+    throw err;
+  }
+
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    const errorMsg = errorData?.detail || errorData?.error || `Delete failed: ${response.status}`;
+    let errorData: any = {};
+    let errorMsg = `Delete failed: ${response.status}`;
+
+    try {
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        errorData = await response.json().catch(() => ({}));
+      } else {
+        const text = await response.text().catch(() => "");
+        errorData = { error: text || `HTTP ${response.status}` };
+      }
+    } catch (e) {
+      // If we can't parse the response, use status code
+      errorData = { error: `HTTP ${response.status}` };
+    }
+
+    // Extract error message with priority: detail > error > status
+    errorMsg = errorData?.detail || errorData?.error || errorMsg;
+
+    // Provide specific messages for common status codes
+    if (response.status === 403) {
+      if (errorMsg.includes('not enabled') || errorMsg.includes('Delete not enabled')) {
+        errorMsg = 'Delete is disabled (set AUTH_MODE=local or ENABLE_DOC_DELETE=true)';
+      } else {
+        errorMsg = errorMsg || 'Delete is disabled (set AUTH_MODE=local or ENABLE_DOC_DELETE=true)';
+      }
+    } else if (response.status === 404) {
+      errorMsg = 'Document not found';
+    }
+
     throw new Error(errorMsg);
   }
 }

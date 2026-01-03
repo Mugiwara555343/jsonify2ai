@@ -180,7 +180,68 @@ def main():
     except Exception:
         pass
 
-    # 6) Infer final issue if unset
+    # 6) ChatGPT export test (if fixture exists)
+    chatgpt_fixture = Path("scripts/fixtures/chatgpt_conversations_min.json")
+    if chatgpt_fixture.exists():
+        summary["chatgpt_test"] = {
+            "fixture_exists": True,
+            "upload_ok": False,
+            "documents_created": None,
+            "has_chatgpt_doc": False,
+            "has_conversation_id": False,
+            "chunks_created": 0,
+        }
+        try:
+            # Upload ChatGPT fixture
+            with open(chatgpt_fixture, "rb") as f:
+                files = {"file": (chatgpt_fixture.name, f, "application/json")}
+                headers = {"Authorization": f"Bearer {api_token}"} if api_token else {}
+                r = requests.post(
+                    f"{api_base}/upload", files=files, headers=headers, timeout=30
+                )
+                if r.ok:
+                    data = r.json()
+                    summary["chatgpt_test"]["upload_ok"] = True
+                    summary["chatgpt_test"]["documents_created"] = data.get(
+                        "documents_created", 1
+                    )
+
+                    # Wait a bit for processing
+                    time.sleep(3)
+
+                    # Check documents endpoint for ChatGPT docs
+                    try:
+                        docs_r = requests.get(
+                            f"{api_base}/documents", headers=headers, timeout=10
+                        )
+                        if docs_r.ok:
+                            docs = docs_r.json()
+                            chatgpt_docs = [
+                                d
+                                for d in docs
+                                if d.get("document_id", "").startswith("chatgpt:")
+                            ]
+                            if chatgpt_docs:
+                                summary["chatgpt_test"]["has_chatgpt_doc"] = True
+                                # Check first ChatGPT doc for metadata
+                                first_doc = chatgpt_docs[0]
+                                # Note: meta might not be in documents list response, but we can check document_id pattern
+                                summary["chatgpt_test"]["has_conversation_id"] = (
+                                    "chatgpt:" in first_doc.get("document_id", "")
+                                )
+                                # Sum chunks from ChatGPT docs
+                                total_chunks = sum(
+                                    d.get("counts", {}).get("chunks", 0)
+                                    + d.get("counts", {}).get("json", 0)
+                                    for d in chatgpt_docs
+                                )
+                                summary["chatgpt_test"]["chunks_created"] = total_chunks
+                    except Exception:
+                        pass
+        except Exception as e:
+            summary["chatgpt_test"]["error"] = str(e)[:100]
+
+    # 7) Infer final issue if unset
     if not summary.get("inferred_issue"):
         if not api_token and not summary["api_upload_ok"]:
             summary["inferred_issue"] = "missing_api_token"
