@@ -97,7 +97,7 @@ def search(
         vec = embed_texts([q])[0]
         col = (
             settings.QDRANT_COLLECTION
-            if kind in ["text", "pdf", "audio"]
+            if kind in ["text", "pdf", "audio", "chat"]
             else getattr(settings, "QDRANT_COLLECTION_IMAGES", "jsonify2ai_images_768")
         )
         return {
@@ -135,7 +135,7 @@ def search_post(body: dict):
         vec = embed_texts([q])[0]
         col = (
             settings.QDRANT_COLLECTION
-            if kind in ["text", "pdf", "audio"]
+            if kind in ["text", "pdf", "audio", "chat"]
             else getattr(settings, "QDRANT_COLLECTION_IMAGES", "jsonify2ai_images_768")
         )
         return {

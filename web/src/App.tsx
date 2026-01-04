@@ -260,6 +260,7 @@ function App() {
   const [askLoading, setAskLoading] = useState(false)
   const [previewDocId, setPreviewDocId] = useState<string | null>(null)
   const [previewLines, setPreviewLines] = useState<string[] | null>(null)
+  const [previewTotal, setPreviewTotal] = useState<number | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [quickActionResult, setQuickActionResult] = useState<AskResp | null>(null)
@@ -355,8 +356,26 @@ function App() {
     setActivityFeed([]);
     try {
       localStorage.removeItem(ACTIVITY_STORAGE_KEY);
+      localStorage.setItem('ui.hideIngestionActivity', 'true');
     } catch {}
   }
+
+  // Check if ingestion activity should be hidden
+  const [hideIngestionActivity, setHideIngestionActivity] = useState(() => {
+    try {
+      return localStorage.getItem('ui.hideIngestionActivity') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  // Show activity link handler
+  const showIngestionActivity = () => {
+    setHideIngestionActivity(false);
+    try {
+      localStorage.removeItem('ui.hideIngestionActivity');
+    } catch {}
+  };
 
   // Active document localStorage helpers
   const ACTIVE_DOC_STORAGE_KEY = "jsonify2ai.activeDoc";
@@ -1126,10 +1145,14 @@ These toggles make it easy to test different features without changing code.`
           setPreviewLoading(true);
           setPreviewError(null);
           setPreviewLines(null);
+          setPreviewTotal(null);
           try {
-            const result = await fetchJsonPreview(requestedDocId, collection, 5);
+            const result = await fetchJsonPreview(requestedDocId, collection, 100);
             if (currentFetchDocIdRef.current === requestedDocId) {
               setPreviewLines(result.lines);
+              if (result.total !== undefined) {
+                setPreviewTotal(result.total);
+              }
             }
           } catch (err: any) {
             if (currentFetchDocIdRef.current === requestedDocId) {
@@ -1206,10 +1229,14 @@ These toggles make it easy to test different features without changing code.`
           setPreviewLoading(true);
           setPreviewError(null);
           setPreviewLines(null);
+          setPreviewTotal(null);
           try {
-            const result = await fetchJsonPreview(targetDocId, collection, 5);
+            const result = await fetchJsonPreview(targetDocId, collection, 100);
             if (currentFetchDocIdRef.current === targetDocId) {
               setPreviewLines(result.lines);
+              if (result.total !== undefined) {
+                setPreviewTotal(result.total);
+              }
             }
           } catch (err: any) {
             if (currentFetchDocIdRef.current === targetDocId) {
@@ -1393,10 +1420,14 @@ These toggles make it easy to test different features without changing code.`
             setPreviewLoading(true);
             setPreviewError(null);
             setPreviewLines(null);
+            setPreviewTotal(null);
             try {
-              const result = await fetchJsonPreview(requestedDocId, collection, 5);
+              const result = await fetchJsonPreview(requestedDocId, collection, 100);
               if (currentFetchDocIdRef.current === requestedDocId) {
                 setPreviewLines(result.lines);
+                if (result.total !== undefined) {
+                  setPreviewTotal(result.total);
+                }
               }
             } catch (err: any) {
               if (currentFetchDocIdRef.current === requestedDocId) {
@@ -1805,17 +1836,37 @@ These toggles make it easy to test different features without changing code.`
       )}
 
       {/* Ingestion Activity Feed */}
-      <IngestionActivity
-        activityFeed={activityFeed}
-        docs={docs}
-        askInputRef={askInputRef}
-        onClearActivity={clearActivityFeed}
-        onSetActiveDoc={setActiveDocId}
-        saveActiveDocId={saveActiveDocId}
-        setAskScope={setAskScope}
-        saveAskScope={saveAskScope}
-        showToast={showToast}
-      />
+      {hideIngestionActivity ? (
+        <div style={{ marginBottom: 16 }}>
+          <button
+            onClick={showIngestionActivity}
+            style={{
+              fontSize: 12,
+              padding: '4px 8px',
+              borderRadius: 6,
+              border: '1px solid #ddd',
+              background: '#fff',
+              color: '#666',
+              cursor: 'pointer',
+              textDecoration: 'underline'
+            }}
+          >
+            Show activity
+          </button>
+        </div>
+      ) : (
+        <IngestionActivity
+          activityFeed={activityFeed}
+          docs={docs}
+          askInputRef={askInputRef}
+          onClearActivity={clearActivityFeed}
+          onSetActiveDoc={setActiveDocId}
+          saveActiveDocId={saveActiveDocId}
+          setAskScope={setAskScope}
+          saveAskScope={saveAskScope}
+          showToast={showToast}
+        />
+      )}
 
       <div style={{ display: 'flex', gap: 8 }}>
           {(() => {
@@ -1966,10 +2017,14 @@ These toggles make it easy to test different features without changing code.`
           setPreviewLoading(true);
           setPreviewError(null);
           setPreviewLines(null);
+          setPreviewTotal(null);
           try {
-            const result = await fetchJsonPreview(docId, collection, 5);
+            const result = await fetchJsonPreview(docId, collection, 100);
             if (currentFetchDocIdRef.current === docId) {
               setPreviewLines(result.lines);
+              if (result.total !== undefined) {
+                setPreviewTotal(result.total);
+              }
             }
           } catch (err: any) {
             if (currentFetchDocIdRef.current === docId) {
@@ -2260,10 +2315,14 @@ These toggles make it easy to test different features without changing code.`
           setPreviewLoading(true);
           setPreviewError(null);
           setPreviewLines(null);
+          setPreviewTotal(null);
           try {
-            const result = await fetchJsonPreview(docId, collection, 5);
+            const result = await fetchJsonPreview(docId, collection, 100);
             if (currentFetchDocIdRef.current === docId) {
               setPreviewLines(result.lines);
+              if (result.total !== undefined) {
+                setPreviewTotal(result.total);
+              }
             }
           } catch (err: any) {
             if (currentFetchDocIdRef.current === docId) {
@@ -2324,17 +2383,8 @@ These toggles make it easy to test different features without changing code.`
               setOpenMenuDocId(null);
             }
           } catch (err: any) {
-
-            const errorMsg = err?.message || err || 'Unknown error';
-            // deleteDocument already provides specific messages, so just show them
+            const errorMsg = err?.message || String(err) || 'Unknown error';
             showToast(errorMsg, true);
-            const errorMsg = err?.message || err;
-            if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
-              showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
-            } else {
-              showToast(`Delete failed: ${errorMsg}`, true);
-            }
-
           }
         }}
         onToggleSelection={(docId: string) => {
@@ -2358,79 +2408,188 @@ These toggles make it easy to test different features without changing code.`
         getDocumentStatus={getDocumentStatus}
         collectionForDoc={collectionForDoc}
       />
+      {/* JSON Preview Modal */}
       {previewDocId && (() => {
         const previewedDoc = docs.find(d => d.document_id === previewDocId);
         const collection = previewedDoc ? collectionForDoc(previewedDoc) : '';
-        const truncatedId = previewDocId.length > 40 ? previewDocId.substring(0, 40) + '...' : previewDocId;
+        const docTitle = previewedDoc && (previewedDoc as any).meta?.title
+          ? (previewedDoc as any).meta.title
+          : previewDocId.length > 40 ? previewDocId.substring(0, 40) + '...' : previewDocId;
         const previewStatus = previewedDoc ? getDocumentStatus(previewedDoc) : null;
+        const linesLoaded = previewLines ? previewLines.length : 0;
+        const hasMore = previewTotal !== null ? linesLoaded < previewTotal : true;
+
+        const handleLoadMore = async () => {
+          if (!previewDocId || !collection) return;
+          setPreviewLoading(true);
+          try {
+            const result = await fetchJsonPreview(previewDocId, collection, 100, linesLoaded);
+            if (result.lines && result.lines.length > 0) {
+              setPreviewLines(prev => [...(prev || []), ...result.lines]);
+              if (result.total !== undefined) {
+                setPreviewTotal(result.total);
+              }
+            }
+          } catch (err: any) {
+            setPreviewError(err?.message || 'Failed to load more lines');
+          } finally {
+            setPreviewLoading(false);
+          }
+        };
+
+        const handleClose = () => {
+          setPreviewDocId(null);
+          setPreviewLines(null);
+          setPreviewTotal(null);
+          setPreviewError(null);
+          setPreviewLoading(false);
+        };
 
         return (
-          <section style={{ marginTop: 24, padding: 16, border: '1px solid #ddd', borderRadius: 8, background: '#fafafa' }}>
-            <h3 style={{ fontSize: 16, marginBottom: 4, fontFamily: 'monospace' }}>Preview: {truncatedId}</h3>
-            {collection && (
-              <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>
-                Collection: {collection} {previewLines && previewLines.length > 0 && `• Showing ${previewLines.length} lines (JSONL preview)`}
-              </p>
-            )}
-            {previewStatus && (
-              <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 12 }}>
-                Status: {previewStatus === 'indexed' ? 'Indexed' : 'Pending'}
-              </p>
-            )}
-            <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 12 }}>
-              Each line below is one JSON chunk. This is what gets stored in Qdrant.
-            </p>
-            {previewLoading && <p style={{ fontSize: 14, opacity: 0.7 }}>Loading JSON preview…</p>}
-            {previewError && (
-              <p style={{ color: '#dc2626', fontSize: 14 }}>Failed to load JSON preview: {previewError}</p>
-            )}
-            {!previewLoading && !previewError && (!previewLines || previewLines.length === 0) && (
-              <p style={{ fontSize: 14, opacity: 0.7, fontStyle: 'italic' }}>
-                No JSON rows yet. The document may not be fully indexed. Try Refresh documents.
-              </p>
-            )}
-            {previewLines && previewLines.length > 0 && (
-              <pre style={{
-                background: '#fff',
-                padding: 12,
-                borderRadius: 4,
-                border: '1px solid #e5e7eb',
-                overflow: 'auto',
-                fontSize: 12,
-                lineHeight: 1.5,
-                maxHeight: '400px',
-                fontFamily: 'monospace'
-              }}>
-{previewLines.map((line, idx) => {
-                  try {
-                    const obj = JSON.parse(line);
-                    return JSON.stringify(obj, null, 2) + (idx < previewLines.length - 1 ? '\n\n' : '');
-                  } catch {
-                    return line + (idx < previewLines.length - 1 ? '\n\n' : '');
-                  }
-                }).join('')}
-              </pre>
-            )}
-            <button
-              onClick={() => {
-                setPreviewDocId(null);
-                setPreviewLines(null);
-                setPreviewError(null);
-                setPreviewLoading(false);
-              }}
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000,
+              padding: 20
+            }}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) handleClose();
+            }}
+          >
+            <div
               style={{
-                marginTop: 12,
-                padding: '8px 16px',
-                borderRadius: 6,
-                border: '1px solid #ddd',
-                background: '#fff',
-                cursor: 'pointer',
-                fontSize: 14
+                background: 'var(--bg)',
+                borderRadius: 12,
+                boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+                maxWidth: '90vw',
+                maxHeight: '90vh',
+                width: '800px',
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden'
               }}
+              onClick={(e) => e.stopPropagation()}
             >
-              Close
-            </button>
-          </section>
+              {/* Modal Header */}
+              <div style={{
+                padding: 16,
+                borderBottom: '1px solid #e5e7eb',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start'
+              }}>
+                <div style={{ flex: 1 }}>
+                  <h3 style={{ fontSize: 16, marginBottom: 4, fontFamily: 'monospace', fontWeight: 600 }}>
+                    Preview: {docTitle}
+                  </h3>
+                  {collection && (
+                    <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>
+                      Collection: {collection}
+                    </p>
+                  )}
+                  {previewStatus && (
+                    <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>
+                      Status: {previewStatus === 'indexed' ? 'Indexed' : 'Pending'}
+                    </p>
+                  )}
+                  {previewLines && previewLines.length > 0 && (
+                    <p style={{ fontSize: 12, opacity: 0.7 }}>
+                      {previewTotal !== null
+                        ? `Showing ${linesLoaded} of ${previewTotal} lines`
+                        : `Showing ${linesLoaded} lines`}
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={handleClose}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: 6,
+                    border: '1px solid #ddd',
+                    background: '#fff',
+                    cursor: 'pointer',
+                    fontSize: 14,
+                    marginLeft: 16
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Modal Content */}
+              <div style={{
+                padding: 16,
+                overflow: 'auto',
+                flex: 1,
+                minHeight: 0
+              }}>
+                {previewLoading && linesLoaded === 0 && (
+                  <p style={{ fontSize: 14, opacity: 0.7 }}>Loading JSON preview…</p>
+                )}
+                {previewError && (
+                  <p style={{ color: '#dc2626', fontSize: 14 }}>Failed to load JSON preview: {previewError}</p>
+                )}
+                {!previewLoading && !previewError && (!previewLines || previewLines.length === 0) && (
+                  <p style={{ fontSize: 14, opacity: 0.7, fontStyle: 'italic' }}>
+                    No JSON rows yet. The document may not be fully indexed. Try Refresh documents.
+                  </p>
+                )}
+                {previewLines && previewLines.length > 0 && (
+                  <>
+                    <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 12 }}>
+                      Each line below is one JSON chunk. This is what gets stored in Qdrant.
+                    </p>
+                    <pre style={{
+                      background: '#fff',
+                      padding: 12,
+                      borderRadius: 4,
+                      border: '1px solid #e5e7eb',
+                      overflow: 'auto',
+                      fontSize: 12,
+                      lineHeight: 1.5,
+                      maxHeight: '60vh',
+                      fontFamily: 'monospace',
+                      marginBottom: 12
+                    }}>
+                      {previewLines.map((line, idx) => {
+                        try {
+                          const obj = JSON.parse(line);
+                          return JSON.stringify(obj, null, 2) + (idx < previewLines.length - 1 ? '\n\n' : '');
+                        } catch {
+                          return line + (idx < previewLines.length - 1 ? '\n\n' : '');
+                        }
+                      }).join('')}
+                    </pre>
+                    {hasMore && (
+                      <button
+                        onClick={handleLoadMore}
+                        disabled={previewLoading}
+                        style={{
+                          padding: '8px 16px',
+                          borderRadius: 6,
+                          border: '1px solid #ddd',
+                          background: previewLoading ? '#f3f4f6' : '#fff',
+                          cursor: previewLoading ? 'not-allowed' : 'pointer',
+                          fontSize: 14,
+                          opacity: previewLoading ? 0.6 : 1
+                        }}
+                      >
+                        {previewLoading ? 'Loading...' : 'Load more'}
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
         );
       })()}
       <DocumentDrawer
@@ -2477,10 +2636,14 @@ These toggles make it easy to test different features without changing code.`
           setPreviewLoading(true);
           setPreviewError(null);
           setPreviewLines(null);
+          setPreviewTotal(null);
           try {
-            const result = await fetchJsonPreview(docId, collection, 5);
+            const result = await fetchJsonPreview(docId, collection, 100);
             if (currentFetchDocIdRef.current === docId) {
               setPreviewLines(result.lines);
+              if (result.total !== undefined) {
+                setPreviewTotal(result.total);
+              }
             }
           } catch (err: any) {
             if (currentFetchDocIdRef.current === docId) {
@@ -2539,17 +2702,8 @@ These toggles make it easy to test different features without changing code.`
               setOpenMenuDocId(null);
             }
           } catch (err: any) {
-
-            const errorMsg = err?.message || err || 'Unknown error';
-            // deleteDocument already provides specific messages, so just show them
+            const errorMsg = err?.message || String(err) || 'Unknown error';
             showToast(errorMsg, true);
-            const errorMsg = err?.message || err;
-            if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
-              showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
-            } else {
-              showToast(`Delete failed: ${errorMsg}`, true);
-            }
-
           }
         }}
         copyToClipboard={copyToClipboard}

@@ -1,4 +1,4 @@
-import { RefObject } from 'react';
+import { RefObject, useState, useEffect } from 'react';
 
 export type IngestionEvent = {
   timestamp: number;
@@ -42,6 +42,30 @@ export default function IngestionActivity({
   saveAskScope,
   showToast
 }: IngestionActivityProps) {
+  // Load persisted state from localStorage
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    const stored = localStorage.getItem('ui.ingestionActivityCollapsed');
+    return stored !== null ? stored === 'true' : true; // Default collapsed
+  });
+
+  // Sync collapsed state to localStorage
+  useEffect(() => {
+    localStorage.setItem('ui.ingestionActivityCollapsed', String(isCollapsed));
+  }, [isCollapsed]);
+
+  // Calculate badge text
+  const hasRunning = activityFeed.some(e => e.status === 'indexing' || e.status === 'uploading');
+  const badgeText = activityFeed.length > 0
+    ? hasRunning
+      ? `(${activityFeed.length}, running)`
+      : `(${activityFeed.length})`
+    : '';
+
+  const handleClear = () => {
+    onClearActivity();
+    localStorage.setItem('ui.hideIngestionActivity', 'true');
+  };
+
   return (
     <div style={{
       padding: 16,
@@ -51,13 +75,30 @@ export default function IngestionActivity({
       background: 'var(--bg)',
       border: '1px solid rgba(0,0,0,.1)'
     }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.7 }}>
-          Ingestion activity
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: isCollapsed ? 0 : 12,
+          cursor: 'pointer'
+        }}
+        onClick={() => setIsCollapsed(!isCollapsed)}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 12, opacity: 0.5 }}>
+            {isCollapsed ? '▶' : '▼'}
+          </span>
+          <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.7 }}>
+            Ingestion activity {badgeText && <span style={{ opacity: 0.6 }}>{badgeText}</span>}
+          </div>
         </div>
-        {activityFeed.length > 0 && (
+        {!isCollapsed && activityFeed.length > 0 && (
           <button
-            onClick={onClearActivity}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleClear();
+            }}
             style={{
               fontSize: 11,
               padding: '4px 8px',
@@ -72,12 +113,13 @@ export default function IngestionActivity({
           </button>
         )}
       </div>
-      {activityFeed.length === 0 ? (
-        <div style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>
-          No ingestion activity yet. Upload files to see activity here.
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {!isCollapsed && (
+        activityFeed.length === 0 ? (
+          <div style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>
+            No ingestion activity yet. Upload files to see activity here.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {activityFeed.map((event, idx) => {
             const timestamp = new Date(event.timestamp);
             const timeStr = timestamp.toLocaleTimeString();
@@ -216,7 +258,8 @@ export default function IngestionActivity({
               </div>
             );
           })}
-        </div>
+          </div>
+        )
       )}
     </div>
   );
