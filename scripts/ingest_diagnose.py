@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import json
 from pathlib import Path
@@ -33,6 +34,7 @@ def main():
     api_token = env.get("API_AUTH_TOKEN", os.getenv("API_AUTH_TOKEN", ""))
     worker_token = env.get("WORKER_AUTH_TOKEN", os.getenv("WORKER_AUTH_TOKEN", ""))
     qdrant_url = env.get("QDRANT_URL", os.getenv("QDRANT_URL", "http://localhost:6333"))
+    upload_fixtures = os.getenv("DIAGNOSE_UPLOAD_FIXTURES", "1") == "1"
 
     drop = Path("data/dropzone")
     drop.mkdir(parents=True, exist_ok=True)
@@ -180,9 +182,10 @@ def main():
     except Exception:
         pass
 
-    # 6) ChatGPT export test (if fixture exists)
+    # 6) ChatGPT export test (if fixture exists and upload_fixtures is enabled)
+    summary["fixtures_uploaded"] = False
     chatgpt_fixture = Path("scripts/fixtures/chatgpt_conversations_min.json")
-    if chatgpt_fixture.exists():
+    if upload_fixtures and chatgpt_fixture.exists():
         summary["chatgpt_test"] = {
             "fixture_exists": True,
             "upload_ok": False,
@@ -204,6 +207,7 @@ def main():
                 if r.ok:
                     data = r.json()
                     summary["chatgpt_test"]["upload_ok"] = True
+                    summary["fixtures_uploaded"] = True
                     summary["chatgpt_test"]["documents_created"] = data.get(
                         "documents_created", 1
                     )
@@ -273,7 +277,7 @@ def main():
         except Exception:
             pass  # Skip if can't create fixture
 
-    if generic_json_fixture.exists():
+    if upload_fixtures and generic_json_fixture.exists():
         summary["generic_json_test"] = {
             "fixture_exists": True,
             "upload_ok": False,
@@ -289,6 +293,7 @@ def main():
                 )
                 if r.ok:
                     summary["generic_json_test"]["upload_ok"] = True
+                    summary["fixtures_uploaded"] = True
                     time.sleep(3)
                     try:
                         docs_r = requests.get(
@@ -327,6 +332,15 @@ def main():
             summary["inferred_issue"] = "ok"
         else:
             summary["inferred_issue"] = "unknown"
+
+    # Print fixture upload status
+    if summary.get("fixtures_uploaded", False):
+        print("# Fixtures were uploaded (DIAGNOSE_UPLOAD_FIXTURES=1)", file=sys.stderr)
+    else:
+        print(
+            "# Fixtures were NOT uploaded (DIAGNOSE_UPLOAD_FIXTURES=0 or no fixtures found)",
+            file=sys.stderr,
+        )
 
     print(json.dumps(summary))
 

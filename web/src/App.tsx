@@ -375,6 +375,8 @@ function App() {
     try {
       localStorage.removeItem('ui.hideIngestionActivity');
     } catch {}
+    // Reload status to populate activity feed
+    loadStatus();
   };
 
   // Active document localStorage helpers
@@ -596,8 +598,8 @@ function App() {
     const j = await fetchStatus()
     setS(j)
 
-    // Merge ingest_recent from status into activityFeed
-    if (j?.ingest_recent && Array.isArray(j.ingest_recent)) {
+    // Merge ingest_recent from status into activityFeed only if activity is not hidden
+    if (j?.ingest_recent && Array.isArray(j.ingest_recent) && !hideIngestionActivity) {
       const newEvents: IngestionEvent[] = j.ingest_recent.map((item: IngestActivityItem) => {
         // Map worker activity to IngestionEvent format
         const timestamp = item.finished_at || item.started_at;
