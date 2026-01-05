@@ -354,6 +354,7 @@ function App() {
 
   function clearActivityFeed() {
     setActivityFeed([]);
+    setHideIngestionActivity(true);
     try {
       localStorage.removeItem(ACTIVITY_STORAGE_KEY);
       localStorage.setItem('ui.hideIngestionActivity', 'true');
@@ -373,7 +374,7 @@ function App() {
   const showIngestionActivity = () => {
     setHideIngestionActivity(false);
     try {
-      localStorage.removeItem('ui.hideIngestionActivity');
+      localStorage.setItem('ui.hideIngestionActivity', 'false');
     } catch {}
     // Reload status to populate activity feed
     loadStatus();
@@ -639,7 +640,7 @@ function App() {
         const existingIds = new Set(prev.map(e => (e as any).activity_id).filter(Boolean));
         const newUnique = newEvents.filter(e => {
           const aid = (e as any).activity_id;
-          return !aid || !existingIds.has(aid);
+          return aid && !existingIds.has(aid);
         });
         // Keep most recent first, limit to last 100
         const merged = [...newUnique, ...prev].slice(0, 100);
