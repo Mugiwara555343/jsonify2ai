@@ -1082,6 +1082,10 @@ async def process_json(request: Request, _: bool = Depends(require_auth)):
 
                 # Chunk the conversation text using message-boundary chunker
                 chunks = chunk_chat_messages(
+
+                # Chunk the conversation text
+                chunks = chunk_text(
+
                     text,
                     size=int(settings.CHUNK_SIZE),
                     overlap=int(settings.CHUNK_OVERLAP),
@@ -1115,7 +1119,10 @@ async def process_json(request: Request, _: bool = Depends(require_auth)):
                     payload_data = {
                         "document_id": conv_docid,
                         "path": rel_path,  # Keep source file path
+
                         "kind": "chat",
+
+                        "kind": "json",
                         "idx": idx,
                         "text": text_chunk,
                         "meta": full_meta,
@@ -1162,6 +1169,9 @@ async def process_json(request: Request, _: bool = Depends(require_auth)):
                     document_id=conv_docid,
                     path=rel_path,
                     kind="chat",
+
+                    kind="json",
+
                     chunks=upserted,
                     images=0,
                     bytes=len(text.encode("utf-8")),

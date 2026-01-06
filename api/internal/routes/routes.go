@@ -53,6 +53,12 @@ func withCORS(next http.Handler, cfg *config.Config) http.Handler {
 			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
 			// Build verification header (for debugging CORS fixes)
 			w.Header().Set("X-Jsonify2ai-Build", "2025-01-02-cors-delete-fix")
+
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
 		}
 		next.ServeHTTP(w, r)
 	})
