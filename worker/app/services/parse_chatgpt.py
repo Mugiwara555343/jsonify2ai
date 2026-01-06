@@ -34,6 +34,60 @@ def is_chatgpt_export(data: Any, filename: str = "") -> bool:
     if not data:
         return False
 
+    # Check at least one item satisfies ChatGPT structure requirements
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+
+        # Must have mapping as a dict
+        mapping = item.get("mapping")
+        if not isinstance(mapping, dict):
+            continue
+
+        # Mapping must contain at least one node with message structure
+        found_valid_node = False
+        for node_id, node in mapping.items():
+            if not isinstance(node, dict):
+                continue
+
+            message = node.get("message")
+            if not isinstance(message, dict):
+                continue
+
+            # Message must have author with role
+            author = message.get("author")
+            if not isinstance(author, dict):
+                continue
+            role = author.get("role")
+            if not isinstance(role, str):
+                continue
+
+            # Message must have content with parts or text-like content
+            content = message.get("content")
+            has_valid_content = False
+
+            if isinstance(content, dict):
+                # Check for parts array
+                parts = content.get("parts")
+                if isinstance(parts, list) and len(parts) > 0:
+                    has_valid_content = True
+                # Check for text field
+                elif "text" in content:
+                    has_valid_content = True
+            elif isinstance(content, str) and content.strip():
+                has_valid_content = True
+            elif isinstance(content, list) and len(content) > 0:
+                has_valid_content = True
+
+            if has_valid_content:
+                found_valid_node = True
+                break
+
+        if found_valid_node:
+            return True
+
+    return False
+
     # Check first item has ChatGPT structure
     first = data[0]
     if not isinstance(first, dict):
@@ -45,6 +99,7 @@ def is_chatgpt_export(data: Any, filename: str = "") -> bool:
     has_time = "create_time" in first or "update_time" in first
 
     return has_mapping and (has_title or has_time)
+
 
 
 def parse_conversation(
@@ -235,6 +290,10 @@ def parse_conversation(
             "source_system": "chatgpt",
             "conversation_id": conversation_id,
             "source_file": source_file,
+
+            "logical_path": f"chatgpt/{conversation_id}",
+
+
         }
 
         if title:

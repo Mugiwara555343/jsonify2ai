@@ -30,6 +30,21 @@ func withCORS(next http.Handler, cfg *config.Config) http.Handler {
 			}
 		}
 
+		// Handle OPTIONS preflight requests regardless of origin
+		if r.Method == http.MethodOptions {
+			if allowedOrigins[origin] {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Vary", "Origin")
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+				w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
+				// Build verification header (for debugging CORS fixes)
+				w.Header().Set("X-Jsonify2ai-Build", "2025-01-02-cors-delete-fix")
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
 		if allowedOrigins[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
@@ -38,10 +53,12 @@ func withCORS(next http.Handler, cfg *config.Config) http.Handler {
 			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
 			// Build verification header (for debugging CORS fixes)
 			w.Header().Set("X-Jsonify2ai-Build", "2025-01-02-cors-delete-fix")
+
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
+
 		}
 		next.ServeHTTP(w, r)
 	})

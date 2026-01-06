@@ -2,7 +2,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field, field_validator
 from typing import Any, Dict, Literal
 
-ChunkKind = Literal["text", "pdf", "audio", "image", "csv", "doc", "html"]
+ChunkKind = Literal["text", "pdf", "audio", "image", "csv", "doc", "html", "chat"]
 
 
 class Chunk(BaseModel):

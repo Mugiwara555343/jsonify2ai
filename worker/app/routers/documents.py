@@ -47,6 +47,7 @@ def _scroll_all_documents(
             "kinds": set(),
             "paths": set(),
             "counts": defaultdict(int),
+            "meta": None,  # Store meta from first point
         }
     )
 
@@ -61,6 +62,21 @@ def _scroll_all_documents(
         doc_aggregates[doc_id]["paths"].add(payload.get("path", ""))
         doc_aggregates[doc_id]["counts"][payload.get("kind", "unknown")] += 1
 
+        # Extract meta from first point (preserve for backward compatibility)
+        if doc_aggregates[doc_id]["meta"] is None:
+            meta = payload.get("meta", {})
+            if isinstance(meta, dict):
+                # Extract relevant meta fields
+                extracted_meta = {}
+                if "source_system" in meta:
+                    extracted_meta["source_system"] = meta["source_system"]
+                if "title" in meta:
+                    extracted_meta["title"] = meta["title"]
+                if "logical_path" in meta:
+                    extracted_meta["logical_path"] = meta["logical_path"]
+                if extracted_meta:
+                    doc_aggregates[doc_id]["meta"] = extracted_meta
+
     # Convert to list format
     result = []
     for doc_id, data in doc_aggregates.items():
@@ -68,14 +84,20 @@ def _scroll_all_documents(
         paths_list = list(data["paths"])[:3]  # Limit to first 3 paths
         kinds_list = list(data["kinds"])
 
-        result.append(
-            {
-                "document_id": doc_id,
-                "kinds": kinds_list,
-                "paths": paths_list,
-                "counts": dict(data["counts"]),
-            }
-        )
+        doc_result = {
+            "document_id": doc_id,
+            "kinds": kinds_list,
+            "paths": paths_list,
+            "counts": dict(data["counts"]),
+        }
+
+        # Add meta if present (backward compatible: empty dict if not found)
+        if data["meta"] is not None:
+            doc_result["meta"] = data["meta"]
+        else:
+            doc_result["meta"] = {}
+
+        result.append(doc_result)
 
     return result
 

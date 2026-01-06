@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import json
 from pathlib import Path
@@ -33,6 +34,7 @@ def main():
     api_token = env.get("API_AUTH_TOKEN", os.getenv("API_AUTH_TOKEN", ""))
     worker_token = env.get("WORKER_AUTH_TOKEN", os.getenv("WORKER_AUTH_TOKEN", ""))
     qdrant_url = env.get("QDRANT_URL", os.getenv("QDRANT_URL", "http://localhost:6333"))
+    upload_fixtures = os.getenv("DIAGNOSE_UPLOAD_FIXTURES", "1") == "1"
 
     drop = Path("data/dropzone")
     drop.mkdir(parents=True, exist_ok=True)
@@ -180,14 +182,24 @@ def main():
     except Exception:
         pass
 
+
+    # 6) ChatGPT export test (if fixture exists and upload_fixtures is enabled)
+    summary["fixtures_uploaded"] = False
+    chatgpt_fixture = Path("scripts/fixtures/chatgpt_conversations_min.json")
+    if upload_fixtures and chatgpt_fixture.exists():
+
     # 6) ChatGPT export test (if fixture exists)
     chatgpt_fixture = Path("scripts/fixtures/chatgpt_conversations_min.json")
     if chatgpt_fixture.exists():
+
         summary["chatgpt_test"] = {
             "fixture_exists": True,
             "upload_ok": False,
             "documents_created": None,
             "has_chatgpt_doc": False,
+            "has_source_system": False,
+            "has_logical_path": False,
+            "has_chat_kind": False,
             "has_conversation_id": False,
             "chunks_created": 0,
         }
@@ -202,6 +214,9 @@ def main():
                 if r.ok:
                     data = r.json()
                     summary["chatgpt_test"]["upload_ok"] = True
+
+                    summary["fixtures_uploaded"] = True
+
                     summary["chatgpt_test"]["documents_created"] = data.get(
                         "documents_created", 1
                     )
@@ -216,15 +231,44 @@ def main():
                         )
                         if docs_r.ok:
                             docs = docs_r.json()
+
+                            # Find ChatGPT docs by meta.source_system or kind="chat"
+                            chatgpt_docs = [
+                                d
+                                for d in docs
+                                if (
+                                    d.get("meta", {}).get("source_system") == "chatgpt"
+                                    or "chat" in d.get("kinds", [])
+                                )
+
                             chatgpt_docs = [
                                 d
                                 for d in docs
                                 if d.get("document_id", "").startswith("chatgpt:")
+
                             ]
                             if chatgpt_docs:
                                 summary["chatgpt_test"]["has_chatgpt_doc"] = True
                                 # Check first ChatGPT doc for metadata
                                 first_doc = chatgpt_docs[0]
+
+                                meta = first_doc.get("meta", {})
+                                summary["chatgpt_test"]["has_source_system"] = (
+                                    meta.get("source_system") == "chatgpt"
+                                )
+                                summary["chatgpt_test"]["has_logical_path"] = (
+                                    "logical_path" in meta
+                                    and meta.get("logical_path", "").startswith(
+                                        "chatgpt/"
+                                    )
+                                )
+                                summary["chatgpt_test"]["has_chat_kind"] = (
+                                    "chat" in first_doc.get("kinds", [])
+                                )
+                                # Sum chunks from ChatGPT docs (check both "chat" and "json" for backward compat)
+                                total_chunks = sum(
+                                    d.get("counts", {}).get("chat", 0)
+
                                 # Note: meta might not be in documents list response, but we can check document_id pattern
                                 summary["chatgpt_test"]["has_conversation_id"] = (
                                     "chatgpt:" in first_doc.get("document_id", "")
@@ -232,6 +276,7 @@ def main():
                                 # Sum chunks from ChatGPT docs
                                 total_chunks = sum(
                                     d.get("counts", {}).get("chunks", 0)
+
                                     + d.get("counts", {}).get("json", 0)
                                     for d in chatgpt_docs
                                 )
@@ -240,6 +285,70 @@ def main():
                         pass
         except Exception as e:
             summary["chatgpt_test"]["error"] = str(e)[:100]
+
+
+    # 7) Negative test: generic JSON should NOT be treated as ChatGPT
+    generic_json_fixture = Path("scripts/fixtures/generic_array.json")
+    if not generic_json_fixture.exists():
+        # Create a simple generic JSON fixture that should NOT match ChatGPT detection
+        try:
+            generic_json_fixture.parent.mkdir(parents=True, exist_ok=True)
+            with open(generic_json_fixture, "w") as f:
+                json.dump(
+                    [
+                        {"id": 1, "name": "Item 1", "value": 100},
+                        {"id": 2, "name": "Item 2", "value": 200},
+                    ],
+                    f,
+                )
+        except Exception:
+            pass  # Skip if can't create fixture
+
+    if upload_fixtures and generic_json_fixture.exists():
+        summary["generic_json_test"] = {
+            "fixture_exists": True,
+            "upload_ok": False,
+            "treated_as_chatgpt": None,
+            "has_json_kind": False,
+        }
+        try:
+            with open(generic_json_fixture, "rb") as f:
+                files = {"file": (generic_json_fixture.name, f, "application/json")}
+                headers = {"Authorization": f"Bearer {api_token}"} if api_token else {}
+                r = requests.post(
+                    f"{api_base}/upload", files=files, headers=headers, timeout=30
+                )
+                if r.ok:
+                    summary["generic_json_test"]["upload_ok"] = True
+                    summary["fixtures_uploaded"] = True
+                    time.sleep(3)
+                    try:
+                        docs_r = requests.get(
+                            f"{api_base}/documents", headers=headers, timeout=10
+                        )
+                        if docs_r.ok:
+                            docs = docs_r.json()
+                            # Find docs from this upload (by filename or recent)
+                            generic_docs = [
+                                d
+                                for d in docs
+                                if generic_json_fixture.name in str(d.get("paths", []))
+                            ]
+                            if generic_docs:
+                                first_doc = generic_docs[0]
+                                meta = first_doc.get("meta", {})
+                                summary["generic_json_test"]["treated_as_chatgpt"] = (
+                                    meta.get("source_system") == "chatgpt"
+                                    or "chat" in first_doc.get("kinds", [])
+                                )
+                                summary["generic_json_test"]["has_json_kind"] = (
+                                    "json" in first_doc.get("kinds", [])
+                                )
+                    except Exception:
+                        pass
+        except Exception as e:
+            summary["generic_json_test"]["error"] = str(e)[:100]
+
 
     # 7) Infer final issue if unset
     if not summary.get("inferred_issue"):
@@ -251,6 +360,15 @@ def main():
             summary["inferred_issue"] = "ok"
         else:
             summary["inferred_issue"] = "unknown"
+
+    # Print fixture upload status
+    if summary.get("fixtures_uploaded", False):
+        print("# Fixtures were uploaded (DIAGNOSE_UPLOAD_FIXTURES=1)", file=sys.stderr)
+    else:
+        print(
+            "# Fixtures were NOT uploaded (DIAGNOSE_UPLOAD_FIXTURES=0 or no fixtures found)",
+            file=sys.stderr,
+        )
 
     print(json.dumps(summary))
 

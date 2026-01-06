@@ -353,8 +353,9 @@ export function downloadJson(documentId: string, kind: string): void {
 export async function fetchJsonPreview(
   documentId: string,
   collection: string,
-  maxLines = 5
-): Promise<{ lines: string[] }> {
+  maxLines = 100,
+  offset = 0
+): Promise<{ lines: string[]; total?: number }> {
   const res = await apiRequest(
     `/export?document_id=${encodeURIComponent(documentId)}&collection=${encodeURIComponent(collection)}`,
     { method: 'GET' },
@@ -364,8 +365,10 @@ export async function fetchJsonPreview(
     throw new Error(`Failed to fetch JSON preview: ${res.status}`);
   }
   const text = await res.text();
-  const lines = text.split('\n').filter(Boolean).slice(0, maxLines);
-  return { lines };
+  const allLines = text.split('\n').filter(Boolean);
+  const total = allLines.length;
+  const lines = allLines.slice(offset, offset + maxLines);
+  return { lines, total };
 }
 
 export async function deleteDocument(documentId: string): Promise<void> {

@@ -86,7 +86,7 @@ def _search(
 @router.get("/search")
 def search(
     q: str = Query(...),
-    kind: Literal["text", "pdf", "image", "audio"] = "text",
+    kind: Literal["text", "pdf", "image", "audio", "chat"] = "text",
     k: int = 10,
     path: Optional[str] = Query(None),
     document_id: Optional[str] = Query(None),
@@ -97,7 +97,7 @@ def search(
         vec = embed_texts([q])[0]
         col = (
             settings.QDRANT_COLLECTION
-            if kind in ["text", "pdf", "audio"]
+            if kind in ["text", "pdf", "audio", "chat"]
             else getattr(settings, "QDRANT_COLLECTION_IMAGES", "jsonify2ai_images_768")
         )
         return {
@@ -135,7 +135,7 @@ def search_post(body: dict):
         vec = embed_texts([q])[0]
         col = (
             settings.QDRANT_COLLECTION
-            if kind in ["text", "pdf", "audio"]
+            if kind in ["text", "pdf", "audio", "chat"]
             else getattr(settings, "QDRANT_COLLECTION_IMAGES", "jsonify2ai_images_768")
         )
         return {
