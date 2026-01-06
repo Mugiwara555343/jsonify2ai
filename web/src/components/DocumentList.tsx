@@ -214,6 +214,9 @@ export default function DocumentList(props: DocumentListProps) {
                       {doc.document_id}
                     </code>
                     {((doc as any).meta?.source_system === "chatgpt" || doc.kinds.includes("chat")) && (
+
+                    {doc.document_id.startsWith('chatgpt:') && (
+
                       <span style={{
                         padding: '2px 6px',
                         borderRadius: 4,
@@ -418,6 +421,12 @@ export default function DocumentList(props: DocumentListProps) {
                       </div>
                     )}
                     <div>Counts: {Object.entries(doc.counts).map(([k, v]) => `${k}: ${v}`).join(', ')}</div>
+                    {(doc as any).meta?.title && (
+                      <div style={{ fontSize: 11, fontWeight: 500, marginTop: 4, color: '#374151' }}>
+                        Title: {(doc as any).meta.title}
+                      </div>
+                    )}
+
                     {(doc as any).ingested_at && (
                       <div style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>
                         Ingested: {formatRelativeTime((doc as any).ingested_at)}

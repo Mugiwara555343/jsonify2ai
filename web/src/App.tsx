@@ -639,8 +639,12 @@ function App() {
     const j = await fetchStatus()
     setS(j)
 
+
     // Merge ingest_recent from status into activityFeed only if activity is not hidden
     if (j?.ingest_recent && Array.isArray(j.ingest_recent) && !hideIngestionActivity) {
+    // Merge ingest_recent from status into activityFeed
+    if (j?.ingest_recent && Array.isArray(j.ingest_recent)) {
+
       const newEvents: IngestionEvent[] = j.ingest_recent.map((item: IngestActivityItem) => {
         // Map worker activity to IngestionEvent format
         const timestamp = item.finished_at || item.started_at;
@@ -681,6 +685,8 @@ function App() {
         const newUnique = newEvents.filter(e => {
           const aid = (e as any).activity_id;
           return aid && !existingIds.has(aid);
+
+          return !aid || !existingIds.has(aid);
         });
         // Keep most recent first, limit to last 100
         const merged = [...newUnique, ...prev].slice(0, 100);
@@ -2468,8 +2474,21 @@ These toggles make it easy to test different features without changing code.`
               setOpenMenuDocId(null);
             }
           } catch (err: any) {
+
             const errorMsg = err?.message || String(err) || 'Unknown error';
             showToast(errorMsg, true);
+
+            const errorMsg = err?.message || err || 'Unknown error';
+            // deleteDocument already provides specific messages, so just show them
+            showToast(errorMsg, true);
+            const errorMsg = err?.message || err;
+            if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
+              showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
+            } else {
+              showToast(`Delete failed: ${errorMsg}`, true);
+            }
+
+
           }
         }}
         onToggleSelection={(docId: string) => {
@@ -2787,8 +2806,22 @@ These toggles make it easy to test different features without changing code.`
               setOpenMenuDocId(null);
             }
           } catch (err: any) {
+
             const errorMsg = err?.message || String(err) || 'Unknown error';
             showToast(errorMsg, true);
+
+
+            const errorMsg = err?.message || err || 'Unknown error';
+            // deleteDocument already provides specific messages, so just show them
+            showToast(errorMsg, true);
+            const errorMsg = err?.message || err;
+            if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
+              showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
+            } else {
+              showToast(`Delete failed: ${errorMsg}`, true);
+            }
+
+
           }
         }}
         copyToClipboard={copyToClipboard}
