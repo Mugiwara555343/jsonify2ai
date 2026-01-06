@@ -6,8 +6,8 @@ from pathlib import Path
 import requests
 
 
-def read_env(path: str = ".env"):
-    env = {}
+def read_env(path: str = ".env") -> dict:
+    env: dict[str, str] = {}
     if not os.path.exists(path):
         return env
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
@@ -21,13 +21,26 @@ def read_env(path: str = ".env"):
     return env
 
 
-def mask(token: str | None):
+def mask(token: str | None) -> str:
     if not token:
         return ""
+    if len(token) <= 8:
+        return token
     return token[:4] + "..." + token[-4:]
 
 
-def main():
+def _auth_headers(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
+def _json_headers(token: str) -> dict:
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def main() -> None:
     env = read_env()
     api_base = os.getenv("API_BASE", "http://localhost:8082")
     worker_base = os.getenv("WORKER_URL", "http://localhost:8090")
@@ -43,7 +56,7 @@ def main():
         "diagnose upload\nvector manifest.json EMBED_DEV_MODE\n", encoding="utf-8"
     )
 
-    summary = {
+    summary: dict = {
         "api_upload_ok": False,
         "worker_process_ok": False,
         "status_counts": None,
@@ -53,6 +66,7 @@ def main():
             "EMBED_DEV_MODE": False,
         },
         "qdrant_points_count": None,
+        "fixtures_uploaded": False,
         "inferred_issue": None,
     }
 
@@ -60,68 +74,57 @@ def main():
     try:
         with open(test_path, "rb") as f:
             files = {"file": (test_path.name, f, "text/markdown")}
-            headers = {"Authorization": f"Bearer {api_token}"} if api_token else {}
             r = requests.post(
-                f"{api_base}/upload", files=files, headers=headers, timeout=30
+                f"{api_base}/upload",
+                files=files,
+                headers=_auth_headers(api_token),
+                timeout=30,
             )
-            if r.status_code in (401, 403):
-                summary["inferred_issue"] = "missing_api_token"
-                summary["api_upload_status"] = r.status_code
-                try:
-                    error_data = r.json()
-                    # Handle nested error format from worker: {"detail": {"error": "..."}}
-                    if "detail" in error_data and isinstance(
-                        error_data["detail"], dict
-                    ):
-                        summary["api_upload_error_snippet"] = error_data["detail"].get(
-                            "error", "unknown"
-                        )
-                    else:
-                        summary["api_upload_error_snippet"] = error_data.get(
-                            "error", "unknown"
-                        )
-                except Exception:
-                    summary["api_upload_error_snippet"] = "no_json_response"
-                summary["used_token_prefix"] = mask(api_token)
-            elif r.status_code == 200:
-                summary["api_upload_ok"] = True
-            else:
-                r.raise_for_status()
+        if r.status_code in (401, 403):
+            summary["inferred_issue"] = "missing_api_token"
+            summary["api_upload_status"] = r.status_code
+            try:
+                error_data = r.json()
+                if "detail" in error_data and isinstance(error_data["detail"], dict):
+                    summary["api_upload_error_snippet"] = error_data["detail"].get(
+                        "error", "unknown"
+                    )
+                else:
+                    summary["api_upload_error_snippet"] = error_data.get(
+                        "error", "unknown"
+                    )
+            except Exception:
+                summary["api_upload_error_snippet"] = "no_json_response"
+            summary["used_token_prefix"] = mask(api_token)
+        elif r.status_code == 200:
+            summary["api_upload_ok"] = True
+        else:
+            r.raise_for_status()
     except requests.exceptions.HTTPError as e:
-        if hasattr(e, "response") and e.response is not None:
-            if e.response.status_code in (401, 403):
-                summary["api_upload_status"] = e.response.status_code
-                try:
-                    error_data = e.response.json()
-                    # Handle nested error format from worker: {"detail": {"error": "..."}}
-                    if "detail" in error_data and isinstance(
-                        error_data["detail"], dict
-                    ):
-                        summary["api_upload_error_snippet"] = error_data["detail"].get(
-                            "error", "unknown"
-                        )
-                    else:
-                        summary["api_upload_error_snippet"] = error_data.get(
-                            "error", "unknown"
-                        )
-                except Exception:
-                    summary["api_upload_error_snippet"] = "no_json_response"
-                summary["used_token_prefix"] = mask(api_token)
-                if not summary.get("inferred_issue"):
-                    summary["inferred_issue"] = "missing_api_token"
+        resp = getattr(e, "response", None)
+        if resp is not None and resp.status_code in (401, 403):
+            summary["api_upload_status"] = resp.status_code
+            try:
+                error_data = resp.json()
+                if "detail" in error_data and isinstance(error_data["detail"], dict):
+                    summary["api_upload_error_snippet"] = error_data["detail"].get(
+                        "error", "unknown"
+                    )
+                else:
+                    summary["api_upload_error_snippet"] = error_data.get(
+                        "error", "unknown"
+                    )
+            except Exception:
+                summary["api_upload_error_snippet"] = "no_json_response"
+            summary["used_token_prefix"] = mask(api_token)
+            if not summary.get("inferred_issue"):
+                summary["inferred_issue"] = "missing_api_token"
     except Exception:
+        # Best-effort script; don't crash on network issues
         pass
 
     # 2) Worker process fallback
     try:
-        headers = (
-            {
-                "Authorization": f"Bearer {worker_token}",
-                "Content-Type": "application/json",
-            }
-            if worker_token
-            else {"Content-Type": "application/json"}
-        )
         body = {
             "kind": "text",
             "path": str(test_path),
@@ -130,7 +133,7 @@ def main():
         r = requests.post(
             f"{worker_base}/process/text",
             data=json.dumps(body),
-            headers=headers,
+            headers=_json_headers(worker_token),
             timeout=30,
         )
         if r.status_code in (401, 403) and not summary.get("inferred_issue"):
@@ -156,7 +159,7 @@ def main():
 
     # 4) API searches (require token)
     try:
-        headers = {"Authorization": f"Bearer {api_token}"} if api_token else {}
+        headers = _auth_headers(api_token)
         for term in ["vector", "manifest.json", "EMBED_DEV_MODE"]:
             rr = requests.get(
                 f"{api_base}/search",
@@ -182,16 +185,10 @@ def main():
     except Exception:
         pass
 
-
-    # 6) ChatGPT export test (if fixture exists and upload_fixtures is enabled)
-    summary["fixtures_uploaded"] = False
+    # 6) ChatGPT export test (if fixture exists AND upload_fixtures enabled)
     chatgpt_fixture = Path("scripts/fixtures/chatgpt_conversations_min.json")
     if upload_fixtures and chatgpt_fixture.exists():
-
-    # 6) ChatGPT export test (if fixture exists)
-    chatgpt_fixture = Path("scripts/fixtures/chatgpt_conversations_min.json")
-    if chatgpt_fixture.exists():
-
+        summary["fixtures_uploaded"] = True
         summary["chatgpt_test"] = {
             "fixture_exists": True,
             "upload_ok": False,
@@ -204,96 +201,79 @@ def main():
             "chunks_created": 0,
         }
         try:
-            # Upload ChatGPT fixture
             with open(chatgpt_fixture, "rb") as f:
                 files = {"file": (chatgpt_fixture.name, f, "application/json")}
-                headers = {"Authorization": f"Bearer {api_token}"} if api_token else {}
                 r = requests.post(
-                    f"{api_base}/upload", files=files, headers=headers, timeout=30
+                    f"{api_base}/upload",
+                    files=files,
+                    headers=_auth_headers(api_token),
+                    timeout=30,
                 )
-                if r.ok:
-                    data = r.json()
-                    summary["chatgpt_test"]["upload_ok"] = True
+            if r.ok:
+                data = r.json()
+                summary["chatgpt_test"]["upload_ok"] = True
+                summary["chatgpt_test"]["documents_created"] = data.get(
+                    "documents_created", 1
+                )
 
-                    summary["fixtures_uploaded"] = True
+                # Wait a bit for processing
+                time.sleep(3)
 
-                    summary["chatgpt_test"]["documents_created"] = data.get(
-                        "documents_created", 1
-                    )
+                docs_r = requests.get(
+                    f"{api_base}/documents",
+                    headers=_auth_headers(api_token),
+                    timeout=10,
+                )
+                if docs_r.ok:
+                    docs = docs_r.json() or []
+                    chatgpt_docs = [
+                        d
+                        for d in docs
+                        if (d.get("meta", {}) or {}).get("source_system") == "chatgpt"
+                        or "chat" in (d.get("kinds") or [])
+                        or str(d.get("document_id", "")).startswith("chatgpt:")
+                    ]
+                    if chatgpt_docs:
+                        summary["chatgpt_test"]["has_chatgpt_doc"] = True
+                        first_doc = chatgpt_docs[0]
+                        meta = first_doc.get("meta", {}) or {}
 
-                    # Wait a bit for processing
-                    time.sleep(3)
-
-                    # Check documents endpoint for ChatGPT docs
-                    try:
-                        docs_r = requests.get(
-                            f"{api_base}/documents", headers=headers, timeout=10
+                        summary["chatgpt_test"]["has_source_system"] = (
+                            meta.get("source_system") == "chatgpt"
                         )
-                        if docs_r.ok:
-                            docs = docs_r.json()
+                        lp = meta.get("logical_path", "")
+                        summary["chatgpt_test"]["has_logical_path"] = isinstance(
+                            lp, str
+                        ) and lp.startswith("chatgpt/")
+                        summary["chatgpt_test"]["has_chat_kind"] = "chat" in (
+                            first_doc.get("kinds") or []
+                        )
+                        summary["chatgpt_test"]["has_conversation_id"] = str(
+                            first_doc.get("document_id", "")
+                        ).startswith("chatgpt:")
 
-                            # Find ChatGPT docs by meta.source_system or kind="chat"
-                            chatgpt_docs = [
-                                d
-                                for d in docs
-                                if (
-                                    d.get("meta", {}).get("source_system") == "chatgpt"
-                                    or "chat" in d.get("kinds", [])
-                                )
+                        # Prefer chat counts; fall back to chunks/json if older schema
+                        def _doc_chunk_count(d: dict) -> int:
+                            c = d.get("counts", {}) or {}
+                            return int(
+                                c.get("chat", 0)
+                                or c.get("chunks", 0)
+                                or c.get("json", 0)
+                                or 0
+                            )
 
-                            chatgpt_docs = [
-                                d
-                                for d in docs
-                                if d.get("document_id", "").startswith("chatgpt:")
-
-                            ]
-                            if chatgpt_docs:
-                                summary["chatgpt_test"]["has_chatgpt_doc"] = True
-                                # Check first ChatGPT doc for metadata
-                                first_doc = chatgpt_docs[0]
-
-                                meta = first_doc.get("meta", {})
-                                summary["chatgpt_test"]["has_source_system"] = (
-                                    meta.get("source_system") == "chatgpt"
-                                )
-                                summary["chatgpt_test"]["has_logical_path"] = (
-                                    "logical_path" in meta
-                                    and meta.get("logical_path", "").startswith(
-                                        "chatgpt/"
-                                    )
-                                )
-                                summary["chatgpt_test"]["has_chat_kind"] = (
-                                    "chat" in first_doc.get("kinds", [])
-                                )
-                                # Sum chunks from ChatGPT docs (check both "chat" and "json" for backward compat)
-                                total_chunks = sum(
-                                    d.get("counts", {}).get("chat", 0)
-
-                                # Note: meta might not be in documents list response, but we can check document_id pattern
-                                summary["chatgpt_test"]["has_conversation_id"] = (
-                                    "chatgpt:" in first_doc.get("document_id", "")
-                                )
-                                # Sum chunks from ChatGPT docs
-                                total_chunks = sum(
-                                    d.get("counts", {}).get("chunks", 0)
-
-                                    + d.get("counts", {}).get("json", 0)
-                                    for d in chatgpt_docs
-                                )
-                                summary["chatgpt_test"]["chunks_created"] = total_chunks
-                    except Exception:
-                        pass
+                        summary["chatgpt_test"]["chunks_created"] = sum(
+                            _doc_chunk_count(d) for d in chatgpt_docs
+                        )
         except Exception as e:
             summary["chatgpt_test"]["error"] = str(e)[:100]
-
 
     # 7) Negative test: generic JSON should NOT be treated as ChatGPT
     generic_json_fixture = Path("scripts/fixtures/generic_array.json")
     if not generic_json_fixture.exists():
-        # Create a simple generic JSON fixture that should NOT match ChatGPT detection
         try:
             generic_json_fixture.parent.mkdir(parents=True, exist_ok=True)
-            with open(generic_json_fixture, "w") as f:
+            with open(generic_json_fixture, "w", encoding="utf-8") as f:
                 json.dump(
                     [
                         {"id": 1, "name": "Item 1", "value": 100},
@@ -302,9 +282,10 @@ def main():
                     f,
                 )
         except Exception:
-            pass  # Skip if can't create fixture
+            pass
 
     if upload_fixtures and generic_json_fixture.exists():
+        summary["fixtures_uploaded"] = True
         summary["generic_json_test"] = {
             "fixture_exists": True,
             "upload_ok": False,
@@ -314,43 +295,47 @@ def main():
         try:
             with open(generic_json_fixture, "rb") as f:
                 files = {"file": (generic_json_fixture.name, f, "application/json")}
-                headers = {"Authorization": f"Bearer {api_token}"} if api_token else {}
                 r = requests.post(
-                    f"{api_base}/upload", files=files, headers=headers, timeout=30
+                    f"{api_base}/upload",
+                    files=files,
+                    headers=_auth_headers(api_token),
+                    timeout=30,
                 )
-                if r.ok:
-                    summary["generic_json_test"]["upload_ok"] = True
-                    summary["fixtures_uploaded"] = True
-                    time.sleep(3)
-                    try:
-                        docs_r = requests.get(
-                            f"{api_base}/documents", headers=headers, timeout=10
+            if r.ok:
+                summary["generic_json_test"]["upload_ok"] = True
+                time.sleep(3)
+                docs_r = requests.get(
+                    f"{api_base}/documents",
+                    headers=_auth_headers(api_token),
+                    timeout=10,
+                )
+                if docs_r.ok:
+                    docs = docs_r.json() or []
+                    generic_docs = [
+                        d
+                        for d in docs
+                        if generic_json_fixture.name in str(d.get("paths", []))
+                    ]
+                    if generic_docs:
+                        first_doc = generic_docs[0]
+                        meta = first_doc.get("meta", {}) or {}
+                        treated_as_chatgpt = (
+                            meta.get("source_system") == "chatgpt"
+                            or "chat" in (first_doc.get("kinds") or [])
+                            or str(first_doc.get("document_id", "")).startswith(
+                                "chatgpt:"
+                            )
                         )
-                        if docs_r.ok:
-                            docs = docs_r.json()
-                            # Find docs from this upload (by filename or recent)
-                            generic_docs = [
-                                d
-                                for d in docs
-                                if generic_json_fixture.name in str(d.get("paths", []))
-                            ]
-                            if generic_docs:
-                                first_doc = generic_docs[0]
-                                meta = first_doc.get("meta", {})
-                                summary["generic_json_test"]["treated_as_chatgpt"] = (
-                                    meta.get("source_system") == "chatgpt"
-                                    or "chat" in first_doc.get("kinds", [])
-                                )
-                                summary["generic_json_test"]["has_json_kind"] = (
-                                    "json" in first_doc.get("kinds", [])
-                                )
-                    except Exception:
-                        pass
+                        summary["generic_json_test"]["treated_as_chatgpt"] = (
+                            treated_as_chatgpt
+                        )
+                        summary["generic_json_test"]["has_json_kind"] = "json" in (
+                            first_doc.get("kinds") or []
+                        )
         except Exception as e:
             summary["generic_json_test"]["error"] = str(e)[:100]
 
-
-    # 7) Infer final issue if unset
+    # 8) Infer final issue if unset
     if not summary.get("inferred_issue"):
         if not api_token and not summary["api_upload_ok"]:
             summary["inferred_issue"] = "missing_api_token"
