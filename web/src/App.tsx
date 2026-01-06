@@ -42,11 +42,40 @@ type Status = {
   // LLM status
   llm?: { provider?: string; model?: string; reachable?: boolean; synth_total?: number };
 }
-type Hit = { id: string; score: number; text?: string; caption?: string; path?: string; idx?: number; kind?: string; document_id?: string }
+type Hit = {
+  id: string;
+  score: number;
+  text?: string;
+  caption?: string;
+  path?: string;
+  idx?: number;
+  kind?: string;
+  document_id?: string;
+  meta?: {
+    ingested_at?: string;
+    ingested_at_ts?: number;
+    source_system?: string;
+    title?: string;
+    logical_path?: string;
+    conversation_id?: string;
+    source_file?: string;
+    [k: string]: any;
+  };
+}
 
 type Document = { document_id: string; kinds: string[]; paths: string[]; counts: Record<string, number> }
 const apiBase = API_BASE
-type AskResp = { ok: boolean; mode: 'search' | 'llm'; model?: string; answer?: string; final?: string; sources?: Hit[]; answers?: Hit[]; error?: string }
+type AskResp = {
+  ok: boolean;
+  mode: 'search' | 'llm' | 'retrieve' | 'synthesize';
+  model?: string;
+  answer?: string;
+  final?: string;
+  sources?: Hit[];
+  answers?: Hit[];
+  error?: string;
+  stats?: { k: number; returned: number };
+}
 
 type IngestionEvent = {
   timestamp: number; // Date.now()
@@ -307,6 +336,23 @@ function App() {
   const ACTIVITY_STORAGE_KEY = "jsonify2ai.activity";
   const MAX_ACTIVITY_EVENTS = 10;
 
+  // Robust localStorage boolean helpers
+  function getLSBool(key: string, defaultVal: boolean): boolean {
+    try {
+      const v = localStorage.getItem(key);
+      if (v === null) return defaultVal;
+      return v === 'true';
+    } catch {
+      return defaultVal;
+    }
+  }
+
+  function setLSBool(key: string, v: boolean) {
+    try {
+      localStorage.setItem(key, v ? 'true' : 'false');
+    } catch {}
+  }
+
   function loadActivityFeed(): IngestionEvent[] {
     try {
       const raw = localStorage.getItem(ACTIVITY_STORAGE_KEY);
@@ -355,27 +401,21 @@ function App() {
   function clearActivityFeed() {
     setActivityFeed([]);
     setHideIngestionActivity(true);
+    setLSBool('ui.hideIngestionActivity', true);
     try {
       localStorage.removeItem(ACTIVITY_STORAGE_KEY);
-      localStorage.setItem('ui.hideIngestionActivity', 'true');
     } catch {}
   }
 
   // Check if ingestion activity should be hidden
-  const [hideIngestionActivity, setHideIngestionActivity] = useState(() => {
-    try {
-      return localStorage.getItem('ui.hideIngestionActivity') === 'true';
-    } catch {
-      return false;
-    }
-  });
+  const [hideIngestionActivity, setHideIngestionActivity] = useState(() =>
+    getLSBool('ui.hideIngestionActivity', false)
+  );
 
   // Show activity link handler
   const showIngestionActivity = () => {
     setHideIngestionActivity(false);
-    try {
-      localStorage.setItem('ui.hideIngestionActivity', 'false');
-    } catch {}
+    setLSBool('ui.hideIngestionActivity', false);
     // Reload status to populate activity feed
     loadStatus();
   };
@@ -2129,7 +2169,9 @@ These toggles make it easy to test different features without changing code.`
               </div>
             ) : null}
             <div>
-              <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 12 }}>Sources</div>
+              <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 12 }}>
+                {ans.mode === 'retrieve' ? 'Retrieved sources' : 'Sources'}
+              </div>
               {(() => {
                 const sources = ans.sources || ans.answers || [];
                 if (sources.length === 0) {
@@ -2141,19 +2183,30 @@ These toggles make it easy to test different features without changing code.`
                 }
                 return (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    {sources.map((h, i) => {
-                      const filename = h.path ? h.path.split('/').pop() || h.path : (h.id || `Source ${i + 1}`);
-                      const docId = h.document_id ? h.document_id.substring(0, 12) : null;
+                    {sources.map((h: any, i: number) => {
+                      // Use standardized Source shape: id, document_id, text, meta, score, path, kind, idx
+                      const sourceId = h.id || `source-${i}`;
+                      const docId = h.document_id || '';
+                      const title = h.meta?.title || (h.path ? h.path.split('/').pop() || h.path : docId.substring(0, 12) || `Source ${i + 1}`);
+                      const logicalPath = h.meta?.logical_path;
+                      const path = h.path;
+                      const kind = h.kind;
                       const snippet = h.text || h.caption || '';
                       const score = h.score !== undefined ? h.score : null;
+                      const chunkIdx = h.idx !== undefined ? h.idx : null;
 
                       return (
                         <div key={i} style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                            <span style={{ fontWeight: 500, fontSize: 13 }}>{filename}</span>
+                            <span style={{ fontWeight: 500, fontSize: 13 }}>{title}</span>
+                            {kind && (
+                              <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: '#e3f2fd', color: '#1976d2', fontWeight: 500 }}>
+                                {kind}
+                              </span>
+                            )}
                             {docId && (
                               <code style={{ fontSize: 11, fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
-                                {docId}...
+                                {docId.substring(0, 12)}...
                               </code>
                             )}
                             {score !== null && (
@@ -2161,7 +2214,36 @@ These toggles make it easy to test different features without changing code.`
                                 score: {score.toFixed(2)}
                               </span>
                             )}
+                            <button
+                              onClick={() => {
+                                copyToClipboard(sourceId);
+                                showToast('Chunk ID copied');
+                              }}
+                              style={{
+                                fontSize: 10,
+                                padding: '2px 6px',
+                                borderRadius: 4,
+                                border: '1px solid #ddd',
+                                background: '#fff',
+                                color: '#666',
+                                cursor: 'pointer',
+                                marginLeft: 'auto'
+                              }}
+                              title={`Copy chunk ID: ${sourceId}`}
+                            >
+                              Copy ID
+                            </button>
                           </div>
+                          {(logicalPath || path) && (
+                            <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6 }}>
+                              {logicalPath || path}
+                            </div>
+                          )}
+                          {chunkIdx !== null && (
+                            <div style={{ fontSize: 10, color: '#9ca3af', marginBottom: 6 }}>
+                              Chunk index: {chunkIdx}
+                            </div>
+                          )}
                           {snippet && (
                             <div style={{
                               fontSize: 13,

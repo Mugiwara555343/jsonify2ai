@@ -15,7 +15,7 @@ type Document = {
 
 type AskResp = {
   ok: boolean;
-  mode: 'search' | 'llm';
+  mode: 'search' | 'llm' | 'retrieve' | 'synthesize';
   model?: string;
   answer?: string;
   final?: string;
@@ -28,6 +28,16 @@ type AskResp = {
     idx?: number;
     kind?: string;
     document_id?: string;
+    meta?: {
+      ingested_at?: string;
+      ingested_at_ts?: number;
+      source_system?: string;
+      title?: string;
+      logical_path?: string;
+      conversation_id?: string;
+      source_file?: string;
+      [k: string]: any;
+    };
   }>;
   answers?: Array<{
     id: string;

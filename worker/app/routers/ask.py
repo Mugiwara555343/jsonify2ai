@@ -35,6 +35,58 @@ def _parse_iso_to_timestamp(iso_str: str) -> Optional[int]:
         return None
 
 
+def _normalize_source(hit: dict) -> dict:
+    """Convert raw Qdrant hit to standardized Source object."""
+    # Handle both direct fields and payload
+    payload = hit.get("payload", {}) if isinstance(hit.get("payload"), dict) else {}
+
+    # Extract text excerpt (trim to 400-800 chars by default, use 600 as middle ground)
+    text = (
+        hit.get("text")
+        or payload.get("text")
+        or hit.get("caption")
+        or payload.get("caption")
+        or ""
+    )
+    if len(text) > 600:
+        text = text[:600] + "…"
+
+    # Build meta object
+    meta = payload.get("meta", {}) if isinstance(payload.get("meta"), dict) else {}
+    if not isinstance(meta, dict):
+        meta = {}
+
+    # Preserve existing meta fields
+    source_meta = {}
+    for key in [
+        "ingested_at",
+        "ingested_at_ts",
+        "source_system",
+        "title",
+        "logical_path",
+        "conversation_id",
+        "source_file",
+    ]:
+        if key in meta:
+            source_meta[key] = meta[key]
+
+    # Allow passthrough of additional meta keys
+    for k, v in meta.items():
+        if k not in source_meta:
+            source_meta[k] = v
+
+    return {
+        "id": str(hit.get("id", "")),
+        "document_id": hit.get("document_id") or payload.get("document_id", ""),
+        "path": hit.get("path") or payload.get("path"),
+        "kind": hit.get("kind") or payload.get("kind"),
+        "idx": hit.get("idx") or payload.get("idx") or hit.get("chunk_index"),
+        "score": hit.get("score"),
+        "text": text,
+        "meta": source_meta if source_meta else None,
+    }
+
+
 def _search(
     q: str,
     k: int,
@@ -82,7 +134,10 @@ def _search(
         out = []
         for h in hits:
             p = h.payload or {}
-            out.append({"id": str(h.id), "score": float(h.score), **p})
+            raw_hit = {"id": str(h.id), "score": float(h.score), **p}
+            # Normalize to standardized Source shape
+            normalized = _normalize_source(raw_hit)
+            out.append(normalized)
         return out
 
     # Always perform text search
@@ -157,7 +212,15 @@ def ask(body: AskBody):
         body.ingested_after,
         body.ingested_before,
     )
+    # Sources are already normalized by _search()
     sources = text_hits[: body.k // 2] + img_hits[: body.k - body.k // 2]
+
+    # Determine mode: prioritize answer_mode, then mode, then settings
+    # answer_mode="retrieve" means retrieve-only (no synthesis)
+    # answer_mode="synthesize" means try synthesis if available
+    answer_mode = body.answer_mode
+    if answer_mode:
+        answer_mode = answer_mode.lower()
 
     # Normalize requested mode: "retrieval" maps to "search"
     mode = (body.mode or settings.ASK_MODE or "search").lower()
@@ -168,47 +231,49 @@ def ask(body: AskBody):
 
     log = logging.getLogger(__name__)
 
-    if mode == "search":
+    # If answer_mode is "retrieve", force retrieve-only mode
+    if answer_mode == "retrieve" or mode == "search":
         # Retrieval-only path
-        log.info(f"[ask] running in search mode for query: {body.query[:50]}...")
-        snippets = []
-        for h in text_hits[:2] + img_hits[:2]:
-            s = h.get("text") or h.get("caption")
-            if s:
-                snippets.append(s[:220])
-        summary = " • ".join(snippets) or "(no matching snippets)"
-        result = {"ok": True, "mode": "search", "answer": summary, "sources": sources}
+        log.info(f"[ask] running in retrieve mode for query: {body.query[:50]}...")
+        result = {
+            "ok": True,
+            "mode": "retrieve",
+            "answer": "",  # Empty answer for retrieve-only
+            "sources": sources,
+            "stats": {"k": body.k, "returned": len(sources)},
+        }
 
-        # Optional LLM synthesis if enabled
-        if settings.LLM_PROVIDER == "ollama" and snippets:
+        # Optional LLM synthesis if enabled (but only if answer_mode is not "retrieve")
+        if answer_mode != "retrieve" and settings.LLM_PROVIDER == "ollama" and sources:
             result = _try_llm_synthesis(body.query, result, log, body.answer_mode)
 
         return result
     else:
-        # LLM path
-        log.info(f"[ask] running in llm mode for query: {body.query[:50]}...")
+        # LLM/synthesize path
+        log.info(f"[ask] running in synthesize mode for query: {body.query[:50]}...")
         prompt = _format_prompt(body.query, text_hits, img_hits)
         resp = _ollama_generate(prompt)
         if resp:
             return {
                 "ok": True,
-                "mode": "llm",
+                "mode": "synthesize",
                 "model": settings.ASK_MODEL,
                 "answer": resp,
                 "sources": sources,
+                "stats": {"k": body.k, "returned": len(sources)},
             }
-        # Fallback to search if LLM fails
-        log.warning("[ask] LLM generation failed, falling back to search mode")
-        snippets = []
-        for h in text_hits[:2] + img_hits[:2]:
-            s = h.get("text") or h.get("caption")
-            if s:
-                snippets.append(s[:220])
-        summary = " • ".join(snippets) or "(no matching snippets)"
-        result = {"ok": True, "mode": "search", "answer": summary, "sources": sources}
+        # Fallback to retrieve if LLM fails
+        log.warning("[ask] LLM generation failed, falling back to retrieve mode")
+        result = {
+            "ok": True,
+            "mode": "retrieve",
+            "answer": "",
+            "sources": sources,
+            "stats": {"k": body.k, "returned": len(sources)},
+        }
 
-        # Optional LLM synthesis if enabled
-        if settings.LLM_PROVIDER == "ollama" and snippets:
+        # Optional LLM synthesis if enabled (but only if answer_mode is not "retrieve")
+        if answer_mode != "retrieve" and settings.LLM_PROVIDER == "ollama" and sources:
             result = _try_llm_synthesis(body.query, result, log, body.answer_mode)
 
         return result
@@ -337,6 +402,7 @@ def _try_llm_synthesis(query: str, result: dict, log, answer_mode: str = None) -
 
         if final_answer:
             result["final"] = final_answer
+            result["mode"] = "synthesize"  # Update mode to reflect synthesis
             log.info(f"[ask] synthesis successful ({duration_ms}ms)")
         else:
             log.warning("[ask] synthesis failed, result unchanged")

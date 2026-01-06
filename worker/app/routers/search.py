@@ -20,6 +20,58 @@ def _parse_iso_to_timestamp(iso_str: str) -> Optional[int]:
         return None
 
 
+def _normalize_source(hit: dict) -> dict:
+    """Convert raw Qdrant hit to standardized Source object."""
+    # Handle both direct fields and payload
+    payload = hit.get("payload", {}) if isinstance(hit.get("payload"), dict) else {}
+
+    # Extract text excerpt (trim to 400-800 chars by default, use 600 as middle ground)
+    text = (
+        hit.get("text")
+        or payload.get("text")
+        or hit.get("caption")
+        or payload.get("caption")
+        or ""
+    )
+    if len(text) > 600:
+        text = text[:600] + "…"
+
+    # Build meta object
+    meta = payload.get("meta", {}) if isinstance(payload.get("meta"), dict) else {}
+    if not isinstance(meta, dict):
+        meta = {}
+
+    # Preserve existing meta fields
+    source_meta = {}
+    for key in [
+        "ingested_at",
+        "ingested_at_ts",
+        "source_system",
+        "title",
+        "logical_path",
+        "conversation_id",
+        "source_file",
+    ]:
+        if key in meta:
+            source_meta[key] = meta[key]
+
+    # Allow passthrough of additional meta keys
+    for k, v in meta.items():
+        if k not in source_meta:
+            source_meta[k] = v
+
+    return {
+        "id": str(hit.get("id", "")),
+        "document_id": hit.get("document_id") or payload.get("document_id", ""),
+        "path": hit.get("path") or payload.get("path"),
+        "kind": hit.get("kind") or payload.get("kind"),
+        "idx": hit.get("idx") or payload.get("idx") or hit.get("chunk_index"),
+        "score": hit.get("score"),
+        "text": text,
+        "meta": source_meta if source_meta else None,
+    }
+
+
 def _build_filter(
     path: Optional[str],
     document_id: Optional[str],
@@ -79,7 +131,10 @@ def _search(
     out = []
     for h in hits:
         p = h.payload or {}
-        out.append({"id": str(h.id), "score": float(h.score), **p})
+        raw_hit = {"id": str(h.id), "score": float(h.score), **p}
+        # Normalize to standardized Source shape
+        normalized = _normalize_source(raw_hit)
+        out.append(normalized)
     return out
 
 

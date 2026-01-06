@@ -84,7 +84,9 @@ This project is meant to feel like a small product: clone → start → click th
 6. **Ask your data:**
    - Scroll down to the **Ask** section
    - **Scope**: Choose between "This document" (searches only the active/previewed document) or "All documents" (searches across all indexed documents)
-   - **Answer mode**: Choose "Retrieve" (shows top matching sources only, no LLM synthesis) or "Synthesize" (uses LLM to generate answer from sources, if confidence is high enough)
+   - **Answer mode**:
+     - **Retrieve** - Returns top matching sources with citations (chunk IDs, excerpts, provenance). No LLM synthesis. This is the baseline mode that always works.
+     - **Synthesize** - Uses LLM to generate an answer from retrieved sources (if confidence is high enough), plus all source citations. Requires `LLM_PROVIDER=ollama` and Ollama to be reachable.
      - Global mode ("All documents") defaults to "Retrieve" to avoid mixing unrelated documents
      - Document mode ("This document") defaults to "Synthesize" if LLM is available, else "Retrieve"
    - **Quick Actions**: Available in "This document" mode only. Use "Use this doc" in Global mode results to switch and enable Quick Actions.
@@ -92,14 +94,21 @@ This project is meant to feel like a small product: clone → start → click th
    - Press **Ask** or Enter to search
    - View results:
      - **Top matching documents** (Global mode only) - shows which documents contributed sources, with "Use this doc" buttons to switch to document scope
-     - **Answer** block (if synthesis is enabled and confident) - shows a synthesized answer with an "local (ollama)" badge
-     - **Sources** section - always shows matching snippets with filenames, document IDs, and scores
+     - **Answer** block (Synthesize mode only) - shows a synthesized answer with an "local (ollama)" badge when LLM synthesis succeeds
+     - **Sources** section - always shows matching sources with:
+       - Chunk ID (copyable)
+       - Document ID and path
+       - Title (from meta.title if available)
+       - Kind badge (text, pdf, image, etc.)
+       - Similarity score
+       - Excerpt/snippet (trimmed to ~600 chars)
+       - Provenance metadata (ingestion time, source system, logical path, etc.)
    - **"Use this doc" workflow**: In Global mode results, click "Use this doc" on any document to:
      - Switch to "This document" scope
      - Set that document as active
      - Optionally switch to "Synthesize" mode (if LLM is available)
    - In `AUTH_MODE=local`, Ask works without any API token
-   - **Note**: The "Answer" block appears only if `LLM_PROVIDER=ollama` and Ollama is reachable. Otherwise, Ask still returns sources/snippets, which is the baseline behavior.
+   - **Note**: Retrieve mode always works and returns sources with citations. Synthesize mode requires `LLM_PROVIDER=ollama` and Ollama to be reachable. All responses include source citations for traceability.
 
 7. **Export:**
    - In the **Documents** section, use:
@@ -148,15 +157,15 @@ To enable LLM synthesis for the "Ask" feature:
 
 The app works perfectly without an LLM—you'll still get semantic search results and exports. LLM synthesis is purely optional.
 
-## UI preview
+## Screenshots
 
-_A short animated GIF or screenshot of the main flow will go here in a future update._
+_(Replace with your own screenshots)_
 
-For now, the key pieces are:
-- Upload + **"Load demo data"** buttons at the top.
-- Documents list with **Preview JSON / Export JSON / Export ZIP**.
-- Ask panel with Answer + Sources.
-- Status chips showing API/worker health and LLM status.
+- ![UI Overview](docs/images/ui-overview.png) - Main interface with status chips and document list
+- ![JSON Preview Modal](docs/images/json-preview.png) - Preview JSONL chunks for a document
+- ![Ask Retrieve-Only](docs/images/ask-retrieve.png) - Ask in Retrieve mode showing top sources with citations
+- ![Ask Synthesize](docs/images/ask-synthesize.png) - Ask in Synthesize mode with LLM answer and source citations
+- ![Export ZIP Contents](docs/images/export-zip.png) - ZIP archive with manifest.json, chunks.jsonl, and source file
 
 ## Where this shines
 
@@ -206,9 +215,12 @@ See [docs/DEPLOY.md](docs/DEPLOY.md) for more details on deployment modes.
 
 ## Features
 
-- **Multi-format parsing**: Text, PDF, DOCX, CSV, HTML, images, audio
+- **Multi-format parsing**: Text, PDF, DOCX, CSV, HTML, images, audio, JSON, ChatGPT conversations
 - **Semantic search**: Vector similarity search across all documents
-- **LLM synthesis**: Optional Ollama integration for Q&A
+- **Retrieve-only mode**: Get top matching sources with citations (chunk IDs, excerpts, provenance) without LLM synthesis
+- **LLM synthesis**: Optional Ollama integration for Q&A with source citations
+- **Source citations**: All Ask/Search responses include chunk IDs, excerpts, and provenance metadata
+- **Time filters**: Filter by ingestion time (ingested_after, ingested_before)
 - **Idempotent processing**: Safe to re-run, no duplicates
 - **Export formats**: JSONL and ZIP archives with manifests
 

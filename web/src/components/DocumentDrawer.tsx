@@ -1,8 +1,37 @@
 import { RefObject } from 'react';
 import { Document } from './IngestionActivity';
 
-type Hit = { id: string; score: number; text?: string; caption?: string; path?: string; idx?: number; kind?: string; document_id?: string };
-type AskResp = { ok: boolean; mode: 'search' | 'llm'; model?: string; answer?: string; final?: string; sources?: Hit[]; answers?: Hit[]; error?: string };
+type Hit = {
+  id: string;
+  score: number;
+  text?: string;
+  caption?: string;
+  path?: string;
+  idx?: number;
+  kind?: string;
+  document_id?: string;
+  meta?: {
+    ingested_at?: string;
+    ingested_at_ts?: number;
+    source_system?: string;
+    title?: string;
+    logical_path?: string;
+    conversation_id?: string;
+    source_file?: string;
+    [k: string]: any;
+  };
+};
+type AskResp = {
+  ok: boolean;
+  mode: 'search' | 'llm' | 'retrieve' | 'synthesize';
+  model?: string;
+  answer?: string;
+  final?: string;
+  sources?: Hit[];
+  answers?: Hit[];
+  error?: string;
+  stats?: { k: number; returned: number };
+};
 
 interface DocumentDrawerProps {
   drawerDocId: string | null;

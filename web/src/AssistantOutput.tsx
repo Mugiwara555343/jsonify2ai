@@ -17,13 +17,14 @@ type Hit = {
 
 type AskResp = {
   ok: boolean;
-  mode: 'search' | 'llm';
+  mode: 'search' | 'llm' | 'retrieve' | 'synthesize';
   model?: string;
   answer?: string;
   final?: string;
   sources?: Hit[];
   answers?: Hit[];
   error?: string;
+  stats?: { k: number; returned: number };
   synth_skipped_reason?: string;
   top_score?: number;
   min_synth_score?: number;
