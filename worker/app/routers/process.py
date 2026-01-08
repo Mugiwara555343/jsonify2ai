@@ -26,7 +26,7 @@ from worker.app.services.qdrant_client import (
 )
 from worker.app.services.embed_ollama import embed_texts
 from worker.app.services.file_router import extract_text_auto
-from worker.app.services.chunker import chunk_text, chunk_chat_messages
+from worker.app.services.chunker import chunk_text
 from worker.app.services.images import generate_caption
 from worker.app.services.parse_audio import transcribe_audio
 from worker.app.services.parse_chatgpt import (
@@ -1080,12 +1080,8 @@ async def process_json(request: Request, _: bool = Depends(require_auth)):
                 except Exception as e:
                     log.warning(f"[process/json] delete failed for {conv_docid}: {e}")
 
-                # Chunk the conversation text using message-boundary chunker
-                chunks = chunk_chat_messages(
-
                 # Chunk the conversation text
                 chunks = chunk_text(
-
                     text,
                     size=int(settings.CHUNK_SIZE),
                     overlap=int(settings.CHUNK_OVERLAP),
@@ -1119,10 +1115,7 @@ async def process_json(request: Request, _: bool = Depends(require_auth)):
                     payload_data = {
                         "document_id": conv_docid,
                         "path": rel_path,  # Keep source file path
-
                         "kind": "chat",
-
-                        "kind": "json",
                         "idx": idx,
                         "text": text_chunk,
                         "meta": full_meta,
@@ -1169,9 +1162,6 @@ async def process_json(request: Request, _: bool = Depends(require_auth)):
                     document_id=conv_docid,
                     path=rel_path,
                     kind="chat",
-
-                    kind="json",
-
                     chunks=upserted,
                     images=0,
                     bytes=len(text.encode("utf-8")),

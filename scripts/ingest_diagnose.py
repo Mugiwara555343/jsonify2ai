@@ -182,16 +182,10 @@ def main():
     except Exception:
         pass
 
-
     # 6) ChatGPT export test (if fixture exists and upload_fixtures is enabled)
     summary["fixtures_uploaded"] = False
     chatgpt_fixture = Path("scripts/fixtures/chatgpt_conversations_min.json")
     if upload_fixtures and chatgpt_fixture.exists():
-
-    # 6) ChatGPT export test (if fixture exists)
-    chatgpt_fixture = Path("scripts/fixtures/chatgpt_conversations_min.json")
-    if chatgpt_fixture.exists():
-
         summary["chatgpt_test"] = {
             "fixture_exists": True,
             "upload_ok": False,
@@ -232,20 +226,11 @@ def main():
                         if docs_r.ok:
                             docs = docs_r.json()
 
-                            # Find ChatGPT docs by meta.source_system or kind="chat"
-                            chatgpt_docs = [
-                                d
-                                for d in docs
-                                if (
-                                    d.get("meta", {}).get("source_system") == "chatgpt"
-                                    or "chat" in d.get("kinds", [])
-                                )
-
+                            # Find ChatGPT docs by document_id pattern
                             chatgpt_docs = [
                                 d
                                 for d in docs
                                 if d.get("document_id", "").startswith("chatgpt:")
-
                             ]
                             if chatgpt_docs:
                                 summary["chatgpt_test"]["has_chatgpt_doc"] = True
@@ -265,18 +250,13 @@ def main():
                                 summary["chatgpt_test"]["has_chat_kind"] = (
                                     "chat" in first_doc.get("kinds", [])
                                 )
-                                # Sum chunks from ChatGPT docs (check both "chat" and "json" for backward compat)
-                                total_chunks = sum(
-                                    d.get("counts", {}).get("chat", 0)
-
                                 # Note: meta might not be in documents list response, but we can check document_id pattern
                                 summary["chatgpt_test"]["has_conversation_id"] = (
                                     "chatgpt:" in first_doc.get("document_id", "")
                                 )
-                                # Sum chunks from ChatGPT docs
+                                # Sum chunks from ChatGPT docs (check both "chat" and "json" for backward compat)
                                 total_chunks = sum(
                                     d.get("counts", {}).get("chunks", 0)
-
                                     + d.get("counts", {}).get("json", 0)
                                     for d in chatgpt_docs
                                 )
@@ -285,7 +265,6 @@ def main():
                         pass
         except Exception as e:
             summary["chatgpt_test"]["error"] = str(e)[:100]
-
 
     # 7) Negative test: generic JSON should NOT be treated as ChatGPT
     generic_json_fixture = Path("scripts/fixtures/generic_array.json")
@@ -348,7 +327,6 @@ def main():
                         pass
         except Exception as e:
             summary["generic_json_test"]["error"] = str(e)[:100]
-
 
     # 7) Infer final issue if unset
     if not summary.get("inferred_issue"):
