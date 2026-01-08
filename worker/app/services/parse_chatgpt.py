@@ -101,7 +101,6 @@ def is_chatgpt_export(data: Any, filename: str = "") -> bool:
     return has_mapping and (has_title or has_time)
 
 
-
 def parse_conversation(
     conv: Dict[str, Any], source_file: str
 ) -> Optional[Tuple[str, str, Dict[str, Any]]]:
@@ -290,10 +289,7 @@ def parse_conversation(
             "source_system": "chatgpt",
             "conversation_id": conversation_id,
             "source_file": source_file,
-
             "logical_path": f"chatgpt/{conversation_id}",
-
-
         }
 
         if title:
