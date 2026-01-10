@@ -1,0 +1,16 @@
+User: How do I create a Python virtual environment?
+
+Assistant: You can create a Python virtual environment using the `venv` module. Here's how:
+
+1. Open your terminal
+2. Navigate to your project directory
+3. Run: `python -m venv venv`
+4. Activate it:
+   - On Windows: `venv\Scripts\activate`
+   - On macOS/Linux: `source venv/bin/activate`
+
+Once activated, you'll see `(venv)` in your prompt, and any packages you install will be isolated to this environment.
+
+User: Thanks! How do I deactivate it?
+
+Assistant: Simply run `deactivate` in your terminal. This will exit the virtual environment and return you to your system Python.

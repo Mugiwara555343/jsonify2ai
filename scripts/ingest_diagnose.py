@@ -28,13 +28,20 @@ def mask(token: str | None):
 
 
 def main():
+    """Run ingestion diagnostics.
+
+    Fixture uploads are OPT-IN via DIAGNOSE_UPLOAD_FIXTURES=1.
+    By default (DIAGNOSE_UPLOAD_FIXTURES=0), fixtures in scripts/fixtures
+    are NOT uploaded. This prevents unintended ingestion of test data.
+    """
     env = read_env()
     api_base = os.getenv("API_BASE", "http://localhost:8082")
     worker_base = os.getenv("WORKER_URL", "http://localhost:8090")
     api_token = env.get("API_AUTH_TOKEN", os.getenv("API_AUTH_TOKEN", ""))
     worker_token = env.get("WORKER_AUTH_TOKEN", os.getenv("WORKER_AUTH_TOKEN", ""))
     qdrant_url = env.get("QDRANT_URL", os.getenv("QDRANT_URL", "http://localhost:6333"))
-    upload_fixtures = os.getenv("DIAGNOSE_UPLOAD_FIXTURES", "1") == "1"
+    # OPT-IN: Fixture uploads disabled by default to prevent ghost ingestion
+    upload_fixtures = os.getenv("DIAGNOSE_UPLOAD_FIXTURES", "0") == "1"
 
     drop = Path("data/dropzone")
     drop.mkdir(parents=True, exist_ok=True)
@@ -328,7 +335,84 @@ def main():
         except Exception as e:
             summary["generic_json_test"]["error"] = str(e)[:100]
 
-    # 7) Infer final issue if unset
+    # 8) Generic transcript test (if fixture exists and upload_fixtures is enabled)
+    transcript_fixture = Path("scripts/fixtures/generic_transcript_min.txt")
+    if upload_fixtures and transcript_fixture.exists():
+        summary["transcript_test"] = {
+            "fixture_exists": True,
+            "upload_ok": False,
+            "documents_created": None,
+            "has_transcript_doc": False,
+            "has_source_system": False,
+            "has_chat_kind": False,
+            "treated_as_chatgpt": False,
+            "chunks_created": 0,
+        }
+        try:
+            # Upload transcript fixture
+            with open(transcript_fixture, "rb") as f:
+                files = {"file": (transcript_fixture.name, f, "text/plain")}
+                headers = {"Authorization": f"Bearer {api_token}"} if api_token else {}
+                r = requests.post(
+                    f"{api_base}/upload", files=files, headers=headers, timeout=30
+                )
+                if r.ok:
+                    data = r.json()
+                    summary["transcript_test"]["upload_ok"] = True
+                    summary["fixtures_uploaded"] = True
+                    summary["transcript_test"]["documents_created"] = data.get(
+                        "documents_created", 1
+                    )
+
+                    # Wait a bit for processing
+                    time.sleep(3)
+
+                    # Check documents endpoint for transcript docs
+                    try:
+                        docs_r = requests.get(
+                            f"{api_base}/documents", headers=headers, timeout=10
+                        )
+                        if docs_r.ok:
+                            docs = docs_r.json()
+
+                            # Find transcript docs by document_id pattern or source_system
+                            transcript_docs = [
+                                d
+                                for d in docs
+                                if d.get("document_id", "").startswith("transcript:")
+                                or d.get("meta", {}).get("source_system")
+                                == "transcript"
+                            ]
+                            if transcript_docs:
+                                summary["transcript_test"]["has_transcript_doc"] = True
+                                # Check first transcript doc for metadata
+                                first_doc = transcript_docs[0]
+
+                                meta = first_doc.get("meta", {})
+                                summary["transcript_test"]["has_source_system"] = (
+                                    meta.get("source_system") == "transcript"
+                                )
+                                summary["transcript_test"]["has_chat_kind"] = (
+                                    "chat" in first_doc.get("kinds", [])
+                                )
+                                summary["transcript_test"]["treated_as_chatgpt"] = (
+                                    meta.get("source_system") == "chatgpt"
+                                    or meta.get("detected_as") == "chatgpt"
+                                )
+                                # Sum chunks from transcript docs
+                                total_chunks = sum(
+                                    d.get("counts", {}).get("chunks", 0)
+                                    for d in transcript_docs
+                                )
+                                summary["transcript_test"]["chunks_created"] = (
+                                    total_chunks
+                                )
+                    except Exception:
+                        pass
+        except Exception as e:
+            summary["transcript_test"]["error"] = str(e)[:100]
+
+    # 9) Infer final issue if unset
     if not summary.get("inferred_issue"):
         if not api_token and not summary["api_upload_ok"]:
             summary["inferred_issue"] = "missing_api_token"

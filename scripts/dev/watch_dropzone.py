@@ -1,4 +1,11 @@
-# scripts/watch_dropzone.py (top-of-file only)
+# scripts/watch_dropzone.py
+"""Dropzone watcher for file ingestion.
+
+IMPORTANT: This watcher only monitors the real dropzone folder (data/dropzone).
+Test fixtures in scripts/fixtures are NEVER ingested unless explicitly uploaded.
+This prevents "ghost" documents from appearing unexpectedly in the index.
+"""
+
 from __future__ import annotations
 
 import json
@@ -21,6 +28,7 @@ DEBOUNCE_SEC = float(os.getenv("WATCH_DEBOUNCE_SEC", "0.6"))  # min gap between 
 STABLE_PROBE_MS = int(os.getenv("WATCH_STABLE_PROBE_MS", "300"))  # size-stability probe
 STABLE_TRIES = int(os.getenv("WATCH_STABLE_TRIES", "3"))  # consecutive matches
 
+# NOTE: Only watches data/dropzone - test fixtures in scripts/fixtures are excluded
 DROPZONE = Path(os.getenv("DROPZONE_DIR", "data/dropzone"))
 EXPORT = Path(os.getenv("EXPORT_JSONL", "data/exports/ingest.jsonl"))
 PYTHONPATH = os.getenv("PYTHONPATH", "worker")
@@ -30,6 +38,9 @@ STATE_FILE = Path(os.getenv("WATCH_STATE_FILE", "data/.ingest_state.json"))
 IGNORE_SUFFIXES = (".tmp", ".part", ".crdownload")
 IGNORE_NAMES = {".DS_Store", "Thumbs.db"}
 IGNORE_PREFIXES = ("~$",)
+
+# Paths that should NEVER be ingested (test fixtures, etc.)
+EXCLUDE_PATH_PATTERNS = ("scripts/fixtures", "scripts/data", "__pycache__")
 
 
 # --- Qdrant helpers ----------------------------------------------------------
@@ -124,7 +135,18 @@ def _doc_id_from_hash(h: str) -> str:
 
 # --- Utilities ---------------------------------------------------------------
 def _should_ignore(path: str) -> bool:
+    """Check if path should be ignored.
+
+    This includes test fixtures and other paths that should never be auto-ingested.
+    """
     name = os.path.basename(path)
+    path_normalized = path.replace("\\", "/")
+
+    # Exclude test fixtures and other protected paths
+    for pattern in EXCLUDE_PATH_PATTERNS:
+        if pattern in path_normalized:
+            return True
+
     if name.startswith(".") or name in IGNORE_NAMES:
         return True
     if any(name.startswith(p) for p in IGNORE_PREFIXES):

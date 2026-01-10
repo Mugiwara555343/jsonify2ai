@@ -8,58 +8,42 @@
 
 ---
 
-### At a Glance
-
-- 🧩 **Multi-format ingestion** – TXT, MD, PDF, CSV, HTML, DOCX, images, audio → normalized JSONL
-- 🔍 **Vector search** – Qdrant-backed semantic retrieval with optional LLM “Ask” via Ollama
-- 🖥️ **Fully offline** – Runs entirely on your hardware, no cloud APIs or external services
-- 🧪 **Built-in verification** – Health endpoints + smoke scripts validate API, worker, and vector points
-
----
-
 [![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![OS](https://img.shields.io/badge/tested-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
 
 ---
 
-## Why Local-First?
+## What it does
 
-- **Privacy**: Your data never leaves your machine, no cloud uploads, no third-party APIs
-- **Control**: Full ownership of your documents, embeddings, and search indices
-- **Cost**: Zero API fees, runs entirely on your hardware
-- **Speed**: No network latency, instant search and processing
-- **Compliance**: Perfect for sensitive data, research, or enterprise environments
+jsonify2ai transforms your local files (text, PDFs, images, audio, chat transcripts) into searchable vector embeddings. Everything runs on your machine—no cloud APIs, no data leaving your hardware.
 
----
+**Key features:**
+- 🧩 **Multi-format ingestion** – TXT, MD, PDF, CSV, HTML, DOCX, images, audio, chat transcripts → normalized JSONL
+- 🔍 **Vector search** – Qdrant-backed semantic retrieval with optional LLM "Ask" via Ollama
+- 🖥️ **Fully offline** – Runs entirely on your hardware, no cloud APIs or external services
+- 🧪 **Built-in verification** – Health endpoints + smoke scripts validate API, worker, and vector points
 
-## For reviewers / hiring managers
-
-If you're skimming this repo, here's the fastest way to evaluate it:
-
-1. **Run the demo** – follow the "Quick Start" and use the **Load demo data** button in the UI.
-2. **Inspect the JSON** – upload or use a demo doc, then click **Preview JSON** to see the normalized chunks (JSONL).
-3. **Ask your data** – go to the **Ask** section, click one of the example questions, and see snippets come back.
-4. **Export** – use **Export JSON** or **Export ZIP** on a document to see manifest + chunks + source.
-5. **Check self-tests** – run the smoke/diagnostic scripts (described below) and look at the JSON verdict.
-
-This project is meant to feel like a small product: clone → start → click through → understand the architecture.
+**Why local-first?**
+- **Privacy**: Your data never leaves your machine
+- **Control**: Full ownership of documents, embeddings, and search indices
+- **Cost**: Zero API fees
+- **Speed**: No network latency
+- **Compliance**: Perfect for sensitive data
 
 ---
 
-## Quick Start (Local Demo)
+## Quickstart
 
-**Works without an LLM (search + export).** The app provides semantic search and exports out of the box. LLM synthesis is optional and only enhances the "Ask" feature with generated answers.
+**Works without an LLM (search + export).** LLM synthesis is optional and only enhances the "Ask" feature.
 
-1. **Clone and enter the repo:**
+1. **Clone and start:**
    ```bash
    git clone https://github.com/Mugiwara555343/jsonify2ai.git
    cd jsonify2ai
    ```
-
-2. **Start everything:**
    ```powershell
-   # Windows (PowerShell)
+   # Windows
    scripts/start_all.ps1
    ```
    ```bash
@@ -67,181 +51,49 @@ This project is meant to feel like a small product: clone → start → click th
    ./scripts/start_all.sh
    ```
 
-3. **Open the web UI:**
-   - http://localhost:5173
+2. **Open the web UI:** http://localhost:5173
 
-4. **Get started (fastest path):**
-   - Click the **"Start here"** button at the top of the page
-   - This automatically loads demo data (if needed), sets up an active document, switches to "This document" scope, and scrolls to the Ask panel
-   - The button checks for existing demo documents and reuses them if available
-   - Or manually click **"Load demo data"** in the upload section and follow the step-by-step guide in [DEMO_SCRIPT.md](DEMO_SCRIPT.md)
+3. **Get started:** Click **"Start here"** button (loads demo data automatically) or manually click **"Load demo data"**
 
-5. **Inspect the JSON:**
-   - In the **Documents** section, find a document
-   - Click **"Preview JSON"** to see the normalized chunks (JSONL format)
-   - Each line shows one chunk with fields: `id`, `document_id`, `text`, `path`, `idx`, `meta`
+4. **Try it out:**
+   - **Preview JSON** – Click any document → "Preview JSON" to see normalized chunks
+   - **Search** – Use the search bar to find content across documents
+   - **Ask** – Scroll to Ask section, type a question, get answers with citations
+   - **Export** – Use "Export JSON" or "Export ZIP" to download chunks + manifest
 
-6. **Ask your data:**
-   - Scroll down to the **Ask** section
-   - **Scope**: Choose between "This document" (searches only the active/previewed document) or "All documents" (searches across all indexed documents)
-   - **Answer mode**:
-     - **Retrieve** - Returns top matching sources with citations (chunk IDs, excerpts, provenance). No LLM synthesis. This is the baseline mode that always works.
-     - **Synthesize** - Uses LLM to generate an answer from retrieved sources (if confidence is high enough), plus all source citations. Requires `LLM_PROVIDER=ollama` and Ollama to be reachable.
-     - Global mode ("All documents") defaults to "Retrieve" to avoid mixing unrelated documents
-     - Document mode ("This document") defaults to "Synthesize" if LLM is available, else "Retrieve"
-   - **Quick Actions**: Available in "This document" mode only. Use "Use this doc" in Global mode results to switch and enable Quick Actions.
-   - Click one of the context-aware suggestion questions or type your own
-   - Press **Ask** or Enter to search
-   - View results:
-     - **Top matching documents** (Global mode only) - shows which documents contributed sources, with "Use this doc" buttons to switch to document scope
-     - **Answer** block (Synthesize mode only) - shows a synthesized answer with an "local (ollama)" badge when LLM synthesis succeeds
-     - **Sources** section - always shows matching sources with:
-       - Chunk ID (copyable)
-       - Document ID and path
-       - Title (from meta.title if available)
-       - Kind badge (text, pdf, image, etc.)
-       - Similarity score
-       - Excerpt/snippet (trimmed to ~600 chars)
-       - Provenance metadata (ingestion time, source system, logical path, etc.)
-   - **"Use this doc" workflow**: In Global mode results, click "Use this doc" on any document to:
-     - Switch to "This document" scope
-     - Set that document as active
-     - Optionally switch to "Synthesize" mode (if LLM is available)
-   - In `AUTH_MODE=local`, Ask works without any API token
-   - **Note**: Retrieve mode always works and returns sources with citations. Synthesize mode requires `LLM_PROVIDER=ollama` and Ollama to be reachable. All responses include source citations for traceability.
-
-7. **Export:**
-   - In the **Documents** section, use:
-     - **Export JSON** → downloads `chunks.jsonl` or `images.jsonl` (all chunks for a document)
-     - **Export ZIP** → downloads ZIP with `manifest.json` + JSONL + source file (when available)
-   - The manifest.json shows document metadata (paths, counts, kinds)
+**To stop:** `scripts/stop_all.ps1` (Windows) or `./scripts/stop_all.sh` (macOS/Linux)
 
 ### Optional: Local LLM
 
 To enable LLM synthesis for the "Ask" feature:
 
-1. **Install Ollama:**
-   - Download from [ollama.com](https://ollama.com) and install on your system
+1. **Install Ollama:** Download from [ollama.com](https://ollama.com)
 
 2. **Pull a model:**
    ```bash
    ollama pull qwen2.5:3b-instruct-q4_K_M
    ```
-   Or use any other model: `ollama pull llama2`, `ollama pull mistral`, etc.
 
-3. **Set environment variables:**
-   ```powershell
-   # Windows (PowerShell)
-   $env:LLM_PROVIDER="ollama"
-   $env:OLLAMA_HOST="http://host.docker.internal:11434"
-   $env:OLLAMA_MODEL="qwen2.5:3b-instruct-q4_K_M"
-   ```
+3. **Set environment variables** (or add to `.env`):
    ```bash
-   # macOS / Linux
    export LLM_PROVIDER=ollama
    export OLLAMA_HOST=http://host.docker.internal:11434
    export OLLAMA_MODEL=qwen2.5:3b-instruct-q4_K_M
    ```
-   Or add to `.env` file:
-   ```
-   LLM_PROVIDER=ollama
-   OLLAMA_HOST=http://host.docker.internal:11434
-   OLLAMA_MODEL=qwen2.5:3b-instruct-q4_K_M
-   ```
    Then restart: `docker compose restart worker`
 
 **UI chip states:**
-- **LLM: off** (gray) - No LLM configured, search-only mode
+- **LLM: off** (gray) - No LLM configured (normal, search-only mode)
 - **LLM: offline** (yellow) - Ollama configured but unreachable
 - **LLM: on (ollama)** (blue) - Ollama reachable, synthesis enabled
 
-The app works perfectly without an LLM—you'll still get semantic search results and exports. LLM synthesis is purely optional.
-
-## Screenshots
-
-_(Replace with your own screenshots)_
-
-- ![UI Overview](docs/images/ui-overview.png) - Main interface with status chips and document list
-- ![JSON Preview Modal](docs/images/json-preview.png) - Preview JSONL chunks for a document
-- ![Ask Retrieve-Only](docs/images/ask-retrieve.png) - Ask in Retrieve mode showing top sources with citations
-- ![Ask Synthesize](docs/images/ask-synthesize.png) - Ask in Synthesize mode with LLM answer and source citations
-- ![Export ZIP Contents](docs/images/export-zip.png) - ZIP archive with manifest.json, chunks.jsonl, and source file
-
-## Where this shines
-
-- **Local-first knowledgebase** – point it at notes, PDFs, and logs without sending data to the cloud.
-- **Semantic search over messy content** – normalized chunks + vector search via Qdrant.
-- **Traceable answers** – Ask returns snippets with paths + document IDs, plus optional local LLM synthesis.
-- **Exportable data** – JSONL and ZIP exports with manifest + checksums.
-- **Demo → production gradient** – simple local mode by default, stricter auth and tokens available when you need them.
-
-### Supported file types (demo)
-
-- `.md`, `.txt`
-- `.pdf`
-- `.csv` (basic text rows)
-- Images & audio if already supported by the pipeline (see [Support Matrix](#support-matrix) below)
-
-### To stop services
-
-```powershell
-# Windows
-scripts/stop_all.ps1
-```
-
-```bash
-# macOS / Linux
-./scripts/stop_all.sh
-```
-
 ---
 
----
+## How ingestion works
 
-## Auth Modes
+Files are uploaded to `data/dropzone/`, automatically detected by type, parsed, chunked, embedded, and stored in Qdrant.
 
-- **`AUTH_MODE=local`** (default)
-  - No auth required
-  - Best for local experiments and demos
-
-- **`AUTH_MODE=strict`**
-  - All protected API endpoints require `Authorization: Bearer <API_AUTH_TOKEN>`
-  - The API uses `WORKER_AUTH_TOKEN` for internal calls to the worker
-  - Intended for multi-user / production setups
-
-See [docs/DEPLOY.md](docs/DEPLOY.md) for more details on deployment modes.
-
----
-
-## Features
-
-- **Multi-format parsing**: Text, PDF, DOCX, CSV, HTML, images, audio, JSON, ChatGPT conversations
-- **Semantic search**: Vector similarity search across all documents
-- **Retrieve-only mode**: Get top matching sources with citations (chunk IDs, excerpts, provenance) without LLM synthesis
-- **LLM synthesis**: Optional Ollama integration for Q&A with source citations
-- **Source citations**: All Ask/Search responses include chunk IDs, excerpts, and provenance metadata
-- **Time filters**: Filter by ingestion time (ingested_after, ingested_before)
-- **Idempotent processing**: Safe to re-run, no duplicates
-- **Export formats**: JSONL and ZIP archives with manifests
-
-## Document Workflow
-
-jsonify2ai supports a document-centric workflow for focused Q&A:
-
-1. **Find documents**: Use Global (Retrieve) mode to search across all documents and find relevant files
-2. **Activate document**: Click "Use this doc" in search results to switch to document scope
-3. **Ask questions**: In "This document" mode with Synthesize enabled, ask specific questions about the active document
-4. **Quick Actions**: Document-scoped Quick Actions (summarize, extract, etc.) are only available in "This document" mode
-5. **Export & manage**: Use the document details drawer or overflow menu to export, preview, or delete documents
-
-**Delete functionality**: Document deletion is gated for safety:
-- Enabled by default in `AUTH_MODE=local` (development mode)
-- In `AUTH_MODE=strict`, set `ENABLE_DOC_DELETE=true` to enable
-- Delete removes indexed data (vectors/chunks) from Qdrant, but does NOT delete source files from disk
-
----
-
-## Support Matrix
+**Supported file types:**
 
 | Type   | Extensions           | Status      |
 |--------|----------------------|-------------|
@@ -260,6 +112,155 @@ pip install -r worker/requirements.pdf.txt    # PDF
 pip install -r worker/requirements.audio.txt # Audio
 pip install -r worker/requirements.images.txt # Images
 ```
+
+**Processing pipeline:**
+1. File uploaded → stored in `data/dropzone/`
+2. Type detection → parser selected (text, PDF, image, etc.)
+3. Content extraction → text extracted from file
+4. Chunking → text split into overlapping chunks
+5. Embedding → chunks converted to vectors (768-dim)
+6. Storage → vectors + metadata stored in Qdrant
+
+**Idempotent processing:** Same file content always produces the same `document_id`. Safe to re-upload without duplicates.
+
+---
+
+## Chat exports
+
+jsonify2ai supports two types of chat ingestion:
+
+### ChatGPT Exports
+
+Upload `conversations.json` from ChatGPT export. Each conversation becomes a separate document with:
+- `kind="chat"`
+- `meta.source_system="chatgpt"`
+- `meta.detected_as="chatgpt"`
+- Conversation metadata (title, timestamps, etc.)
+
+### Generic Transcripts
+
+Upload `.txt` or `.md` files with chat transcript patterns:
+- `User:` / `Assistant:` / `System:` prefixes
+- `[YYYY-MM-DD ...] user:` / `assistant:` formats
+- `role: user` / `role: assistant` blocks
+
+**Detection:**
+- Automatically detected with confidence scoring (threshold: 0.85)
+- If detected, processed as chat with `kind="chat"` and `meta.source_system="transcript"`
+- If not detected, processed as regular text
+
+**Example transcript format:**
+```
+User: How do I create a Python virtual environment?
+
+Assistant: You can create a Python virtual environment using the venv module.
+
+User: Thanks!
+```
+
+Both chat types use chat-aware chunking (by message boundaries) and are stored with `kind="chat"` for consistent retrieval.
+
+---
+
+## Search/Ask
+
+### Search
+
+Semantic vector search across all documents:
+- **Scope**: "All documents" (global) or "This document" (focused)
+- **Results**: Top matching chunks with similarity scores, excerpts, and provenance metadata
+
+### Ask
+
+Q&A with optional LLM synthesis:
+
+**Answer modes:**
+- **Retrieve** – Returns top matching sources with citations (chunk IDs, excerpts, provenance). No LLM synthesis. Always works.
+- **Synthesize** – Uses LLM to generate an answer from retrieved sources (if confidence is high enough), plus all source citations. Requires `LLM_PROVIDER=ollama` and Ollama to be reachable.
+
+**Workflow:**
+1. **Find documents** – Use Global (Retrieve) mode to search across all documents
+2. **Activate document** – Click "Use this doc" in search results to switch to document scope
+3. **Ask questions** – In "This document" mode, ask specific questions about the active document
+4. **Quick Actions** – Document-scoped actions (summarize, extract, etc.) available in "This document" mode
+
+**All responses include source citations** for traceability (chunk IDs, document IDs, paths, provenance metadata).
+
+---
+
+## Export
+
+Export documents in two formats:
+
+**Export JSON:**
+- Downloads `chunks.jsonl` or `images.jsonl`
+- One JSON object per line (JSONL format)
+- Contains all chunks for the document with full metadata
+
+**Export ZIP:**
+- Downloads ZIP archive containing:
+  - `manifest.json` – Document metadata (paths, counts, kinds, timestamps)
+  - `chunks.jsonl` or `images.jsonl` – All chunks
+  - Source file (when available)
+
+Use the **Documents** section → select document → "Export JSON" or "Export ZIP".
+
+---
+
+## Troubleshooting
+
+### LLM Chip States
+
+- **LLM: on (ollama)** (blue) - ✅ Working correctly
+- **LLM: offline** (yellow) - Configured but unreachable
+  - Verify `LLM_PROVIDER=ollama` in `.env`
+  - Check `OLLAMA_HOST` (default: `http://localhost:11434`)
+  - Ensure Ollama is running: `ollama serve`
+  - For Docker: Use `host.docker.internal:11434`
+  - Check logs: `docker compose logs worker | grep -i ollama`
+- **LLM: off** (gray) - Not configured (normal if `LLM_PROVIDER` not set)
+
+### Export ZIP Failure
+
+1. Use **Copy ID** button to get correct document ID
+2. Check collection type:
+   - Images → `jsonify2ai_images_768`
+   - Text/PDF/Audio/Chat → `jsonify2ai_chunks_768`
+3. Verify document exists: `docker compose logs worker | tail -80`
+4. Check API token matches web UI token
+
+### Verify Installation
+
+Run the smoke verify script:
+
+**Windows:**
+```powershell
+.\scripts\smoke_verify.ps1
+```
+
+**macOS/Linux:**
+```bash
+./scripts/smoke_verify.sh
+```
+
+**Expected output:**
+```json
+{
+  "api_health_ok": true,
+  "worker_status_ok": true,
+  "api_upload_ok": true,
+  "search_hits_all": true,
+  "inferred_issue": "ok"
+}
+```
+
+### Getting Help
+
+- Logs: `docker compose logs -f [service-name]`
+- Smoke verify: `./scripts/smoke_verify.sh` or `.\scripts\smoke_verify.ps1`
+- Check `.env` configuration
+- See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for system overview
+- See [docs/DATA_MODEL.md](docs/DATA_MODEL.md) for data schema
 
 ---
 
@@ -280,110 +281,10 @@ For advanced usage, create `.env` from `.env.example` and set:
 | `EMBED_DEV_MODE` | Set to `1` to skip embeddings (use dummy vectors) | No |
 | `AUDIO_DEV_MODE` | Set to `1` to skip audio transcription | No |
 | `IMAGES_CAPTION` | Set to `1` to enable image captioning | No |
-| `CORS_ORIGINS` | Comma-separated allowed origins | No |
 
 **⚠️ Important:** Do not set `VITE_API_URL` unless deploying behind a reverse proxy. The web UI auto-detects the API URL from the hostname by default.
 
 See [docs/API.md](docs/API.md) for full API documentation.
-
----
-
-## Troubleshooting
-
-### LLM Chip States
-
-- **LLM: on (ollama)** (blue) - ✅ Working correctly
-- **LLM: offline** (yellow) - Configured but unreachable
-  - Verify `LLM_PROVIDER=ollama` in `.env`
-  - Check `OLLAMA_HOST` (default: `http://localhost:11434`)
-  - Ensure Ollama is running: `ollama serve`
-  - For Docker: Use `host.docker.internal:11434` or service name
-  - Check logs: `docker compose logs worker | grep -i ollama`
-- **LLM: off** (gray) - Not configured (normal if `LLM_PROVIDER` not set)
-
-### Export ZIP Failure
-
-1. Use **Copy ID** button to get correct document ID
-2. Check collection type:
-   - Images → `jsonify2ai_images_768`
-   - Text/PDF/Audio → `jsonify2ai_chunks_768`
-3. Verify document exists: `docker compose logs worker | tail -80`
-4. Check API token matches web UI token
-
-### Getting Help
-
-- Logs: `docker compose logs -f [service-name]`
-- Smoke verify: `./scripts/smoke_verify.sh` or `.\scripts\smoke_verify.ps1`
-- Check `.env` configuration
-- See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for system overview
-- See [docs/DATA_MODEL.md](docs/DATA_MODEL.md) for data schema
-
-### Verify Installation
-
-Run the smoke verify script to confirm everything works:
-
-**Windows:**
-```powershell
-.\scripts\smoke_verify.ps1
-```
-
-**macOS/Linux:**
-```bash
-./scripts/smoke_verify.sh
-```
-
-**Expected output:**
-```json
-{
-  "api_health_ok": true,
-  "worker_status_ok": true,
-  "api_upload_ok": true,
-  "search_hits_all": true,
-  "ask_answers": 3,
-  "ask_final_present": false,
-  "export_manifest_ok": true,
-  "qdrant_points": 6,
-  "inferred_issue": "ok",
-  "diag": {}
-}
-```
-
----
-
-## Health & self-checks
-
-jsonify2ai ships with small scripts that tell you if the system is healthy.
-
-### Core scripts
-
-- `scripts/smoke_verify.ps1` / `scripts/smoke_verify.sh`
-  Full end-to-end smoke: starts fresh containers, uploads a seed doc, runs health checks, search, ask, and export.
-
-- `python scripts/ingest_diagnose.py`
-  Lightweight ingestion + search diagnosis. Good for quick local checks.
-
-- `python scripts/export_smoke.py`
-  Verifies that `/export` and `/export/archive` return well-formed JSONL and ZIPs.
-
-Each script prints a single JSON object with a high-level verdict.
-
-### Reading the JSON verdict
-
-The exact fields may evolve, but common ones include:
-
-- `api_upload_ok` – `true` if an upload through the API succeeded.
-- `worker_process_ok` – `true` if the worker processed and embedded the test file.
-- `status_counts` – chunk/image counts reported by the worker.
-- `search_hits` – whether key probe queries (like `"vector"` or `"manifest.json"`) returned results.
-- `qdrant_points_count` – number of points in the Qdrant collection.
-- `export_manifest_ok` – `true` if the ZIP manifest looks correct.
-- `ask_answers` / `ask_final_present` – ask/LLM behavior where configured.
-- `inferred_issue` – the script's best guess at what's wrong, or `"ok"` when everything passes.
-
-You don't have to remember every field. The usual flow is:
-
-- **Healthy:** `inferred_issue` is `"ok"`, and counts / hits look reasonable.
-- **Something off:** `inferred_issue` is a short string like `"missing_api_token"` or `"qdrant_empty"`. Use that plus the other fields as breadcrumbs. The [Troubleshooting](#troubleshooting) section and [docs/DEPLOY.md](docs/DEPLOY.md) cover common failure modes.
 
 ---
 
@@ -392,6 +293,7 @@ You don't have to remember every field. The usual flow is:
 - **[API Reference](docs/API.md)** - Endpoint documentation with examples
 - **[Architecture](docs/ARCHITECTURE.md)** - System design and component overview
 - **[Data Model](docs/DATA_MODEL.md)** - JSON chunk schema and structure
+- **[Deployment](docs/DEPLOY.md)** - Deployment modes and production setup
 
 ---
 
