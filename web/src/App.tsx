@@ -90,7 +90,7 @@ type IngestionEvent = {
 
 
 function HealthChip() {
-  const [state, setState] = useState<"checking"|"ok"|"warn">("checking");
+  const [state, setState] = useState<"checking" | "ok" | "warn">("checking");
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -102,9 +102,9 @@ function HealthChip() {
     })();
     return () => { alive = false; };
   }, []);
-  const bg = state==="ok" ? "#c6f6d5" : state==="checking" ? "#fefcbf" : "#fed7d7";
-  const label = state==="ok" ? "API: healthy" : state==="checking" ? "API: checking" : "API: unreachable";
-  return <span style={{background:bg, padding:"2px 8px", borderRadius:12, fontSize:12, marginLeft:8}}>{label}</span>;
+  const bg = state === "ok" ? "#c6f6d5" : state === "checking" ? "#fefcbf" : "#fed7d7";
+  const label = state === "ok" ? "API: healthy" : state === "checking" ? "API: checking" : "API: unreachable";
+  return <span style={{ background: bg, padding: "2px 8px", borderRadius: 12, fontSize: 12, marginLeft: 8 }}>{label}</span>;
 }
 
 function LLMChip({ status }: { status: Status | null }) {
@@ -134,7 +134,7 @@ function LLMChip({ status }: { status: Status | null }) {
   const color = isOn ? "#0369a1" : isOffline ? "#92400e" : "#6b7280";
   const borderColor = isOn ? "#bae6fd" : isOffline ? "#fde68a" : "#d1d5db";
 
-  return <span style={{background:bg, color:color, padding:"2px 8px", borderRadius:12, fontSize:12, marginLeft:8, border:`1px solid ${borderColor}`}}>{label}</span>;
+  return <span style={{ background: bg, color: color, padding: "2px 8px", borderRadius: 12, fontSize: 12, marginLeft: 8, border: `1px solid ${borderColor}` }}>{label}</span>;
 }
 
 function sleep(ms: number) {
@@ -157,7 +157,7 @@ async function waitForProcessed(oldTotal: number, timeoutMs = 20000, intervalMs 
   return { ok: false };
 }
 
-async function waitForDocumentIndexed(document_id: string, timeoutMs = 15000): Promise<{ok: boolean, chunks?: number}> {
+async function waitForDocumentIndexed(document_id: string, timeoutMs = 15000): Promise<{ ok: boolean, chunks?: number }> {
   const t0 = Date.now();
   const pollInterval = 1500; // Poll every 1.5 seconds
   while (Date.now() - t0 < timeoutMs) {
@@ -282,7 +282,7 @@ function App() {
   const [uploadBusy, setUploadBusy] = useState(false)
   const [demoLoading, setDemoLoading] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
-  const [lastDoc, setLastDoc] = useState<{id:string, kind:string} | null>(null)
+  const [lastDoc, setLastDoc] = useState<{ id: string, kind: string } | null>(null)
   const [docs, setDocs] = useState<Document[]>([])
   const [recentDocs, setRecentDocs] = useState<Hit[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
@@ -320,7 +320,7 @@ function App() {
   const askInputRef = useRef<HTMLInputElement>(null)
 
   // Apply saved theme on mount
-  useEffect(() => { try { applyTheme(loadTheme()); } catch {} }, [])
+  useEffect(() => { try { applyTheme(loadTheme()); } catch { } }, [])
 
   // Log build stamp on app start
   useEffect(() => {
@@ -350,7 +350,7 @@ function App() {
   function setLSBool(key: string, v: boolean) {
     try {
       localStorage.setItem(key, v ? 'true' : 'false');
-    } catch {}
+    } catch { }
   }
 
   function loadActivityFeed(): IngestionEvent[] {
@@ -361,7 +361,7 @@ function App() {
         // Limit to MAX_ACTIVITY_EVENTS, newest first
         return events.slice(0, MAX_ACTIVITY_EVENTS);
       }
-    } catch {}
+    } catch { }
     return [];
   }
 
@@ -370,7 +370,7 @@ function App() {
       // Limit to MAX_ACTIVITY_EVENTS, newest first
       const limited = events.slice(0, MAX_ACTIVITY_EVENTS);
       localStorage.setItem(ACTIVITY_STORAGE_KEY, JSON.stringify(limited));
-    } catch {}
+    } catch { }
   }
 
   function addActivityEvent(event: IngestionEvent) {
@@ -404,7 +404,7 @@ function App() {
     setLSBool('ui.hideIngestionActivity', true);
     try {
       localStorage.removeItem(ACTIVITY_STORAGE_KEY);
-    } catch {}
+    } catch { }
   }
 
   // Check if ingestion activity should be hidden
@@ -431,7 +431,7 @@ function App() {
       if (raw) {
         return raw;
       }
-    } catch {}
+    } catch { }
     return null;
   }
 
@@ -442,7 +442,7 @@ function App() {
       } else {
         localStorage.removeItem(ACTIVE_DOC_STORAGE_KEY);
       }
-    } catch {}
+    } catch { }
   }
 
   function loadAskScope(): 'doc' | 'all' {
@@ -451,14 +451,14 @@ function App() {
       if (raw === 'doc' || raw === 'all') {
         return raw;
       }
-    } catch {}
+    } catch { }
     return 'all'; // Default to 'all' for backward compatibility
   }
 
   function saveAskScope(scope: 'doc' | 'all') {
     try {
       localStorage.setItem(ASK_SCOPE_STORAGE_KEY, scope);
-    } catch {}
+    } catch { }
   }
 
   function loadAnswerMode(llmReachable: boolean, scope: 'doc' | 'all'): 'retrieve' | 'synthesize' {
@@ -473,7 +473,7 @@ function App() {
         }
         return raw;
       }
-    } catch {}
+    } catch { }
     // Default behavior based on scope and LLM
     if (scope === 'all') {
       return 'retrieve';
@@ -488,7 +488,7 @@ function App() {
       // Store preference per scope
       const scopeKey = `${ANSWER_MODE_STORAGE_KEY}.${scope}`;
       localStorage.setItem(scopeKey, mode);
-    } catch {}
+    } catch { }
   }
 
   // Helper function to get active document based on priority
@@ -642,8 +642,7 @@ function App() {
 
     // Merge ingest_recent from status into activityFeed only if activity is not hidden
     if (j?.ingest_recent && Array.isArray(j.ingest_recent) && !hideIngestionActivity) {
-    // Merge ingest_recent from status into activityFeed
-    if (j?.ingest_recent && Array.isArray(j.ingest_recent)) {
+      // Merge ingest_recent from status into activityFeed
 
       const newEvents: IngestionEvent[] = j.ingest_recent.map((item: IngestActivityItem) => {
         // Map worker activity to IngestionEvent format
@@ -1018,7 +1017,7 @@ These toggles make it easy to test different features without changing code.`
     ];
 
     try {
-      const s0 = await fetchStatus().catch(() => ({counts:{total:0}}))
+      const s0 = await fetchStatus().catch(() => ({ counts: { total: 0 } }))
       const baseTotal = s0?.counts?.total ?? 0
       let lastDocId: string | undefined = undefined;
       let lastFileName: string | undefined = undefined;
@@ -1385,10 +1384,10 @@ These toggles make it easy to test different features without changing code.`
 
       // if API returns worker JSON, we'll have document_id and collection
       const docId = data?.document_id as string | undefined;
-      const coll  = (data?.collection || "") as string;
-      const kind  = coll.includes("images") ? "image" : "text"; // images vs chunks
+      const coll = (data?.collection || "") as string;
+      const kind = coll.includes("images") ? "image" : "text"; // images vs chunks
       const documentsCreated = data?.documents_created as number | undefined;
-      const results = data?.results as Array<{document_id: string, chunks: number}> | undefined;
+      const results = data?.results as Array<{ document_id: string, chunks: number }> | undefined;
 
       // Check for multi-document response (ChatGPT export, etc.)
       if (documentsCreated && documentsCreated > 1) {
@@ -1514,7 +1513,7 @@ These toggles make it easy to test different features without changing code.`
 
         showToast("Upload completed but document ID missing.", true);
       }
-    } catch (err:any) {
+    } catch (err: any) {
       const errorMsg = err?.message || String(err);
       setUploadResult({
         filename: file.name,
@@ -1838,22 +1837,22 @@ These toggles make it easy to test different features without changing code.`
               fontWeight: 500,
               background:
                 uploadResult.status === 'processed' ? '#c6f6d5' :
-                uploadResult.status === 'uploading' ? '#dbeafe' :
-                uploadResult.status === 'indexing' ? '#fed7aa' :
-                uploadResult.status === 'skipped' ? '#fef3c7' :
-                '#fed7d7',
+                  uploadResult.status === 'uploading' ? '#dbeafe' :
+                    uploadResult.status === 'indexing' ? '#fed7aa' :
+                      uploadResult.status === 'skipped' ? '#fef3c7' :
+                        '#fed7d7',
               color:
                 uploadResult.status === 'processed' ? '#166534' :
-                uploadResult.status === 'uploading' ? '#1e40af' :
-                uploadResult.status === 'indexing' ? '#92400e' :
-                uploadResult.status === 'skipped' ? '#78350f' :
-                '#991b1b'
+                  uploadResult.status === 'uploading' ? '#1e40af' :
+                    uploadResult.status === 'indexing' ? '#92400e' :
+                      uploadResult.status === 'skipped' ? '#78350f' :
+                        '#991b1b'
             }}>
               {uploadResult.status === 'processed' ? 'Processed' :
-               uploadResult.status === 'uploading' ? 'Uploading…' :
-               uploadResult.status === 'indexing' ? 'Indexing…' :
-               uploadResult.status === 'skipped' ? 'Skipped' :
-               'Error'}
+                uploadResult.status === 'uploading' ? 'Uploading…' :
+                  uploadResult.status === 'indexing' ? 'Indexing…' :
+                    uploadResult.status === 'skipped' ? 'Skipped' :
+                      'Error'}
             </span>
             {uploadResult.chunks !== undefined && uploadResult.status === 'processed' && (
               <span style={{ fontSize: 12, opacity: 0.7 }}>
@@ -1918,55 +1917,55 @@ These toggles make it easy to test different features without changing code.`
       )}
 
       <div style={{ display: 'flex', gap: 8 }}>
-          {(() => {
-            const previewedDoc = previewDocId ? docs.find(d => d.document_id === previewDocId) : null;
-            const isEnabled = previewedDoc !== null;
-            const kind = previewedDoc ? (previewedDoc.kinds.includes('image') ? 'image' : 'text') : 'text';
+        {(() => {
+          const previewedDoc = previewDocId ? docs.find(d => d.document_id === previewDocId) : null;
+          const isEnabled = previewedDoc !== null;
+          const kind = previewedDoc ? (previewedDoc.kinds.includes('image') ? 'image' : 'text') : 'text';
 
-            return (
-              <>
-                <button
-                  className="text-xs underline opacity-70 hover:opacity-100"
-                  disabled={!isEnabled}
-                  title={isEnabled ? undefined : "Preview a document first"}
-                  onClick={async () => {
-                    if (!previewedDoc) return;
-                    try {
-                      await exportJson(previewedDoc.document_id, kind);
-                    } catch (err: any) {
-                      showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
-                    }
-                  }}
-                  style={{
-                    opacity: isEnabled ? 0.7 : 0.3,
-                    cursor: isEnabled ? 'pointer' : 'not-allowed'
-                  }}
-                >
-                  Download JSON
-                </button>
-                <button
-                  className="text-xs underline opacity-70 hover:opacity-100"
-                  disabled={!isEnabled}
-                  title={isEnabled ? undefined : "Preview a document first"}
-                  onClick={async () => {
-                    if (!previewedDoc) return;
-                    try {
-                      await exportZip(previewedDoc.document_id, kind);
-                    } catch (err: any) {
-                      showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
-                    }
-                  }}
-                  style={{
-                    opacity: isEnabled ? 0.7 : 0.3,
-                    cursor: isEnabled ? 'pointer' : 'not-allowed'
-                  }}
-                >
-                  Download ZIP
-                </button>
-              </>
-            );
-          })()}
-        </div>
+          return (
+            <>
+              <button
+                className="text-xs underline opacity-70 hover:opacity-100"
+                disabled={!isEnabled}
+                title={isEnabled ? undefined : "Preview a document first"}
+                onClick={async () => {
+                  if (!previewedDoc) return;
+                  try {
+                    await exportJson(previewedDoc.document_id, kind);
+                  } catch (err: any) {
+                    showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+                  }
+                }}
+                style={{
+                  opacity: isEnabled ? 0.7 : 0.3,
+                  cursor: isEnabled ? 'pointer' : 'not-allowed'
+                }}
+              >
+                Download JSON
+              </button>
+              <button
+                className="text-xs underline opacity-70 hover:opacity-100"
+                disabled={!isEnabled}
+                title={isEnabled ? undefined : "Preview a document first"}
+                onClick={async () => {
+                  if (!previewedDoc) return;
+                  try {
+                    await exportZip(previewedDoc.document_id, kind);
+                  } catch (err: any) {
+                    showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+                  }
+                }}
+                style={{
+                  opacity: isEnabled ? 0.7 : 0.3,
+                  cursor: isEnabled ? 'pointer' : 'not-allowed'
+                }}
+              >
+                Download ZIP
+              </button>
+            </>
+          );
+        })()}
+      </div>
       {/* Dropzone/Watcher Help */}
       <div style={{ marginTop: 12, marginBottom: 8 }}>
         <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
@@ -2094,186 +2093,186 @@ These toggles make it easy to test different features without changing code.`
         generateSuggestionChips={generateSuggestionChips}
       />
       {askScope === 'doc' ? (
-          <QuickActions
-            previewDocId={previewDocId}
-            documents={docs}
-            status={s}
-            onActionComplete={handleQuickActionComplete}
-            onActionError={handleQuickActionError}
-            loading={quickActionsLoading}
-            setLoading={setQuickActionsLoading}
-            showToast={showToast}
-            activeDocId={activeDocId}
-            askScope={askScope}
-            answerMode={answerMode}
-          />
-        ) : (
-          <div style={{ marginTop: 16, marginBottom: 16, fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>
-            Global mode is for finding relevant documents. Use 'Use this doc' in the results below to enable Quick Actions.
-          </div>
-        )}
-        <AssistantOutput
-          result={quickActionResult}
-          status={s}
-          loading={quickActionsLoading !== null}
-          error={quickActionError}
-          actionName={quickActionName || undefined}
-          showToast={showToast}
-          scope={askScope}
-          activeDocFilename={(() => {
-            if (askScope === 'doc') {
-              const activeDoc = getActiveDocument(true); // strictMode = true for doc scope
-              if (activeDoc && activeDoc.paths[0]) {
-                return activeDoc.paths[0].split('/').pop() || activeDoc.paths[0];
-              }
-            }
-            return undefined;
-          })()}
-          onUseDoc={(documentId, llmReachable) => {
-            setActiveDocId(documentId);
-            saveActiveDocId(documentId);
-            setAskScope('doc');
-            saveAskScope('doc');
-            if (llmReachable) {
-              setAnswerMode('synthesize');
-              saveAnswerMode('synthesize', 'doc');
-            }
-          }}
+        <QuickActions
+          previewDocId={previewDocId}
           documents={docs}
+          status={s}
+          onActionComplete={handleQuickActionComplete}
+          onActionError={handleQuickActionError}
+          loading={quickActionsLoading}
+          setLoading={setQuickActionsLoading}
+          showToast={showToast}
+          activeDocId={activeDocId}
+          askScope={askScope}
+          answerMode={answerMode}
         />
+      ) : (
+        <div style={{ marginTop: 16, marginBottom: 16, fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>
+          Global mode is for finding relevant documents. Use 'Use this doc' in the results below to enable Quick Actions.
+        </div>
+      )}
+      <AssistantOutput
+        result={quickActionResult}
+        status={s}
+        loading={quickActionsLoading !== null}
+        error={quickActionError}
+        actionName={quickActionName || undefined}
+        showToast={showToast}
+        scope={askScope}
+        activeDocFilename={(() => {
+          if (askScope === 'doc') {
+            const activeDoc = getActiveDocument(true); // strictMode = true for doc scope
+            if (activeDoc && activeDoc.paths[0]) {
+              return activeDoc.paths[0].split('/').pop() || activeDoc.paths[0];
+            }
+          }
+          return undefined;
+        })()}
+        onUseDoc={(documentId, llmReachable) => {
+          setActiveDocId(documentId);
+          saveActiveDocId(documentId);
+          setAskScope('doc');
+          saveAskScope('doc');
+          if (llmReachable) {
+            setAnswerMode('synthesize');
+            saveAnswerMode('synthesize', 'doc');
+          }
+        }}
+        documents={docs}
+      />
       {/* Existing Ask results (for backward compatibility) */}
       {askLoading && (
-          <div style={{ marginTop: 12, padding: 12, color: '#666', fontSize: 14 }}>
-            Searching your data…
-          </div>
-        )}
-        {askError && (
-          <div style={{ marginTop: 12, padding: 12, border: '1px solid #fecaca', borderRadius: 8, background: '#fef2f2', color: '#dc2626', fontSize: 14 }}>
-            {askError}
-          </div>
-        )}
-        {!askLoading && !askError && !ans && (
-          <div style={{ marginTop: 12, padding: 12, color: '#999', fontSize: 13, fontStyle: 'italic' }}>
-            Run a question to see answers and sources here.
-          </div>
-        )}
-        {!askLoading && ans && (
-          <div style={{ marginTop: 12, padding: 12, border: '1px solid #eee', borderRadius: 10 }}>
-            {(ans.final && ans.final.trim()) || (ans.answer && ans.answer.trim()) ? (
-              <div style={{ marginBottom: 16, padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fafafa' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <div style={{ fontWeight: 600, fontSize: 16 }}>Answer</div>
-                  {s && s.llm?.provider === "ollama" && s.llm?.reachable === true ? (
-                    <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 999, background: '#eef2ff', color: '#3730a3' }}>local (ollama)</span>
-                  ) : (
-                    <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 999, background: '#f3f4f6', color: '#6b7280' }}>Top matches below</span>
-                  )}
-                </div>
-                <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: 14 }}>
-                  {ans.final && ans.final.trim() ? ans.final : (ans.answer || '')}
-                </div>
+        <div style={{ marginTop: 12, padding: 12, color: '#666', fontSize: 14 }}>
+          Searching your data…
+        </div>
+      )}
+      {askError && (
+        <div style={{ marginTop: 12, padding: 12, border: '1px solid #fecaca', borderRadius: 8, background: '#fef2f2', color: '#dc2626', fontSize: 14 }}>
+          {askError}
+        </div>
+      )}
+      {!askLoading && !askError && !ans && (
+        <div style={{ marginTop: 12, padding: 12, color: '#999', fontSize: 13, fontStyle: 'italic' }}>
+          Run a question to see answers and sources here.
+        </div>
+      )}
+      {!askLoading && ans && (
+        <div style={{ marginTop: 12, padding: 12, border: '1px solid #eee', borderRadius: 10 }}>
+          {(ans.final && ans.final.trim()) || (ans.answer && ans.answer.trim()) ? (
+            <div style={{ marginBottom: 16, padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fafafa' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <div style={{ fontWeight: 600, fontSize: 16 }}>Answer</div>
+                {s && s.llm?.provider === "ollama" && s.llm?.reachable === true ? (
+                  <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 999, background: '#eef2ff', color: '#3730a3' }}>local (ollama)</span>
+                ) : (
+                  <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 999, background: '#f3f4f6', color: '#6b7280' }}>Top matches below</span>
+                )}
               </div>
-            ) : null}
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 12 }}>
-                {ans.mode === 'retrieve' ? 'Retrieved sources' : 'Sources'}
+              <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: 14 }}>
+                {ans.final && ans.final.trim() ? ans.final : (ans.answer || '')}
               </div>
-              {(() => {
-                const sources = ans.sources || ans.answers || [];
-                if (sources.length === 0) {
-                  return (
-                    <div style={{ color: '#666', fontSize: 14, padding: 12, background: '#f9fafb', borderRadius: 6 }}>
-                      No matching snippets yet. Try a different query or upload more files.
-                    </div>
-                  );
-                }
+            </div>
+          ) : null}
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 12 }}>
+              {ans.mode === 'retrieve' ? 'Retrieved sources' : 'Sources'}
+            </div>
+            {(() => {
+              const sources = ans.sources || ans.answers || [];
+              if (sources.length === 0) {
                 return (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    {sources.map((h: any, i: number) => {
-                      // Use standardized Source shape: id, document_id, text, meta, score, path, kind, idx
-                      const sourceId = h.id || `source-${i}`;
-                      const docId = h.document_id || '';
-                      const title = h.meta?.title || (h.path ? h.path.split('/').pop() || h.path : docId.substring(0, 12) || `Source ${i + 1}`);
-                      const logicalPath = h.meta?.logical_path;
-                      const path = h.path;
-                      const kind = h.kind;
-                      const snippet = h.text || h.caption || '';
-                      const score = h.score !== undefined ? h.score : null;
-                      const chunkIdx = h.idx !== undefined ? h.idx : null;
-
-                      return (
-                        <div key={i} style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                            <span style={{ fontWeight: 500, fontSize: 13 }}>{title}</span>
-                            {kind && (
-                              <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: '#e3f2fd', color: '#1976d2', fontWeight: 500 }}>
-                                {kind}
-                              </span>
-                            )}
-                            {docId && (
-                              <code style={{ fontSize: 11, fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
-                                {docId.substring(0, 12)}...
-                              </code>
-                            )}
-                            {score !== null && (
-                              <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: '#f0f9ff', color: '#0369a1' }}>
-                                score: {score.toFixed(2)}
-                              </span>
-                            )}
-                            <button
-                              onClick={() => {
-                                copyToClipboard(sourceId);
-                                showToast('Chunk ID copied');
-                              }}
-                              style={{
-                                fontSize: 10,
-                                padding: '2px 6px',
-                                borderRadius: 4,
-                                border: '1px solid #ddd',
-                                background: '#fff',
-                                color: '#666',
-                                cursor: 'pointer',
-                                marginLeft: 'auto'
-                              }}
-                              title={`Copy chunk ID: ${sourceId}`}
-                            >
-                              Copy ID
-                            </button>
-                          </div>
-                          {(logicalPath || path) && (
-                            <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6 }}>
-                              {logicalPath || path}
-                            </div>
-                          )}
-                          {chunkIdx !== null && (
-                            <div style={{ fontSize: 10, color: '#9ca3af', marginBottom: 6 }}>
-                              Chunk index: {chunkIdx}
-                            </div>
-                          )}
-                          {snippet && (
-                            <div style={{
-                              fontSize: 13,
-                              lineHeight: 1.5,
-                              color: '#374151',
-                              fontFamily: 'ui-monospace, monospace',
-                              background: '#f9fafb',
-                              padding: 8,
-                              borderRadius: 4,
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-word'
-                            }}>
-                              {snippet}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                  <div style={{ color: '#666', fontSize: 14, padding: 12, background: '#f9fafb', borderRadius: 6 }}>
+                    No matching snippets yet. Try a different query or upload more files.
                   </div>
                 );
-              })()}
-            </div>
+              }
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {sources.map((h: any, i: number) => {
+                    // Use standardized Source shape: id, document_id, text, meta, score, path, kind, idx
+                    const sourceId = h.id || `source-${i}`;
+                    const docId = h.document_id || '';
+                    const title = h.meta?.title || (h.path ? h.path.split('/').pop() || h.path : docId.substring(0, 12) || `Source ${i + 1}`);
+                    const logicalPath = h.meta?.logical_path;
+                    const path = h.path;
+                    const kind = h.kind;
+                    const snippet = h.text || h.caption || '';
+                    const score = h.score !== undefined ? h.score : null;
+                    const chunkIdx = h.idx !== undefined ? h.idx : null;
+
+                    return (
+                      <div key={i} style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 500, fontSize: 13 }}>{title}</span>
+                          {kind && (
+                            <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: '#e3f2fd', color: '#1976d2', fontWeight: 500 }}>
+                              {kind}
+                            </span>
+                          )}
+                          {docId && (
+                            <code style={{ fontSize: 11, fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
+                              {docId.substring(0, 12)}...
+                            </code>
+                          )}
+                          {score !== null && (
+                            <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: '#f0f9ff', color: '#0369a1' }}>
+                              score: {score.toFixed(2)}
+                            </span>
+                          )}
+                          <button
+                            onClick={() => {
+                              copyToClipboard(sourceId);
+                              showToast('Chunk ID copied');
+                            }}
+                            style={{
+                              fontSize: 10,
+                              padding: '2px 6px',
+                              borderRadius: 4,
+                              border: '1px solid #ddd',
+                              background: '#fff',
+                              color: '#666',
+                              cursor: 'pointer',
+                              marginLeft: 'auto'
+                            }}
+                            title={`Copy chunk ID: ${sourceId}`}
+                          >
+                            Copy ID
+                          </button>
+                        </div>
+                        {(logicalPath || path) && (
+                          <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6 }}>
+                            {logicalPath || path}
+                          </div>
+                        )}
+                        {chunkIdx !== null && (
+                          <div style={{ fontSize: 10, color: '#9ca3af', marginBottom: 6 }}>
+                            Chunk index: {chunkIdx}
+                          </div>
+                        )}
+                        {snippet && (
+                          <div style={{
+                            fontSize: 13,
+                            lineHeight: 1.5,
+                            color: '#374151',
+                            fontFamily: 'ui-monospace, monospace',
+                            background: '#f9fafb',
+                            padding: 8,
+                            borderRadius: 4,
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word'
+                          }}>
+                            {snippet}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
-        )}
+        </div>
+      )}
       <div style={{ marginTop: 24, display: 'flex', gap: 8 }}>
         <input
           value={q}
@@ -2474,21 +2473,8 @@ These toggles make it easy to test different features without changing code.`
               setOpenMenuDocId(null);
             }
           } catch (err: any) {
-
-            const errorMsg = err?.message || String(err) || 'Unknown error';
+            const errorMsg = err?.message || String(err) || "Unknown error";
             showToast(errorMsg, true);
-
-            const errorMsg = err?.message || err || 'Unknown error';
-            // deleteDocument already provides specific messages, so just show them
-            showToast(errorMsg, true);
-            const errorMsg = err?.message || err;
-            if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
-              showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
-            } else {
-              showToast(`Delete failed: ${errorMsg}`, true);
-            }
-
-
           }
         }}
         onToggleSelection={(docId: string) => {
@@ -2806,22 +2792,8 @@ These toggles make it easy to test different features without changing code.`
               setOpenMenuDocId(null);
             }
           } catch (err: any) {
-
-            const errorMsg = err?.message || String(err) || 'Unknown error';
+            const errorMsg = err?.message || String(err) || "Unknown error";
             showToast(errorMsg, true);
-
-
-            const errorMsg = err?.message || err || 'Unknown error';
-            // deleteDocument already provides specific messages, so just show them
-            showToast(errorMsg, true);
-            const errorMsg = err?.message || err;
-            if (errorMsg.includes('not enabled') || errorMsg.includes('403')) {
-              showToast('Delete not enabled. Set AUTH_MODE=local or ENABLE_DOC_DELETE=true', true);
-            } else {
-              showToast(`Delete failed: ${errorMsg}`, true);
-            }
-
-
           }
         }}
         copyToClipboard={copyToClipboard}

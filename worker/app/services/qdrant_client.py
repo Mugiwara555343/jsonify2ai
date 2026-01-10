@@ -203,7 +203,17 @@ def _ensure_collection_with_signature_adapt(
 
 
 def _ensure_payload_indexes(client: QdrantClient, name: str) -> None:
-    """Best-effort creation of helpful payload indexes; ignore failures."""
+    """Best-effort creation of helpful payload indexes; ignore failures.
+
+    Creates indexes for:
+    - document_id (KEYWORD)
+    - kind (KEYWORD)
+    - path (KEYWORD)
+    - meta.ingested_at_ts (INTEGER)
+    - meta.source_system (KEYWORD)
+    - meta.doc_type (KEYWORD)
+    - meta.detected_as (KEYWORD)
+    """
     try:
         client.create_payload_index(
             collection_name=name,
@@ -233,6 +243,31 @@ def _ensure_payload_indexes(client: QdrantClient, name: str) -> None:
             collection_name=name,
             field_name="meta.ingested_at_ts",
             field_schema=models.PayloadSchemaType.INTEGER,
+        )
+    except Exception:
+        pass
+    # New indexes for provenance contract (Milestone 3)
+    try:
+        client.create_payload_index(
+            collection_name=name,
+            field_name="meta.source_system",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+    except Exception:
+        pass
+    try:
+        client.create_payload_index(
+            collection_name=name,
+            field_name="meta.doc_type",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+    except Exception:
+        pass
+    try:
+        client.create_payload_index(
+            collection_name=name,
+            field_name="meta.detected_as",
+            field_schema=models.PayloadSchemaType.KEYWORD,
         )
     except Exception:
         pass

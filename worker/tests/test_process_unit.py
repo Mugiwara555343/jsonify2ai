@@ -1,7 +1,12 @@
 import os
 import pytest
 from app.services.chunker import chunk_text
-from app.routers.process import ProcessTextRequest, ProcessTextResponse
+from app.services.parse_transcript import detect_transcript, DETECTION_THRESHOLD
+from app.routers.process import (
+    ProcessTextRequest,
+    ProcessTextResponse,
+    _build_meta_with_provenance,
+)
 
 
 class TestChunker:
@@ -109,3 +114,102 @@ class TestProcessTextIntegration:
         assert data["embedded"] > 0
         assert data["upserted"] > 0
         assert data["collection"] == "jsonify2ai_chunks"
+
+
+class TestTranscriptDetection:
+    """Test transcript detection in text processing."""
+
+    def test_detect_transcript_pattern(self):
+        """Test that transcript pattern is detected correctly."""
+        transcript_text = """User: How do I create a Python virtual environment?
+
+Assistant: You can create a Python virtual environment using the venv module.
+
+User: Thanks!"""
+        is_transcript, confidence = detect_transcript(transcript_text, "chat.txt")
+        assert is_transcript is True
+        assert confidence >= DETECTION_THRESHOLD
+
+    def test_normal_text_not_misdetected(self):
+        """Test that normal text is NOT misdetected as transcript."""
+        normal_text = """This is a regular document about Python programming.
+It contains multiple paragraphs but no role indicators.
+The content discusses various topics without any chat-like structure.
+There are no User: or Assistant: prefixes here."""
+        is_transcript, confidence = detect_transcript(normal_text, "document.txt")
+        assert is_transcript is False
+        assert confidence < DETECTION_THRESHOLD
+
+
+class TestProvenanceContract:
+    """Test provenance contract metadata fields."""
+
+    def test_meta_fields_present(self):
+        """Test that all provenance contract fields are present."""
+        base_meta = {"source_ext": ".txt", "bytes": 100}
+        meta = _build_meta_with_provenance(
+            base_meta,
+            source_system="filesystem",
+            doc_type="text",
+            detected_as="text",
+            detect_confidence=1.0,
+        )
+
+        # Required fields
+        assert "ingested_at" in meta
+        assert "ingested_at_ts" in meta
+        assert "source_system" in meta
+        assert meta["source_system"] == "filesystem"
+        assert "doc_type" in meta
+        assert meta["doc_type"] == "text"
+        assert "detected_as" in meta
+        assert meta["detected_as"] == "text"
+        assert "detect_confidence" in meta
+        assert meta["detect_confidence"] == 1.0
+
+        # Optional fields (should be present with defaults)
+        assert "tags" in meta
+        assert isinstance(meta["tags"], list)
+        assert "author" in meta
+        assert "created_at" in meta
+        assert "created_at_ts" in meta
+        assert "updated_at" in meta
+        assert "updated_at_ts" in meta
+
+    def test_transcript_meta_fields(self):
+        """Test transcript-specific metadata fields."""
+        base_meta = {"source_ext": ".txt", "bytes": 200}
+        meta = _build_meta_with_provenance(
+            base_meta,
+            source_system="transcript",
+            doc_type="chat",
+            detected_as="transcript",
+            detect_confidence=0.9,
+        )
+
+        assert meta["source_system"] == "transcript"
+        assert meta["doc_type"] == "chat"
+        assert meta["detected_as"] == "transcript"
+        assert meta["detect_confidence"] == 0.9
+
+    def test_chatgpt_meta_fields(self):
+        """Test ChatGPT-specific metadata fields."""
+        base_meta = {"source_ext": ".json", "bytes": 300}
+        meta = _build_meta_with_provenance(
+            base_meta,
+            source_system="chatgpt",
+            doc_type="chat",
+            detected_as="chatgpt",
+            detect_confidence=0.95,
+            created_at="2024-01-15T10:30:00Z",
+            updated_at="2024-01-15T11:00:00Z",
+        )
+
+        assert meta["source_system"] == "chatgpt"
+        assert meta["doc_type"] == "chat"
+        assert meta["detected_as"] == "chatgpt"
+        assert meta["detect_confidence"] == 0.95
+        assert meta["created_at"] == "2024-01-15T10:30:00Z"
+        assert meta["created_at_ts"] is not None
+        assert meta["updated_at"] == "2024-01-15T11:00:00Z"
+        assert meta["updated_at_ts"] is not None

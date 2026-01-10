@@ -1,3 +1,4 @@
+import React from 'react';
 import BulkActionBar from './BulkActionBar';
 import { Document } from './IngestionActivity';
 
@@ -214,32 +215,33 @@ export default function DocumentList(props: DocumentListProps) {
                       {doc.document_id}
                     </code>
                     {((doc as any).meta?.source_system === "chatgpt" || doc.kinds.includes("chat")) && (
-
-                    {doc.document_id.startsWith('chatgpt:') && (
-
-                      <span style={{
-                        padding: '2px 6px',
-                        borderRadius: 4,
-                        fontSize: 10,
-                        fontWeight: 500,
-                        background: '#10b981',
-                        color: '#fff',
-                        marginLeft: 6
-                      }}>
-                        ChatGPT
-                      </span>
-                    )}
-                    {isActive && (
-                      <span style={{
-                        padding: '3px 8px',
-                        borderRadius: 6,
-                        fontSize: 11,
-                        fontWeight: 500,
-                        background: '#dbeafe',
-                        color: '#1e40af'
-                      }}>
-                        Active
-                      </span>
+                      <>
+                        {doc.document_id.startsWith('chatgpt:') && (
+                          <span style={{
+                            padding: '2px 6px',
+                            borderRadius: 4,
+                            fontSize: 10,
+                            fontWeight: 500,
+                            background: '#10b981',
+                            color: '#fff',
+                            marginLeft: 6
+                          }}>
+                            ChatGPT
+                          </span>
+                        )}
+                        {isActive && (
+                          <span style={{
+                            padding: '3px 8px',
+                            borderRadius: 6,
+                            fontSize: 11,
+                            fontWeight: 500,
+                            background: '#dbeafe',
+                            color: '#1e40af'
+                          }}>
+                            Active
+                          </span>
+                        )}
+                      </>
                     )}
                     <span style={{
                       padding: '3px 8px',

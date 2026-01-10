@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+"""File watcher for dropzone ingestion.
+
+IMPORTANT: This watcher only monitors the dropzone folder (data/dropzone by default).
+Test fixtures in scripts/fixtures are NEVER ingested unless explicitly uploaded
+via the API. This prevents "ghost" documents from appearing unexpectedly.
+"""
+
 import os
 import time
 import json
@@ -11,6 +18,7 @@ from datetime import datetime, timezone
 import threading
 
 # Environment variables with defaults
+# NOTE: Watcher only monitors DROPZONE - not repo folders like scripts/fixtures
 DROPZONE = os.getenv("WATCH_DIR", "data/dropzone")
 WORKER_BASE = os.getenv("WORKER_BASE", "http://worker:8090")
 STATE_FILE = os.getenv("WATCH_STATE", "data/.watcher_state.json")
@@ -21,6 +29,15 @@ STABLE_PASSES = int(os.getenv("WATCH_STABLE_PASSES", "2"))
 STRIP_PREFIX = os.getenv("WATCH_STRIP_PREFIX", "")
 REQUIRE_PREFIX = os.getenv("WATCH_REQUIRE_PREFIX", "data/")
 LOG_MAX_MB = int(os.getenv("MAX_LOG_MB", os.getenv("WATCH_LOG_MAX_MB", "16")))
+
+# Paths that should NEVER be ingested (test fixtures, etc.)
+# Watcher excludes these even if somehow within the dropzone
+EXCLUDE_PATH_PATTERNS = [
+    "scripts/fixtures",
+    "scripts/data",
+    "test_fixtures",
+    "__pycache__",
+]
 
 EXT_KIND = {
     ".txt": "text",
@@ -54,8 +71,18 @@ log_file = None
 
 
 def should_ignore(path: Path) -> bool:
-    """Check if path should be ignored based on patterns."""
+    """Check if path should be ignored based on patterns.
+
+    This includes test fixtures and other paths that should never be auto-ingested.
+    """
     name = path.name
+    path_str = str(path).replace("\\", "/")
+
+    # Exclude test fixtures and other protected paths
+    for pattern in EXCLUDE_PATH_PATTERNS:
+        if pattern in path_str:
+            return True
+
     # Hidden files
     if name.startswith("."):
         return True

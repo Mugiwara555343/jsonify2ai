@@ -26,12 +26,17 @@ from worker.app.services.qdrant_client import (
 )
 from worker.app.services.embed_ollama import embed_texts
 from worker.app.services.file_router import extract_text_auto
-from worker.app.services.chunker import chunk_text
+from worker.app.services.chunker import chunk_text, chunk_chat_messages
 from worker.app.services.images import generate_caption
 from worker.app.services.parse_audio import transcribe_audio
 from worker.app.services.parse_chatgpt import (
     is_chatgpt_export,
     parse_chatgpt_export,
+)
+from worker.app.services.parse_transcript import (
+    detect_transcript,
+    parse_transcript,
+    DETECTION_THRESHOLD,
 )
 from worker.app.telemetry import telemetry
 from worker.app.dependencies.auth import require_auth
@@ -48,21 +53,91 @@ def _get_filename_from_path(path: str) -> str:
 
 
 def _build_meta_with_provenance(
-    base_meta: dict, source_system: str = "filesystem"
+    base_meta: dict,
+    source_system: str = "filesystem",
+    doc_type: str = "unknown",
+    detected_as: str = None,
+    detect_confidence: float = 1.0,
+    tags: list = None,
+    author: str = None,
+    created_at: str = None,
+    updated_at: str = None,
 ) -> dict:
-    """Add ingested_at and source_system to meta, preserving existing fields."""
+    """Add provenance fields to meta, preserving existing fields.
+
+    Provenance contract fields:
+    - ingested_at / ingested_at_ts: when this chunk was ingested
+    - source_system: origin system (filesystem, chatgpt, transcript, etc.)
+    - doc_type: document type (text, pdf, chat, image, audio, json, unknown)
+    - detected_as: detection result (text, pdf, chatgpt, transcript, generic_json, etc.)
+    - detect_confidence: confidence of detection (0.0-1.0)
+    - tags: list of tags (default [])
+    - author: author if known (default null)
+    - created_at / created_at_ts: original creation time if known
+    - updated_at / updated_at_ts: original update time if known
+    """
     from datetime import datetime, timezone
 
     now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     now_ts = int(datetime.now(timezone.utc).timestamp())
 
     meta = base_meta.copy()
+
+    # Ingestion timestamps (always set)
     if not meta.get("ingested_at"):
         meta["ingested_at"] = now_iso
     if not meta.get("ingested_at_ts"):
         meta["ingested_at_ts"] = now_ts
+
+    # Source system
     if not meta.get("source_system"):
         meta["source_system"] = source_system
+
+    # Document type
+    if not meta.get("doc_type"):
+        meta["doc_type"] = doc_type
+
+    # Detection info
+    if not meta.get("detected_as"):
+        meta["detected_as"] = detected_as if detected_as else doc_type
+    if "detect_confidence" not in meta:
+        meta["detect_confidence"] = detect_confidence
+
+    # Tags (always ensure list exists)
+    if "tags" not in meta:
+        meta["tags"] = tags if tags else []
+
+    # Author (optional)
+    if "author" not in meta:
+        meta["author"] = author
+
+    # Original timestamps (if known)
+    if created_at and not meta.get("created_at"):
+        meta["created_at"] = created_at
+        # Try to parse and add timestamp version
+        if not meta.get("created_at_ts"):
+            try:
+                dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                meta["created_at_ts"] = int(dt.timestamp())
+            except Exception:
+                meta["created_at_ts"] = None
+    elif "created_at" not in meta:
+        meta["created_at"] = None
+        meta["created_at_ts"] = None
+
+    if updated_at and not meta.get("updated_at"):
+        meta["updated_at"] = updated_at
+        # Try to parse and add timestamp version
+        if not meta.get("updated_at_ts"):
+            try:
+                dt = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+                meta["updated_at_ts"] = int(dt.timestamp())
+            except Exception:
+                meta["updated_at_ts"] = None
+    elif "updated_at" not in meta:
+        meta["updated_at"] = None
+        meta["updated_at_ts"] = None
+
     return meta
 
 
@@ -357,6 +432,148 @@ async def process_text(request: Request, _: bool = Depends(require_auth)):
             dim=settings.EMBEDDING_DIM,
         )
 
+        # Detect if this is a chat transcript
+        filename = Path(abs_path).name
+        is_transcript, transcript_confidence = detect_transcript(raw_text, filename)
+
+        if is_transcript and transcript_confidence >= DETECTION_THRESHOLD:
+            # Process as chat transcript
+            log.info(
+                f"[process/text] detected transcript (confidence={transcript_confidence:.2f}): {rel_path}"
+            )
+
+            # Parse transcript into threads
+            parsed_threads = parse_transcript(raw_text, filename)
+
+            if not parsed_threads:
+                # Fall back to regular text processing if parsing fails
+                log.warning(
+                    "[process/text] transcript parsing returned no threads, falling back to text"
+                )
+                is_transcript = False
+            else:
+                # Process each thread as a chat document
+                results = []
+                total_chunks = 0
+                total_embedded = 0
+                total_upserted = 0
+
+                for thread_docid, thread_text, thread_meta in parsed_threads:
+                    # Delete existing points for this thread (idempotent)
+                    try:
+                        delete_by_document_id(thread_docid, client=client)
+                    except Exception as e:
+                        log.warning(
+                            f"[process/text] delete failed for {thread_docid}: {e}"
+                        )
+
+                    # Chunk using chat-aware chunking
+                    chunks = chunk_chat_messages(
+                        thread_text,
+                        size=int(settings.CHUNK_SIZE),
+                        overlap=int(settings.CHUNK_OVERLAP),
+                    )
+
+                    if not chunks:
+                        log.warning(
+                            f"[process/text] no chunks for thread {thread_docid}, skipping"
+                        )
+                        continue
+
+                    # Embed
+                    vectors = embed_texts(chunks)
+                    total_embedded += len(vectors)
+
+                    # Build items
+                    items = []
+                    for idx, (text_chunk, vec) in enumerate(zip(chunks, vectors)):
+                        point_id = str(uuid.uuid4())
+                        base_meta = {
+                            "source_ext": Path(abs_path).suffix.lower(),
+                            "content_sig": "",
+                            "bytes": len(thread_text.encode("utf-8")),
+                        }
+                        # Build provenance with transcript metadata
+                        full_meta = _build_meta_with_provenance(
+                            base_meta,
+                            source_system="transcript",
+                            doc_type="chat",
+                            detected_as="transcript",
+                            detect_confidence=transcript_confidence,
+                        )
+                        full_meta.update(thread_meta)
+
+                        payload_data = {
+                            "document_id": thread_docid,
+                            "path": rel_path,
+                            "kind": "chat",
+                            "idx": idx,
+                            "text": text_chunk,
+                            "meta": full_meta,
+                        }
+                        items.append((point_id, vec, payload_data))
+
+                    # Upsert
+                    upserted = upsert_points(
+                        items,
+                        collection_name=settings.QDRANT_COLLECTION,
+                        client=client,
+                        ensure=False,
+                    )
+                    total_upserted += upserted
+                    total_chunks += len(chunks)
+
+                    # Record status summary
+                    try:
+                        record_ingest_summary(
+                            document_id=thread_docid, chunks_upserted=upserted
+                        )
+                    except Exception as e:
+                        log.debug(
+                            f"[process/text] record_ingest_summary failed for {thread_docid}: {e}"
+                        )
+
+                    # Build result
+                    result = DocumentIngestResult(
+                        document_id=thread_docid,
+                        path=rel_path,
+                        kind="chat",
+                        chunks=upserted,
+                        images=0,
+                        bytes=len(thread_text.encode("utf-8")),
+                        meta=full_meta,
+                    )
+                    results.append(result)
+
+                # Record ingest activity success
+                if activity_id:
+                    _record_ingest_success(
+                        activity_id=activity_id,
+                        path=rel_path,
+                        kind="text",
+                        chunks=total_upserted,
+                        bytes=len(raw_text.encode("utf-8")),
+                    )
+
+                # Log success
+                duration_ms = int((time.time() - start_time) * 1000)
+                _log_process_completion(request_id, "text", docid, True, duration_ms)
+
+                # Return multi-document response
+                primary_docid = results[0].document_id if results else docid
+
+                return ProcessTextResponse(
+                    ok=True,
+                    document_id=primary_docid,
+                    chunks=total_chunks,
+                    embedded=total_embedded,
+                    upserted=total_upserted,
+                    collection=settings.QDRANT_COLLECTION,
+                    documents_created=len(results),
+                    results=results[:50],
+                )
+
+        # Regular text processing (not a transcript or transcript parsing failed)
         # Delete existing points for this document (idempotent re-ingest)
         try:
             delete_by_document_id(docid, client=client)
@@ -393,7 +610,13 @@ async def process_text(request: Request, _: bool = Depends(require_auth)):
                 "kind": "text",
                 "idx": idx,
                 "text": text_chunk,
-                "meta": _build_meta_with_provenance(base_meta),
+                "meta": _build_meta_with_provenance(
+                    base_meta,
+                    source_system="filesystem",
+                    doc_type="text",
+                    detected_as="text",
+                    detect_confidence=1.0,
+                ),
             }
             items.append((point_id, vec, payload_data))
 
@@ -437,7 +660,11 @@ async def process_text(request: Request, _: bool = Depends(require_auth)):
                     "source_ext": Path(abs_path).suffix.lower(),
                     "content_sig": "",
                     "bytes": len(raw_text.encode("utf-8")),
-                }
+                },
+                source_system="filesystem",
+                doc_type="text",
+                detected_as="text",
+                detect_confidence=1.0,
             ),
         )
 
@@ -560,7 +787,13 @@ async def process_pdf(request: Request, _: bool = Depends(require_auth)):
                 "kind": "pdf",
                 "idx": idx,
                 "text": text_chunk,
-                "meta": _build_meta_with_provenance(base_meta),
+                "meta": _build_meta_with_provenance(
+                    base_meta,
+                    source_system="filesystem",
+                    doc_type="pdf",
+                    detected_as="pdf",
+                    detect_confidence=1.0,
+                ),
             }
             items.append((point_id, vec, payload_data))
 
@@ -604,7 +837,11 @@ async def process_pdf(request: Request, _: bool = Depends(require_auth)):
                     "source_ext": Path(abs_path).suffix.lower(),
                     "content_sig": "",
                     "bytes": len(raw_text.encode("utf-8")),
-                }
+                },
+                source_system="filesystem",
+                doc_type="pdf",
+                detected_as="pdf",
+                detect_confidence=1.0,
             ),
         )
 
@@ -711,7 +948,13 @@ async def process_image(request: Request, _: bool = Depends(require_auth)):
                 "kind": "image",
                 "idx": idx,
                 "text": text_chunk,
-                "meta": _build_meta_with_provenance(base_meta),
+                "meta": _build_meta_with_provenance(
+                    base_meta,
+                    source_system="filesystem",
+                    doc_type="image",
+                    detected_as="image",
+                    detect_confidence=1.0,
+                ),
             }
             items.append((point_id, vec, payload_data))
 
@@ -756,7 +999,11 @@ async def process_image(request: Request, _: bool = Depends(require_auth)):
                     "source_ext": Path(abs_path).suffix.lower(),
                     "content_sig": "",
                     "bytes": 0,
-                }
+                },
+                source_system="filesystem",
+                doc_type="image",
+                detected_as="image",
+                detect_confidence=1.0,
             ),
         )
 
@@ -831,7 +1078,11 @@ async def process_audio(request: Request, _: bool = Depends(require_auth)):
                     "source_ext": Path(abs_path).suffix.lower() if abs_path else "",
                     "content_sig": "",
                     "bytes": 0,
-                }
+                },
+                source_system="filesystem",
+                doc_type="audio",
+                detected_as="audio",
+                detect_confidence=1.0,
             ),
         )
         return ProcessTextResponse(
@@ -910,7 +1161,13 @@ async def process_audio(request: Request, _: bool = Depends(require_auth)):
                 "kind": "audio",
                 "idx": idx,
                 "text": text_chunk,
-                "meta": _build_meta_with_provenance(base_meta),
+                "meta": _build_meta_with_provenance(
+                    base_meta,
+                    source_system="filesystem",
+                    doc_type="audio",
+                    detected_as="audio",
+                    detect_confidence=1.0,
+                ),
             }
             items.append((point_id, vec, payload_data))
 
@@ -954,7 +1211,11 @@ async def process_audio(request: Request, _: bool = Depends(require_auth)):
                     "source_ext": Path(abs_path).suffix.lower(),
                     "content_sig": "",
                     "bytes": len(transcript.encode("utf-8")),
-                }
+                },
+                source_system="filesystem",
+                doc_type="audio",
+                detected_as="audio",
+                detect_confidence=1.0,
             ),
         )
 
@@ -1106,9 +1367,18 @@ async def process_json(request: Request, _: bool = Depends(require_auth)):
                         "content_sig": "",
                         "bytes": len(text.encode("utf-8")),
                     }
-                    # Merge conversation metadata
+                    # Merge conversation metadata with provenance contract
+                    # Extract timestamps from conv_meta for provenance
+                    chat_created = conv_meta.get("chat_created_at")
+                    chat_updated = conv_meta.get("chat_updated_at")
                     full_meta = _build_meta_with_provenance(
-                        base_meta, source_system="chatgpt"
+                        base_meta,
+                        source_system="chatgpt",
+                        doc_type="chat",
+                        detected_as="chatgpt",
+                        detect_confidence=0.95,
+                        created_at=chat_created,
+                        updated_at=chat_updated,
                     )
                     full_meta.update(conv_meta)
 
@@ -1254,7 +1524,13 @@ async def process_json(request: Request, _: bool = Depends(require_auth)):
                     "kind": "json",
                     "idx": idx,
                     "text": text_chunk,
-                    "meta": _build_meta_with_provenance(base_meta),
+                    "meta": _build_meta_with_provenance(
+                        base_meta,
+                        source_system="filesystem",
+                        doc_type="json",
+                        detected_as="generic_json",
+                        detect_confidence=1.0,
+                    ),
                 }
                 items.append((point_id, vec, payload_data))
 
@@ -1293,7 +1569,13 @@ async def process_json(request: Request, _: bool = Depends(require_auth)):
                 chunks=upserted,
                 images=0,
                 bytes=len(text.encode("utf-8")),
-                meta=_build_meta_with_provenance(base_meta),
+                meta=_build_meta_with_provenance(
+                    base_meta,
+                    source_system="filesystem",
+                    doc_type="json",
+                    detected_as="generic_json",
+                    detect_confidence=1.0,
+                ),
             )
 
             return ProcessTextResponse(
