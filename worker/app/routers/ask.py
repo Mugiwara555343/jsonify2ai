@@ -128,9 +128,9 @@ def _search(
         qf = Filter(must=must)
 
     def go(col):
-        hits = qc.search(
-            collection_name=col, query_vector=vec, limit=k, query_filter=qf
-        )
+        hits = qc.query_points(
+            collection_name=col, query=vec, limit=k, filter=qf
+        ).points
         out = []
         for h in hits:
             p = h.payload or {}
