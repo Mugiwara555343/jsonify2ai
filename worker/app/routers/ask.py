@@ -129,7 +129,7 @@ def _search(
 
     def go(col):
         hits = qc.query_points(
-            collection_name=col, query=vec, limit=k, filter=qf
+            collection_name=col, query=vec, limit=k, query_filter=qf
         ).points
         out = []
         for h in hits:
