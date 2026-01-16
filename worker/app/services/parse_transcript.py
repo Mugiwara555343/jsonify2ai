@@ -257,14 +257,16 @@ def parse_transcript(
 
     # Format messages for output (same format as ChatGPT parser)
     text_lines = []
+    ROLE_LABEL = {"user": "User", "assistant": "Assistant", "system": "System"}
     for msg in messages:
         role = msg["role"]
+        label = ROLE_LABEL.get(str(role).lower(), str(role).title())
         content = msg["content"]
         timestamp = msg.get("timestamp", "")
         if timestamp:
-            text_lines.append(f"[{timestamp}] {role}: {content}")
+            text_lines.append(f"[{timestamp}] {label}: {content}")
         else:
-            text_lines.append(f"{role}: {content}")
+            text_lines.append(f"{label}: {content}")
 
     formatted_text = "\n\n".join(text_lines)
 
