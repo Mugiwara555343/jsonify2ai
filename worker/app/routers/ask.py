@@ -123,19 +123,19 @@ def _search(
             must.append(
                 FieldCondition(key="meta.ingested_at_ts", range=Range(lt=ts_before))
             )
-
+    qf = None
     if must:
         qf = Filter(must=must)
 
     def go(col):
-        hits = qc.query_points(
-            collection_name=col, query=vec, limit=k, filter=qf
-        ).points
+        kwargs = {"collection_name": col, "query": vec, "limit": k}
+        if qf is not None:
+            kwargs["query_filter"] = qf
+        hits = qc.query_points(**kwargs).points
         out = []
         for h in hits:
             p = h.payload or {}
             raw_hit = {"id": str(h.id), "score": float(h.score), **p}
-            # Normalize to standardized Source shape
             normalized = _normalize_source(raw_hit)
             out.append(normalized)
         return out

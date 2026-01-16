@@ -99,3 +99,6 @@ STATE.md
 /export_*.json
 /exports/
 docs/env.md
+
+# local scratch
+body.json

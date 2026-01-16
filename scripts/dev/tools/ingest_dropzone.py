@@ -13,6 +13,7 @@ Notes (to prevent regressions):
 
 from __future__ import annotations
 
+
 # ─── stdlib ───────────────────────────────────────────────────────────────────
 import argparse
 import hashlib
@@ -25,7 +26,13 @@ import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
-import pathlib
+
+
+# --- repo-root bootstrap (after stdlib imports; before local imports) ---
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+# ----------------------------------------------------------------------
 
 ## Discovery helpers removed; now using centralized worker.app.services.discovery
 
@@ -37,10 +44,6 @@ def content_sig_bytes(b: bytes) -> str:  # retained local helper for hashing byt
 
 # === END id helpers ===
 
-# ─── repo-root bootstrap (must precede local imports) ─────────────────────────
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 # Load .env so entrypoint processes see repository defaults early (no-op if python-dotenv missing)
 try:

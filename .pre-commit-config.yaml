@@ -1,8 +1,5 @@
 repos:
-  - repo: https://github.com/psf/black
-    rev: 24.8.0
-    hooks:
-      - id: black
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.6.8
     hooks:
@@ -21,13 +18,13 @@ repos:
     hooks:
       - id: smoke-cli
         name: smoke-cli (help + discovery)
-        entry: python scripts/dev/smoke_precommit.py
+        entry: python scripts/dev/tools/smoke_precommit.py
         language: system
         pass_filenames: false
         stages: [pre-commit]
       - id: smoke-e2e
         name: Smoke E2E (API/Worker/Web)
-        entry: python scripts/dev/smoke_e2e.py
+        entry: python scripts/dev/tools/smoke_e2e.py
         language: system
         pass_filenames: false
         stages: [manual]
