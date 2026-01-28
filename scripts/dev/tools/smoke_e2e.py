@@ -184,7 +184,7 @@ def run() -> int:
     # If DOCX path provided but file missing, generate it
     if args.docx and not os.path.exists(args.docx):
         print(f"[gen] {args.docx} missing; generating via scripts/gen_smoke_docs.py")
-        os.system(f"{sys.executable} scripts/gen_smoke_docs.py")
+        os.system(f"{sys.executable} scripts/dev/tools/gen_smoke_docs.py")
 
     # Optional new types
     if args.csv and os.path.exists(args.csv):
