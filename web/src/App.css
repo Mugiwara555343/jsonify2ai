@@ -1,10 +1,5 @@
 .App {
-  text-align: center;
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .App-header {
@@ -78,4 +73,37 @@
   background: #5a6fd8;
   transform: translateY(-2px);
   box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+}
+
+/* Dark Mode Overrides */
+.dark .App-header {
+  background: #0a0a0a;
+  color: #f3f4f6;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+.dark .App-header h1 {
+  color: #f3f4f6;
+}
+
+.dark .health-status h2 {
+  color: #9ca3af;
+}
+
+.dark .status.loading {
+  background: #1f2937;
+  color: #9ca3af;
+  border-color: #374151;
+}
+
+.dark .status.healthy {
+  background: #064e3b;
+  color: #a7f3d0;
+  border-color: #065f46;
+}
+
+.dark .status.unhealthy {
+  background: #7f1d1d;
+  color: #fecaca;
+  border-color: #991b1b;
 }

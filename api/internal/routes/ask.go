@@ -18,6 +18,7 @@ type askRequest struct {
 	Kind  string `json:"kind"`
 	Q     string `json:"q"`
 	Limit int    `json:"limit"`
+	Model string `json:"model"` // Optional model override
 }
 
 type searchResult struct {
@@ -72,6 +73,9 @@ func (h *AskHandler) Post(c *gin.Context) {
 		"query": req.Q,
 		"kind":  req.Kind,
 		"limit": req.Limit,
+	}
+	if req.Model != "" {
+		wreq["model"] = req.Model
 	}
 	if documentID != "" {
 		wreq["document_id"] = documentID

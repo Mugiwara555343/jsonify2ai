@@ -20,18 +20,8 @@ export default function BulkActionBar({
   }
 
   return (
-    <div style={{
-      marginBottom: 12,
-      padding: 12,
-      background: '#f0f9ff',
-      border: '1px solid #bae6fd',
-      borderRadius: 8,
-      display: 'flex',
-      alignItems: 'center',
-      gap: 12,
-      flexWrap: 'wrap'
-    }}>
-      <span style={{ fontSize: 13, fontWeight: 600 }}>
+    <div className="mb-3 p-3 rounded-lg flex items-center gap-3 flex-wrap bg-blue-50 dark:bg-slate-900 border border-blue-200 dark:border-slate-700">
+      <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
         {selectedDocIds.size} {selectedDocIds.size === 1 ? 'document' : 'documents'} selected
       </span>
       <button
@@ -46,57 +36,29 @@ export default function BulkActionBar({
           }
         }}
         disabled={selectedDocIds.size !== 1}
-        style={{
-          padding: '6px 12px',
-          border: '1px solid #ddd',
-          borderRadius: 6,
-          background: selectedDocIds.size === 1 ? '#fff' : '#f5f5f5',
-          cursor: selectedDocIds.size === 1 ? 'pointer' : 'not-allowed',
-          fontSize: 12,
-          opacity: selectedDocIds.size === 1 ? 1 : 0.5
-        }}
+        className={`px-3 py-1.5 rounded-md border text-xs transition-colors ${selectedDocIds.size === 1
+            ? 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer'
+            : 'bg-gray-100 dark:bg-gray-900 border-gray-200 dark:border-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-50'
+          }`}
       >
         Set Active
       </button>
       <button
         disabled
         title="Export ZIP works per-document. Select one document."
-        style={{
-          padding: '6px 12px',
-          border: '1px solid #ddd',
-          borderRadius: 6,
-          background: '#f5f5f5',
-          cursor: 'not-allowed',
-          fontSize: 12,
-          opacity: 0.5
-        }}
+        className="px-3 py-1.5 rounded-md border text-xs bg-gray-100 dark:bg-gray-900 border-gray-200 dark:border-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-50"
       >
         Export ZIP
       </button>
       <button
         onClick={onBulkDelete}
-        style={{
-          padding: '6px 12px',
-          border: '1px solid #dc2626',
-          borderRadius: 6,
-          background: '#fff',
-          cursor: 'pointer',
-          fontSize: 12,
-          color: '#dc2626'
-        }}
+        className="px-3 py-1.5 rounded-md border text-xs bg-white dark:bg-gray-800 border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10 cursor-pointer"
       >
         Delete selected…
       </button>
       <button
         onClick={onClearSelection}
-        style={{
-          padding: '6px 12px',
-          border: '1px solid #ddd',
-          borderRadius: 6,
-          background: '#fff',
-          cursor: 'pointer',
-          fontSize: 12
-        }}
+        className="px-3 py-1.5 rounded-md border text-xs bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
       >
         Clear selection
       </button>

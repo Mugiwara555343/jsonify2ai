@@ -122,7 +122,7 @@ export default function DocumentList(props: DocumentListProps) {
       <div style={{ marginBottom: 12 }}>
         <button
           onClick={onLoadDocuments}
-          style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14 }}
+          className="px-4 py-2 rounded-lg border text-sm transition-colors bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
         >
           Refresh documents
         </button>
@@ -143,24 +143,16 @@ export default function DocumentList(props: DocumentListProps) {
               placeholder="Search by filename..."
               value={docSearchFilter}
               onChange={(e) => onSetFilter(e.target.value)}
+              className="px-3 py-1.5 rounded-md border text-sm bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               style={{
                 flex: '1 1 200px',
-                minWidth: 150,
-                padding: '6px 12px',
-                borderRadius: 6,
-                border: '1px solid #ddd',
-                fontSize: 13
+                minWidth: 150
               }}
             />
             <select
               value={docSortBy}
               onChange={(e) => onSetSort(e.target.value as 'newest' | 'oldest' | 'most-chunks')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: 6,
-                border: '1px solid #ddd',
-                fontSize: 13
-              }}
+              className="px-3 py-1.5 rounded-md border text-sm bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="newest">Newest first</option>
               <option value="oldest">Oldest first</option>
@@ -175,13 +167,7 @@ export default function DocumentList(props: DocumentListProps) {
               return (
                 <div
                   key={i}
-                  style={{
-                    padding: 12,
-                    border: '1px solid #eee',
-                    borderRadius: 8,
-                    position: 'relative',
-                    cursor: 'pointer'
-                  }}
+                  className="p-3 border border-gray-200 dark:border-gray-800 rounded-lg relative cursor-pointer bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                   onClick={() => {
                     onOpenDrawer(doc.document_id);
                   }}
@@ -243,14 +229,10 @@ export default function DocumentList(props: DocumentListProps) {
                         )}
                       </>
                     )}
-                    <span style={{
-                      padding: '3px 8px',
-                      borderRadius: 6,
-                      fontSize: 11,
-                      fontWeight: 500,
-                      background: status === 'indexed' ? '#c6f6d5' : '#fef3c7',
-                      color: status === 'indexed' ? '#166534' : '#78350f'
-                    }}>
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium border ${status === 'indexed'
+                        ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border-green-200 dark:border-green-900/50'
+                        : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300 border-yellow-200 dark:border-yellow-900/50'
+                      }`}>
                       {status === 'indexed' ? `Indexed (${totalChunks} ${totalChunks === 1 ? 'chunk' : 'chunks'})` : 'Pending / not indexed yet'}
                     </span>
                     <div style={{ marginLeft: 'auto', position: 'relative' }} data-menu-container>
@@ -275,36 +257,14 @@ export default function DocumentList(props: DocumentListProps) {
                         ⋯
                       </button>
                       {openMenuDocId === doc.document_id && (
-                        <div data-menu-container style={{
-                          position: 'absolute',
-                          right: 0,
-                          top: '100%',
-                          marginTop: 4,
-                          background: '#fff',
-                          border: '1px solid #ddd',
-                          borderRadius: 6,
-                          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-                          zIndex: 1000,
-                          minWidth: 150,
-                          padding: '4px 0'
-                        }}>
+                        <div data-menu-container className="absolute right-0 top-full mt-1 min-w-[160px] py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-[1000]">
                           <button
                             onClick={async (e) => {
                               e.stopPropagation();
                               onSetOpenMenu(null);
                               handleSetActive(doc.document_id);
                             }}
-                            style={{
-                              width: '100%',
-                              textAlign: 'left',
-                              padding: '6px 12px',
-                              border: 'none',
-                              background: 'transparent',
-                              cursor: 'pointer',
-                              fontSize: 13
-                            }}
-                            onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5'; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                            className="w-full text-left px-3 py-2 border-none bg-transparent cursor-pointer text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
                           >
                             Set Active
                           </button>
@@ -315,17 +275,7 @@ export default function DocumentList(props: DocumentListProps) {
                               const collection = collectionForDoc(doc);
                               await onPreviewDoc(doc.document_id, collection);
                             }}
-                            style={{
-                              width: '100%',
-                              textAlign: 'left',
-                              padding: '6px 12px',
-                              border: 'none',
-                              background: 'transparent',
-                              cursor: 'pointer',
-                              fontSize: 13
-                            }}
-                            onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5'; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                            className="w-full text-left px-3 py-2 border-none bg-transparent cursor-pointer text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
                           >
                             Preview JSON
                           </button>
@@ -336,17 +286,7 @@ export default function DocumentList(props: DocumentListProps) {
                               const kind = doc.kinds.includes('image') ? 'image' : 'text';
                               await onExportJson(doc.document_id, kind);
                             }}
-                            style={{
-                              width: '100%',
-                              textAlign: 'left',
-                              padding: '6px 12px',
-                              border: 'none',
-                              background: 'transparent',
-                              cursor: 'pointer',
-                              fontSize: 13
-                            }}
-                            onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5'; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                            className="w-full text-left px-3 py-2 border-none bg-transparent cursor-pointer text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
                           >
                             Export JSON
                           </button>
@@ -357,17 +297,7 @@ export default function DocumentList(props: DocumentListProps) {
                               const kind = doc.kinds.includes('image') ? 'image' : 'text';
                               await onExportZip(doc.document_id, kind);
                             }}
-                            style={{
-                              width: '100%',
-                              textAlign: 'left',
-                              padding: '6px 12px',
-                              border: 'none',
-                              background: 'transparent',
-                              cursor: 'pointer',
-                              fontSize: 13
-                            }}
-                            onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5'; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                            className="w-full text-left px-3 py-2 border-none bg-transparent cursor-pointer text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
                           >
                             Export ZIP
                           </button>
@@ -383,18 +313,7 @@ export default function DocumentList(props: DocumentListProps) {
                                 showToast(errorMsg, true);
                               }
                             }}
-                            style={{
-                              width: '100%',
-                              textAlign: 'left',
-                              padding: '6px 12px',
-                              border: 'none',
-                              background: 'transparent',
-                              cursor: 'pointer',
-                              fontSize: 13,
-                              color: '#dc2626'
-                            }}
-                            onMouseEnter={(e) => { e.currentTarget.style.background = '#fef2f2'; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                            className="w-full text-left px-3 py-2 border-none bg-transparent cursor-pointer text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
                           >
                             Delete…
                           </button>
@@ -442,15 +361,8 @@ export default function DocumentList(props: DocumentListProps) {
         </>
       )}
       {docs.length === 0 && (
-        <div style={{
-          padding: 24,
-          textAlign: 'center',
-          background: '#f9fafb',
-          border: '1px solid #e5e7eb',
-          borderRadius: 8,
-          color: '#6b7280'
-        }}>
-          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: '#374151' }}>
+        <div className="p-6 text-center bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg text-gray-500 dark:text-gray-400">
+          <div className="text-base font-semibold mb-2 text-gray-700 dark:text-gray-200">
             No documents yet
           </div>
           <div style={{ fontSize: 14, marginBottom: 16 }}>

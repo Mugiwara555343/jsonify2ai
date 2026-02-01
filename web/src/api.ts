@@ -7,7 +7,7 @@ function hostDefault(): string {
   try {
     const h = window.location.hostname;
     if (h === "localhost" || h === "127.0.0.1") return "http://localhost:8082";
-  } catch {}
+  } catch { }
   return "http://api:8082";
 }
 
@@ -215,7 +215,8 @@ export async function askQuestion(
   documentId?: string,
   answerMode?: 'retrieve' | 'synthesize',
   ingestedAfter?: string,
-  ingestedBefore?: string
+  ingestedBefore?: string,
+  model?: string
 ): Promise<any> {
   // Build URL with optional query parameters
   let url = "/ask";
@@ -242,6 +243,9 @@ export async function askQuestion(
   }
   if (ingestedBefore) {
     body.ingested_before = ingestedBefore;
+  }
+  if (model) {
+    body.model = model;
   }
 
   const r = await apiRequest(url, {

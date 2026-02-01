@@ -30,6 +30,9 @@ services:
       - GIN_MODE=${GIN_MODE:-release}
       - GIN_TRUSTED_PROXIES=${GIN_TRUSTED_PROXIES:-}
       - AUTH_MODE=${AUTH_MODE:-local}
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - OLLAMA_URL=http://host.docker.internal:11434
+      - QDRANT_URL=http://host.docker.internal:6333
     restart: unless-stopped
     depends_on:
       - worker

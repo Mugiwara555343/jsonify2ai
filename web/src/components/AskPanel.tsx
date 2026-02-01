@@ -1,5 +1,6 @@
 import { RefObject } from 'react';
 import { Document } from './IngestionActivity';
+import ModelSelector from './ModelSelector';
 
 type Status = {
   ok: boolean;
@@ -37,6 +38,10 @@ interface AskPanelProps {
   getActiveDocument: (strictMode: boolean) => Document | null;
   collectionForDoc: (doc: Document) => string;
   generateSuggestionChips: (scope: 'doc' | 'all', activeDoc: Document | null) => string[];
+  models: any[];
+  activeModel: string | null;
+  onSelectModel: (model: string | null) => void;
+  modelsLoading: boolean;
 }
 
 export default function AskPanel({
@@ -62,7 +67,11 @@ export default function AskPanel({
   showToast,
   getActiveDocument,
   collectionForDoc,
-  generateSuggestionChips
+  generateSuggestionChips,
+  models,
+  activeModel,
+  onSelectModel,
+  modelsLoading
 }: AskPanelProps) {
   const handleAsk = async () => {
     if (!askQ.trim() || askLoading) return;
@@ -70,34 +79,22 @@ export default function AskPanel({
   };
 
   return (
-    <div style={{
-      marginTop: 24,
-      padding: 20,
-      border: '1px solid #e5e7eb',
-      borderRadius: 12,
-      background: '#fafafa',
-    }}>
-      <h2 style={{ fontSize: 18, marginBottom: 8 }}>Ask</h2>
+    <div className="mt-6 p-5 border border-gray-200 dark:border-gray-800 rounded-xl bg-gray-50 dark:bg-gray-900 transition-colors">
+      <h2 className="text-lg font-semibold mb-2 text-gray-900 dark:text-gray-100">Ask</h2>
       {/* Scope and Answer Mode Toggles */}
       <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ fontSize: 12, opacity: 0.7 }}>Scope:</div>
-          <div style={{ display: 'flex', gap: 4, border: '1px solid #ddd', borderRadius: 6, padding: 2 }}>
+          <div className="flex gap-1 border border-gray-200 dark:border-gray-700 rounded-md p-0.5 bg-white dark:bg-gray-800">
             <button
               onClick={() => {
                 onSetAskScope('doc');
                 saveAskScope('doc');
               }}
-              style={{
-                padding: '4px 12px',
-                borderRadius: 4,
-                border: 'none',
-                background: askScope === 'doc' ? '#1976d2' : 'transparent',
-                color: askScope === 'doc' ? '#fff' : '#666',
-                cursor: 'pointer',
-                fontSize: 12,
-                fontWeight: askScope === 'doc' ? 500 : 400
-              }}
+              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${askScope === 'doc'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
             >
               This document
             </button>
@@ -106,16 +103,10 @@ export default function AskPanel({
                 onSetAskScope('all');
                 saveAskScope('all');
               }}
-              style={{
-                padding: '4px 12px',
-                borderRadius: 4,
-                border: 'none',
-                background: askScope === 'all' ? '#1976d2' : 'transparent',
-                color: askScope === 'all' ? '#fff' : '#666',
-                cursor: 'pointer',
-                fontSize: 12,
-                fontWeight: askScope === 'all' ? 500 : 400
-              }}
+              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${askScope === 'all'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
             >
               All documents
             </button>
@@ -138,23 +129,24 @@ export default function AskPanel({
           })()}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <ModelSelector
+            models={models || []}
+            selectedModel={activeModel}
+            onSelect={(m: string) => onSelectModel(m === "" ? null : m)}
+            loading={modelsLoading}
+          />
+          <div style={{ width: 1, height: 20, background: '#eee', margin: '0 4px' }} />
           <div style={{ fontSize: 12, opacity: 0.7 }}>Answer:</div>
-          <div style={{ display: 'flex', gap: 4, border: '1px solid #ddd', borderRadius: 6, padding: 2 }}>
+          <div className="flex gap-1 border border-gray-200 dark:border-gray-700 rounded-md p-0.5 bg-white dark:bg-gray-800">
             <button
               onClick={() => {
                 onSetAnswerMode('retrieve');
                 saveAnswerMode('retrieve', askScope);
               }}
-              style={{
-                padding: '4px 12px',
-                borderRadius: 4,
-                border: 'none',
-                background: answerMode === 'retrieve' ? '#1976d2' : 'transparent',
-                color: answerMode === 'retrieve' ? '#fff' : '#666',
-                cursor: 'pointer',
-                fontSize: 12,
-                fontWeight: answerMode === 'retrieve' ? 500 : 400
-              }}
+              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${answerMode === 'retrieve'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
             >
               Retrieve
             </button>
@@ -169,17 +161,12 @@ export default function AskPanel({
                 saveAnswerMode('synthesize', askScope);
               }}
               disabled={status?.llm?.reachable !== true}
-              style={{
-                padding: '4px 12px',
-                borderRadius: 4,
-                border: 'none',
-                background: answerMode === 'synthesize' ? '#1976d2' : 'transparent',
-                color: answerMode === 'synthesize' ? '#fff' : (status?.llm?.reachable !== true ? '#999' : '#666'),
-                cursor: status?.llm?.reachable !== true ? 'not-allowed' : 'pointer',
-                fontSize: 12,
-                fontWeight: answerMode === 'synthesize' ? 500 : 400,
-                opacity: status?.llm?.reachable !== true ? 0.5 : 1
-              }}
+              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${answerMode === 'synthesize'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : status?.llm?.reachable !== true
+                  ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed'
+                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
             >
               Synthesize
             </button>
@@ -201,26 +188,16 @@ export default function AskPanel({
         const collection = collectionForDoc(activeDoc);
 
         return (
-          <div style={{
-            marginBottom: 12,
-            padding: 12,
-            background: '#f0f9ff',
-            border: '1px solid #bae6fd',
-            borderRadius: 8,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            flexWrap: 'wrap'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 auto' }}>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>{filename}</span>
+          <div className="mb-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2 flex-auto">
+              <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{filename}</span>
               <span style={{
                 fontSize: 11,
                 padding: '2px 6px',
                 borderRadius: 12,
                 background: '#e3f2fd',
                 color: '#1976d2'
-              }}>
+              }} className="dark:bg-blue-900/30 dark:text-blue-300">
                 {kind}
               </span>
             </div>
@@ -229,15 +206,8 @@ export default function AskPanel({
                 onClick={async () => {
                   await onPreviewDoc(activeDoc.document_id, collection);
                 }}
-                style={{
-                  fontSize: 12,
-                  padding: '4px 8px',
-                  borderRadius: 6,
-                  border: '1px solid #ddd',
-                  background: '#fff',
-                  color: '#1976d2',
-                  cursor: 'pointer'
-                }}
+                style={{}}
+                className="px-2 py-1 text-xs border rounded bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
               >
                 Preview JSON
               </button>
@@ -246,15 +216,8 @@ export default function AskPanel({
                   copyToClipboard(activeDoc.document_id);
                   showToast('Document ID copied');
                 }}
-                style={{
-                  fontSize: 12,
-                  padding: '4px 8px',
-                  borderRadius: 6,
-                  border: '1px solid #ddd',
-                  background: '#fff',
-                  color: '#1976d2',
-                  cursor: 'pointer'
-                }}
+                style={{}}
+                className="px-2 py-1 text-xs border rounded bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
               >
                 Copy ID
               </button>
@@ -266,15 +229,8 @@ export default function AskPanel({
                     showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
                   }
                 }}
-                style={{
-                  fontSize: 12,
-                  padding: '4px 8px',
-                  borderRadius: 6,
-                  border: '1px solid #ddd',
-                  background: '#fff',
-                  color: '#1976d2',
-                  cursor: 'pointer'
-                }}
+                style={{}}
+                className="px-2 py-1 text-xs border rounded bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
               >
                 Export JSON
               </button>
@@ -286,15 +242,8 @@ export default function AskPanel({
                     showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
                   }
                 }}
-                style={{
-                  fontSize: 12,
-                  padding: '4px 8px',
-                  borderRadius: 6,
-                  border: '1px solid #ddd',
-                  background: '#fff',
-                  color: '#1976d2',
-                  cursor: 'pointer'
-                }}
+                style={{}}
+                className="px-2 py-1 text-xs border rounded bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
               >
                 Export ZIP
               </button>
@@ -303,15 +252,8 @@ export default function AskPanel({
                   onClearActive();
                   showToast('Active document cleared');
                 }}
-                style={{
-                  fontSize: 12,
-                  padding: '4px 8px',
-                  borderRadius: 6,
-                  border: '1px solid #dc2626',
-                  background: '#fff',
-                  color: '#dc2626',
-                  cursor: 'pointer'
-                }}
+                style={{}}
+                className="px-2 py-1 text-xs border rounded bg-white dark:bg-gray-800 border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10 cursor-pointer"
               >
                 Clear
               </button>
@@ -342,22 +284,8 @@ export default function AskPanel({
                       }
                     }, 0);
                   }}
-                  style={{
-                    fontSize: 12,
-                    padding: '4px 8px',
-                    borderRadius: 6,
-                    border: '1px solid #ddd',
-                    background: '#fff',
-                    color: '#1976d2',
-                    cursor: 'pointer',
-                    textDecoration: 'none'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = '#f0f9ff';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = '#fff';
-                  }}
+                  style={{}}
+                  className="px-2 py-1 text-xs border rounded bg-white dark:bg-gray-800 border-blue-200 dark:border-gray-700 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-gray-700 cursor-pointer transition-colors"
                 >
                   {example}
                 </button>
@@ -378,18 +306,16 @@ export default function AskPanel({
             }
           }}
           placeholder="ask your data…"
-          style={{ flex: 1, padding: 12, borderRadius: 8, border: '1px solid #ddd' }}
+          className="flex-1 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
         <button
           onClick={handleAsk}
           disabled={askLoading}
-          style={{
-            padding: '12px 16px',
-            borderRadius: 8,
-            border: '1px solid #ddd',
-            opacity: askLoading ? 0.6 : 1,
-            cursor: askLoading ? 'not-allowed' : 'pointer'
-          }}
+          style={{}}
+          className={`px-4 py-3 rounded-lg border border-gray-200 dark:border-gray-700 text-sm font-medium transition-colors ${askLoading
+            ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+            : 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+            }`}
         >
           {askLoading ? 'Asking...' : 'Ask'}
         </button>
@@ -401,41 +327,19 @@ export default function AskPanel({
 
         if (!llm || provider === 'none') {
           return (
-            <div style={{
-              marginTop: 8,
-              padding: 8,
-              fontSize: 12,
-              color: '#6b7280',
-              fontStyle: 'italic',
-            }}>
+            <div className="mt-2 p-2 text-xs italic text-gray-500 dark:text-gray-400">
               Synthesis is optional. You'll still get top matching sources + exports.
             </div>
           );
         } else if (provider === 'ollama' && !reachable) {
           return (
-            <div style={{
-              marginTop: 8,
-              padding: 8,
-              fontSize: 12,
-              color: '#92400e',
-              background: '#fef3c7',
-              borderRadius: 6,
-              border: '1px solid #fde68a',
-            }}>
+            <div className="mt-2 p-2 text-xs rounded-md border bg-yellow-50 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200 border-yellow-200 dark:border-yellow-800">
               Ollama configured but unreachable. Open the panel for steps.
             </div>
           );
         } else if (provider === 'ollama' && reachable) {
           return (
-            <div style={{
-              marginTop: 8,
-              padding: 8,
-              fontSize: 12,
-              color: '#0369a1',
-              background: '#e0f2fe',
-              borderRadius: 6,
-              border: '1px solid #bae6fd',
-            }}>
+            <div className="mt-2 p-2 text-xs rounded-md border bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700">
               Answer generated locally with Ollama. Sources below.
             </div>
           );
