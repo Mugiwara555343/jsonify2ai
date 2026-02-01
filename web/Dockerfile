@@ -8,7 +8,7 @@ COPY package*.json ./
 # Install dependencies with BuildKit cache mount for faster rebuilds
 # This caches npm packages between builds
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci --prefer-offline --no-audit
+    npm install --no-audit
 
 # Copy source code (this layer only rebuilds when source changes)
 COPY . .

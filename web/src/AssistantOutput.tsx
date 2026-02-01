@@ -82,19 +82,10 @@ export default function AssistantOutput({
   // Empty state
   if (!loading && !error && !result) {
     return (
-      <div style={{
-        marginTop: 12,
-        padding: 16,
-        color: '#6b7280',
-        fontSize: 13,
-        textAlign: 'center',
-        background: '#f9fafb',
-        borderRadius: 8,
-        border: '1px dashed #d1d5db',
-      }}>
-        <div style={{ marginBottom: 4, fontWeight: 500 }}>Ready to help</div>
-        <div style={{ fontSize: 12, opacity: 0.8 }}>
-          Try a Quick Action above or ask a question to get started.
+      <div className="mt-3 p-4 text-center text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-900 rounded-lg border border-dashed border-gray-300 dark:border-gray-700">
+        <div className="text-sm font-medium mb-1">Ready to help</div>
+        <div className="text-xs opacity-80">
+          Ask a question to get started.
         </div>
       </div>
     );
@@ -115,15 +106,7 @@ export default function AssistantOutput({
   // Error state
   if (error) {
     return (
-      <div style={{
-        marginTop: 12,
-        padding: 12,
-        border: '1px solid #fecaca',
-        borderRadius: 8,
-        background: '#fef2f2',
-        color: '#dc2626',
-        fontSize: 14,
-      }}>
+      <div className="mt-3 p-3 border border-red-200 dark:border-red-900 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm">
         {error}
       </div>
     );
@@ -176,7 +159,7 @@ export default function AssistantOutput({
   };
 
   return (
-    <div style={{ marginTop: 12, padding: 12, border: '1px solid #eee', borderRadius: 10 }}>
+    <div className="mt-3 p-3 border border-gray-200 dark:border-gray-800 rounded-xl bg-white dark:bg-black transition-colors">
       {/* Title and Model Badge */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <div style={{ fontWeight: 600, fontSize: 16 }}>{title}</div>
@@ -214,29 +197,14 @@ export default function AssistantOutput({
           </span>
         )}
         {showNoSources && (
-          <span style={{
-            fontSize: 11,
-            padding: '2px 6px',
-            borderRadius: 999,
-            background: '#fef3c7',
-            color: '#92400e',
-          }}>
+          <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200">
             No matching sources found
           </span>
         )}
         {(mainText || sources.length > 0) && (
           <button
             onClick={handleCopy}
-            style={{
-              marginLeft: 'auto',
-              padding: '4px 12px',
-              borderRadius: 6,
-              border: '1px solid #ddd',
-              background: '#fff',
-              color: '#1976d2',
-              cursor: 'pointer',
-              fontSize: 12,
-            }}
+            className="ml-auto px-3 py-1 rounded-md border text-xs bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-blue-600 dark:text-blue-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
           >
             Copy output
           </button>
@@ -255,8 +223,8 @@ export default function AssistantOutput({
             {scope === 'doc' && activeDocFilename
               ? `Using document: ${activeDocFilename}`
               : scope === 'doc'
-              ? 'Using document: (no active document)'
-              : 'Using all indexed documents'}
+                ? 'Using document: (no active document)'
+                : 'Using all indexed documents'}
           </div>
           {scope === 'all' && (
             <div style={{ fontSize: 11, color: '#f59e0b', opacity: 0.8 }}>
@@ -268,14 +236,8 @@ export default function AssistantOutput({
 
       {/* Main Output */}
       {mainText && (
-        <div style={{
-          marginBottom: 16,
-          padding: 12,
-          border: '1px solid #e5e7eb',
-          borderRadius: 8,
-          background: '#fafafa',
-        }}>
-          <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: 14 }}>
+        <div className="mb-4 p-4 border rounded-lg shadow-sm bg-gray-50 dark:!bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100">
+          <div className="whitespace-pre-wrap leading-relaxed text-sm">
             {mainText}
           </div>
         </div>
@@ -322,17 +284,7 @@ export default function AssistantOutput({
                 return (
                   <div
                     key={group.docId}
-                    style={{
-                      padding: 12,
-                      border: '1px solid #e5e7eb',
-                      borderRadius: 8,
-                      background: '#fff',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      flexWrap: 'wrap',
-                      gap: 8,
-                    }}
+                    className="p-3 border rounded-lg flex justify-between items-center flex-wrap gap-2 transition-colors bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
                   >
                     <div style={{ flex: 1, minWidth: 200 }}>
                       <div style={{ fontWeight: 500, fontSize: 13, marginBottom: 4 }}>
@@ -398,65 +350,28 @@ export default function AssistantOutput({
               return (
                 <div
                   key={i}
-                  style={{
-                    padding: 12,
-                    border: '1px solid #e5e7eb',
-                    borderRadius: 8,
-                    background: '#fff',
-                  }}
+                  className="p-3 border rounded-lg transition-colors bg-white dark:!bg-gray-900 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
                 >
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    marginBottom: 8,
-                    flexWrap: 'wrap',
-                  }}>
-                    <span style={{ fontWeight: 500, fontSize: 13 }}>{filename}</span>
+                  <div className="flex items-center gap-2 mb-2 flex-wrap">
+                    <span className="font-medium text-[13px] text-gray-900 dark:text-gray-100">{filename}</span>
                     {path && (
-                      <span style={{
-                        fontSize: 11,
-                        opacity: 0.7,
-                        fontFamily: 'monospace',
-                      }}>
+                      <span className="text-[11px] opacity-70 font-mono text-gray-600 dark:text-gray-400">
                         {path}
                       </span>
                     )}
                     {docId && (
-                      <code style={{
-                        fontSize: 11,
-                        fontFamily: 'monospace',
-                        background: '#f5f5f5',
-                        padding: '2px 6px',
-                        borderRadius: 4,
-                      }}>
+                      <code className="text-[11px] font-mono bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-gray-700 dark:text-gray-300">
                         {docId}
                       </code>
                     )}
                     {score !== null && (
-                      <span style={{
-                        fontSize: 11,
-                        padding: '2px 6px',
-                        borderRadius: 4,
-                        background: '#f0f9ff',
-                        color: '#0369a1',
-                      }}>
+                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
                         score: {score.toFixed(2)}
                       </span>
                     )}
                   </div>
                   {snippet && (
-                    <div style={{
-                      fontSize: 13,
-                      lineHeight: 1.5,
-                      color: '#374151',
-                      fontFamily: 'ui-monospace, monospace',
-                      background: '#f9fafb',
-                      padding: 8,
-                      borderRadius: 4,
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                    }}>
+                    <div className="text-sm leading-relaxed font-mono whitespace-pre-wrap break-words bg-gray-50 dark:bg-gray-800 p-2 rounded text-gray-700 dark:text-gray-300">
                       {snippet}
                     </div>
                   )}
@@ -469,13 +384,7 @@ export default function AssistantOutput({
 
       {/* No sources fallback */}
       {sources.length === 0 && (
-        <div style={{
-          color: '#666',
-          fontSize: 14,
-          padding: 12,
-          background: '#f9fafb',
-          borderRadius: 6,
-        }}>
+        <div className="text-gray-500 dark:text-gray-400 text-sm p-3 bg-gray-50 dark:bg-gray-900 rounded-md italic">
           No matching snippets yet. Try a different query or upload more files.
         </div>
       )}

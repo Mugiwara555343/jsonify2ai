@@ -1,3 +1,12 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --accent-color: #3b82f6;
+  /* Default blue-500 */
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -15,4 +24,12 @@ body {
 code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
+}
+
+/* Global Dark Mode Override for consistency */
+.dark pre,
+.dark code {
+  background-color: #1a1a1a !important;
+  color: #e5e7eb !important;
+  border-color: #374151 !important;
 }

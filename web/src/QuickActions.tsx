@@ -170,8 +170,8 @@ export default function QuickActions({
 
   return (
     <div style={{ marginTop: 16, marginBottom: 16 }}>
-      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Quick Actions</div>
-      <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 8 }}>
+      <div className="text-sm font-semibold mb-2 text-gray-900 dark:text-gray-100">Quick Actions</div>
+      <div className="text-xs opacity-70 mb-2 text-gray-600 dark:text-gray-400">
         {getScopeLabel()}
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -182,17 +182,10 @@ export default function QuickActions({
               key={action.name}
               onClick={() => handleAction(action.name, action.prompt)}
               disabled={loading !== null}
-              style={{
-                padding: '8px 16px',
-                borderRadius: 8,
-                border: '1px solid #ddd',
-                background: isActive ? '#f3f4f6' : '#fff',
-                color: isActive ? '#9ca3af' : '#1976d2',
-                cursor: loading !== null ? 'not-allowed' : 'pointer',
-                opacity: loading !== null && !isActive ? 0.6 : 1,
-                fontSize: 13,
-                fontWeight: 500,
-              }}
+              className={`px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${isActive
+                  ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-700 cursor-not-allowed'
+                  : 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                } ${loading !== null && !isActive ? 'opacity-60' : ''}`}
             >
               {isActive ? '⏳ ' : ''}
               {action.name}

@@ -67,30 +67,18 @@ export default function IngestionActivity({
   };
 
   return (
-    <div style={{
-      padding: 16,
-      borderRadius: 12,
-      boxShadow: '0 1px 4px rgba(0,0,0,.08)',
-      marginBottom: 16,
-      background: 'var(--bg)',
-      border: '1px solid rgba(0,0,0,.1)'
-    }}>
+    <div className="p-4 rounded-xl shadow-sm mb-4 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800">
       <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: isCollapsed ? 0 : 12,
-          cursor: 'pointer'
-        }}
+        className="flex justify-between items-center cursor-pointer select-none"
+        style={{ marginBottom: isCollapsed ? 0 : 12 }}
         onClick={() => setIsCollapsed(!isCollapsed)}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 12, opacity: 0.5 }}>
+        <div className="flex items-center gap-2">
+          <span className="text-xs opacity-50 dark:text-gray-400">
             {isCollapsed ? '▶' : '▼'}
           </span>
-          <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.7 }}>
-            Ingestion activity {badgeText && <span style={{ opacity: 0.6 }}>{badgeText}</span>}
+          <div className="text-sm font-semibold opacity-70 text-gray-900 dark:text-gray-100">
+            Ingestion activity {badgeText && <span className="opacity-60">{badgeText}</span>}
           </div>
         </div>
         {!isCollapsed && activityFeed.length > 0 && (
@@ -99,15 +87,7 @@ export default function IngestionActivity({
               e.stopPropagation();
               handleClear();
             }}
-            style={{
-              fontSize: 11,
-              padding: '4px 8px',
-              borderRadius: 6,
-              border: '1px solid #ddd',
-              background: '#fff',
-              color: '#666',
-              cursor: 'pointer'
-            }}
+            className="text-[11px] px-2 py-1 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
           >
             Clear activity
           </button>
@@ -115,149 +95,121 @@ export default function IngestionActivity({
       </div>
       {!isCollapsed && (
         activityFeed.length === 0 ? (
-          <div style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>
+          <div className="text-xs text-gray-400 italic">
             No ingestion activity yet. Upload files to see activity here.
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {activityFeed.map((event, idx) => {
-            const timestamp = new Date(event.timestamp);
-            const timeStr = timestamp.toLocaleTimeString();
-            const getSkipMessage = () => {
-              // Map reason codes to human-readable messages
-              const reason = event.skip_reason || event.error || '';
-              if (reason === 'unsupported_extension') return 'Unsupported extension';
-              if (reason === 'empty_file') return 'File is empty';
-              if (reason === 'parse_failed') return 'Extraction failed';
-              if (reason === 'extraction_failed') return 'Extraction failed';
-              if (reason === 'processing_failed') return 'Processing failed';
-              if (reason === 'audio_dev_mode') return 'Audio dev-mode: transcription skipped';
-              if (reason === 'dev_mode_no_embed') return 'Dev-mode: vector embeddings skipped';
-              if (reason === 'ok') return 'Ingested successfully';
-              if (reason === 'worker_error') return 'Processing error';
-              // Fallback to original logic for backward compatibility
-              if (event.skip_reason === 'unsupported_extension') return 'Unsupported file type. Try .txt/.md/.pdf/.csv/.json';
-              if (event.skip_reason === 'empty_file') return 'File is empty';
-              if (event.skip_reason === 'extraction_failed') return `Extraction failed: ${event.error || 'Check worker logs'}`;
-              if (event.skip_reason === 'processing_failed') return `Processing failed: ${event.error || 'Check worker logs'}`;
-              return event.skip_message || event.error || event.skip_reason || 'Skipped';
-            };
-            return (
-              <div
-                key={idx}
-                style={{
-                  padding: 12,
-                  borderRadius: 8,
-                  border: '1px solid #e5e7eb',
-                  background: '#fafafa',
-                  cursor: event.document_id ? 'pointer' : 'default'
-                }}
-                onClick={async () => {
-                  if (!event.document_id) return;
-                  const eventDocId = event.document_id;
-                  // Find document - handle case where document_id might be shortened (first 8 chars)
-                  const doc = docs.find(d =>
-                    d.document_id === eventDocId ||
-                    d.document_id.startsWith(eventDocId) ||
-                    (eventDocId.length <= 8 && d.document_id.startsWith(eventDocId))
-                  );
-                  if (doc) {
-                    onSetActiveDoc(doc.document_id);
-                    saveActiveDocId(doc.document_id);
-                    setAskScope('doc');
-                    saveAskScope('doc');
-                    // Scroll to Ask section
-                    setTimeout(() => {
-                      askInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          <div className="flex flex-col gap-2">
+            {activityFeed.map((event, idx) => {
+              const timestamp = new Date(event.timestamp);
+              const timeStr = timestamp.toLocaleTimeString();
+              const getSkipMessage = () => {
+                const reason = event.skip_reason || event.error || '';
+                if (reason === 'unsupported_extension') return 'Unsupported extension';
+                if (reason === 'empty_file') return 'File is empty';
+                if (reason === 'parse_failed') return 'Extraction failed';
+                if (reason === 'extraction_failed') return 'Extraction failed';
+                if (reason === 'processing_failed') return 'Processing failed';
+                if (reason === 'audio_dev_mode') return 'Audio dev-mode: transcription skipped';
+                if (reason === 'dev_mode_no_embed') return 'Dev-mode: vector embeddings skipped';
+                if (reason === 'ok') return 'Ingested successfully';
+                if (reason === 'worker_error') return 'Processing error';
+                if (event.skip_reason === 'unsupported_extension') return 'Unsupported file type. Try .txt/.md/.pdf/.csv/.json';
+                if (event.skip_reason === 'empty_file') return 'File is empty';
+                if (event.skip_reason === 'extraction_failed') return `Extraction failed: ${event.error || 'Check worker logs'}`;
+                if (event.skip_reason === 'processing_failed') return `Processing failed: ${event.error || 'Check worker logs'}`;
+                return event.skip_message || event.error || event.skip_reason || 'Skipped';
+              };
+
+              const isClickable = !!event.document_id;
+
+              return (
+                <div
+                  key={idx}
+                  className={`p-3 rounded-lg border transition-colors ${isClickable
+                    ? 'cursor-pointer hover:bg-blue-50 dark:hover:bg-gray-800 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50'
+                    : 'cursor-default border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50'
+                    }`}
+                  onClick={async () => {
+                    if (!event.document_id) return;
+                    const eventDocId = event.document_id;
+                    const doc = docs.find(d =>
+                      d.document_id === eventDocId ||
+                      d.document_id.startsWith(eventDocId) ||
+                      (eventDocId.length <= 8 && d.document_id.startsWith(eventDocId))
+                    );
+                    if (doc) {
+                      onSetActiveDoc(doc.document_id);
+                      saveActiveDocId(doc.document_id);
+                      setAskScope('doc');
+                      saveAskScope('doc');
                       setTimeout(() => {
-                        askInputRef.current?.focus();
-                      }, 300);
-                    }, 100);
-                  } else {
-                    showToast('Document no longer exists.', true);
-                  }
-                }}
-                onMouseEnter={(e) => {
-                  if (event.document_id) {
-                    e.currentTarget.style.background = '#f0f9ff';
-                    e.currentTarget.style.borderColor = '#bae6fd';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (event.document_id) {
-                    e.currentTarget.style.background = '#fafafa';
-                    e.currentTarget.style.borderColor = '#e5e7eb';
-                  }
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-                      {event.filename}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <span style={{
-                        padding: '3px 8px',
-                        borderRadius: 6,
-                        fontSize: 11,
-                        fontWeight: 500,
-                        background:
-                          event.status === 'processed' ? '#c6f6d5' :
-                          event.status === 'uploading' ? '#dbeafe' :
-                          event.status === 'indexing' ? '#fed7aa' :
-                          event.status === 'skipped' ? '#fef3c7' :
-                          '#fed7d7',
-                        color:
-                          event.status === 'processed' ? '#166534' :
-                          event.status === 'uploading' ? '#1e40af' :
-                          event.status === 'indexing' ? '#92400e' :
-                          event.status === 'skipped' ? '#78350f' :
-                          '#991b1b'
-                      }}>
-                        {event.status === 'processed' ? 'Processed' :
-                         event.status === 'uploading' ? 'Uploading…' :
-                         event.status === 'indexing' ? 'Indexing…' :
-                         event.status === 'skipped' ? 'Skipped' :
-                         'Error'}
-                      </span>
-                      {event.status === 'processed' && (
-                        <>
-                          {event.chunks !== undefined && (
-                            <span style={{ fontSize: 11, opacity: 0.7 }}>
-                              {event.chunks} {event.chunks === 1 ? 'chunk' : 'chunks'}
-                            </span>
-                          )}
-                          {event.images !== undefined && (
-                            <span style={{ fontSize: 11, opacity: 0.7 }}>
-                              {event.images} {event.images === 1 ? 'image' : 'images'}
-                            </span>
-                          )}
-                        </>
+                        askInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        setTimeout(() => {
+                          askInputRef.current?.focus();
+                        }, 300);
+                      }, 100);
+                    } else {
+                      showToast('Document no longer exists.', true);
+                    }
+                  }}
+                >
+                  <div className="flex justify-between items-start mb-1.5">
+                    <div className="flex-1">
+                      <div className="text-sm font-semibold mb-1 text-gray-900 dark:text-gray-100">
+                        {event.filename}
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`px-2 py-0.5 rounded-md text-[11px] font-medium ${event.status === 'processed' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300' :
+                          event.status === 'uploading' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300' :
+                            event.status === 'indexing' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300' :
+                              event.status === 'skipped' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300' :
+                                'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300'
+                          }`}>
+                          {event.status === 'processed' ? 'Processed' :
+                            event.status === 'uploading' ? 'Uploading…' :
+                              event.status === 'indexing' ? 'Indexing…' :
+                                event.status === 'skipped' ? 'Skipped' :
+                                  'Error'}
+                        </span>
+                        {event.status === 'processed' && (
+                          <>
+                            {event.chunks !== undefined && (
+                              <span className="text-[11px] opacity-70 text-gray-600 dark:text-gray-400">
+                                {event.chunks} {event.chunks === 1 ? 'chunk' : 'chunks'}
+                              </span>
+                            )}
+                            {event.images !== undefined && (
+                              <span className="text-[11px] opacity-70 text-gray-600 dark:text-gray-400">
+                                {event.images} {event.images === 1 ? 'image' : 'images'}
+                              </span>
+                            )}
+                          </>
+                        )}
+                        {event.document_id && (
+                          <code className="text-[10px] font-mono py-0.5 px-1.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700">
+                            {event.document_id}
+                          </code>
+                        )}
+                      </div>
+                      {event.skip_reason && (
+                        <div className="text-[11px] mt-1.5 text-yellow-700 dark:text-yellow-500">
+                          {getSkipMessage()}
+                        </div>
                       )}
-                      {event.document_id && (
-                        <code style={{ fontSize: 10, fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
-                          {event.document_id}
-                        </code>
+                      {event.error && event.status === 'error' && (
+                        <div className="text-[11px] mt-1.5 text-red-600 dark:text-red-400">
+                          {event.error}
+                        </div>
                       )}
                     </div>
-                    {event.skip_reason && (
-                      <div style={{ fontSize: 11, marginTop: 6, color: '#92400e' }}>
-                        {getSkipMessage()}
-                      </div>
-                    )}
-                    {event.error && event.status === 'error' && (
-                      <div style={{ fontSize: 11, marginTop: 6, color: '#dc2626' }}>
-                        {event.error}
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 10, color: '#9ca3af', marginLeft: 8 }}>
-                    {timeStr}
+                    <div className="text-[10px] text-gray-400 ml-2 whitespace-nowrap">
+                      {timeStr}
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
           </div>
         )
       )}

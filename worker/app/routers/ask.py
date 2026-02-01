@@ -22,6 +22,7 @@ class AskBody(BaseModel):
     answer_mode: str = None
     ingested_after: Optional[str] = None
     ingested_before: Optional[str] = None
+    model: Optional[str] = None
 
 
 def _parse_iso_to_timestamp(iso_str: str) -> Optional[int]:
@@ -178,12 +179,12 @@ def _format_prompt(q: str, text_hits: List[dict], img_hits: List[dict]):
     return "\n".join(lines)
 
 
-def _ollama_generate(prompt: str):
+def _ollama_generate(prompt: str, model: str = None):
     try:
         r = requests.post(
             f"{settings.OLLAMA_URL}/api/generate",
             json={
-                "model": settings.ASK_MODEL,
+                "model": model or settings.ASK_MODEL,
                 "prompt": prompt,
                 "options": {
                     "temperature": settings.ASK_TEMP,
@@ -204,6 +205,7 @@ def _ollama_generate(prompt: str):
 
 @router.post("/ask")
 def ask(body: AskBody):
+    print(f"--- Using model: {body.model} ---")
     text_hits, img_hits = _search(
         body.query,
         body.k,
@@ -245,19 +247,21 @@ def ask(body: AskBody):
 
         # Optional LLM synthesis if enabled (but only if answer_mode is not "retrieve")
         if answer_mode != "retrieve" and settings.LLM_PROVIDER == "ollama" and sources:
-            result = _try_llm_synthesis(body.query, result, log, body.answer_mode)
+            result = _try_llm_synthesis(
+                body.query, result, log, body.answer_mode, body.model
+            )
 
         return result
     else:
         # LLM/synthesize path
         log.info(f"[ask] running in synthesize mode for query: {body.query[:50]}...")
         prompt = _format_prompt(body.query, text_hits, img_hits)
-        resp = _ollama_generate(prompt)
+        resp = _ollama_generate(prompt, body.model)
         if resp:
             return {
                 "ok": True,
                 "mode": "synthesize",
-                "model": settings.ASK_MODEL,
+                "model": body.model or settings.ASK_MODEL,
                 "answer": resp,
                 "sources": sources,
                 "stats": {"k": body.k, "returned": len(sources)},
@@ -274,7 +278,9 @@ def ask(body: AskBody):
 
         # Optional LLM synthesis if enabled (but only if answer_mode is not "retrieve")
         if answer_mode != "retrieve" and settings.LLM_PROVIDER == "ollama" and sources:
-            result = _try_llm_synthesis(body.query, result, log, body.answer_mode)
+            result = _try_llm_synthesis(
+                body.query, result, log, body.answer_mode, body.model
+            )
 
         return result
 
@@ -352,7 +358,9 @@ def _select_snippets(
     return out
 
 
-def _try_llm_synthesis(query: str, result: dict, log, answer_mode: str = None) -> dict:
+def _try_llm_synthesis(
+    query: str, result: dict, log, answer_mode: str = None, model: str = None
+) -> dict:
     """
     Try optional LLM synthesis using Ollama if enabled and sources exist.
     Adds 'final' field to result on success.
@@ -397,7 +405,7 @@ def _try_llm_synthesis(query: str, result: dict, log, answer_mode: str = None) -
 
         # Call Ollama generate
         start_time = time.time()
-        final_answer = ollama_generate(prompt)
+        final_answer = ollama_generate(prompt, model=model)
         duration_ms = int((time.time() - start_time) * 1000)
 
         if final_answer:

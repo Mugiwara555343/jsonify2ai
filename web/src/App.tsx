@@ -1,6 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import ThemeControls from "./ThemeControls";
-import { applyTheme, loadTheme } from "./theme";
+import ThemeToggle from "./components/ThemeToggle";
 import './App.css'
 import { uploadFile, doSearch, askQuestion, fetchStatus, fetchDocuments, exportJson, exportZip, apiRequest, fetchJsonPreview, collectionForKind, deleteDocument } from './api'
 import { API_BASE } from './api';
@@ -11,6 +10,7 @@ import IngestionActivity from './components/IngestionActivity';
 import AskPanel from './components/AskPanel';
 import DocumentList from './components/DocumentList';
 import DocumentDrawer from './components/DocumentDrawer';
+import { useModels } from './hooks/useModels';
 
 const BUILD_STAMP = "beast-2 / 2025-12-23 / commit 39ed9bb";
 
@@ -102,9 +102,17 @@ function HealthChip() {
     })();
     return () => { alive = false; };
   }, []);
-  const bg = state === "ok" ? "#c6f6d5" : state === "checking" ? "#fefcbf" : "#fed7d7";
+
+  const getClasses = () => {
+    switch (state) {
+      case "ok": return "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border-green-200 dark:border-green-800";
+      case "warn": return "bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 border-red-200 dark:border-red-800";
+      default: return "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800";
+    }
+  };
+
   const label = state === "ok" ? "API: healthy" : state === "checking" ? "API: checking" : "API: unreachable";
-  return <span style={{ background: bg, padding: "2px 8px", borderRadius: 12, fontSize: 12, marginLeft: 8 }}>{label}</span>;
+  return <span className={`ml-2 px-2 py-0.5 rounded-full text-xs border ${getClasses()}`}>{label}</span>;
 }
 
 function LLMChip({ status }: { status: Status | null }) {
@@ -130,11 +138,13 @@ function LLMChip({ status }: { status: Status | null }) {
     }
   }
 
-  const bg = isOn ? "#e0f2fe" : isOffline ? "#fef3c7" : "#f3f4f6";
-  const color = isOn ? "#0369a1" : isOffline ? "#92400e" : "#6b7280";
-  const borderColor = isOn ? "#bae6fd" : isOffline ? "#fde68a" : "#d1d5db";
+  const getClasses = () => {
+    if (isOn) return "bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 border-blue-200 dark:border-blue-800";
+    if (isOffline) return "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800";
+    return "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700";
+  };
 
-  return <span style={{ background: bg, color: color, padding: "2px 8px", borderRadius: 12, fontSize: 12, marginLeft: 8, border: `1px solid ${borderColor}` }}>{label}</span>;
+  return <span className={`ml-2 px-2 py-0.5 rounded-full text-xs border ${getClasses()}`}>{label}</span>;
 }
 
 function sleep(ms: number) {
@@ -319,8 +329,20 @@ function App() {
   const currentFetchDocIdRef = useRef<string | null>(null)
   const askInputRef = useRef<HTMLInputElement>(null)
 
-  // Apply saved theme on mount
-  useEffect(() => { try { applyTheme(loadTheme()); } catch { } }, [])
+  // Models integration
+  const { models, loading: modelsLoading } = useModels();
+  const [activeModel, setActiveModel] = useState<string | null>(null);
+
+  // Set default model if available and none selected
+  useEffect(() => {
+    if (!activeModel && models.length > 0) {
+      // Prefer Qwen or Llama, otherwise first
+      const preferred = models.find(m => m.name.toLowerCase().includes('qwen') || m.name.toLowerCase().includes('llama'));
+      setActiveModel(preferred ? preferred.name : models[0].name);
+    }
+  }, [models, activeModel]);
+
+
 
   // Log build stamp on app start
   useEffect(() => {
@@ -795,7 +817,7 @@ function App() {
       // Determine documentId based on scope
       const documentId = askScope === 'doc' ? getActiveDocument(true)?.document_id : undefined; // strictMode = true for doc scope
       const ingestedAfter = getTimeFilterISO(timeFilter);
-      const j: AskResp = await askQuestion(askQ, 6, documentId, answerMode, ingestedAfter, undefined);
+      const j: AskResp = await askQuestion(askQ, 6, documentId, answerMode, ingestedAfter, undefined, activeModel || undefined);
       if (j.ok === false) {
         const errorMsg = j.error === "rate_limited"
           ? "Rate limited — try again in a few seconds."
@@ -1539,1271 +1561,1151 @@ These toggles make it easy to test different features without changing code.`
   }
 
   return (
-    <div style={{ fontFamily: 'ui-sans-serif', padding: 24, maxWidth: 720, margin: '0 auto', background: 'var(--bg)', color: 'var(--fg)', minHeight: '100vh' }}>
-      <h1 style={{ fontSize: 24, marginBottom: 8 }}>jsonify2ai — Status <HealthChip /><LLMChip status={s} /></h1>
-      <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 8, fontStyle: 'italic' }}>
-        Upload files → JSONL chunks → semantic search → exports
-      </div>
-
-      {/* 3-Step How it Works Strip */}
-      <div style={{ marginBottom: 16, display: 'flex', gap: 16, flexWrap: 'wrap', padding: 12, background: '#f9fafb', borderRadius: 8, border: '1px solid #e5e7eb' }}>
-        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: '#1976d2' }}>1) Upload</div>
-          <div style={{ fontSize: 12, color: '#6b7280' }}>Drop files anywhere or use the optional hot folder.</div>
+    <div className="App min-h-screen bg-white dark:bg-black text-slate-900 dark:text-gray-100 transition-colors duration-300" style={{ fontFamily: 'ui-sans-serif', padding: 24, margin: '0 auto' }}>
+      <div className="max-w-3xl mx-auto">
+        <div className="flex justify-between items-center mb-8">
+          <h1 style={{ fontSize: 24, marginBottom: 8 }}>jsonify2ai <HealthChip /><LLMChip status={s} /></h1>
+          <ThemeToggle />
         </div>
-        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: '#1976d2' }}>2) Ask</div>
-          <div style={{ fontSize: 12, color: '#6b7280' }}>Use This document for precise answers.</div>
+        <div className="text-sm mb-2 italic text-gray-500 dark:text-gray-400">
+          Upload files → JSONL chunks → semantic search → exports
         </div>
-        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: '#1976d2' }}>3) Export</div>
-          <div style={{ fontSize: 12, color: '#6b7280' }}>Download JSONL or a ZIP snapshot.</div>
+
+        {/* 3-Step How it Works Strip */}
+        {/* 3-Step How it Works Strip */}
+        <div className="mb-4 flex gap-4 flex-wrap p-3 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 text-gray-900 dark:text-gray-100">
+          <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+            <div className="text-sm font-semibold mb-1 text-blue-600 dark:text-blue-400">1) Upload</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">Drop files anywhere or use the optional hot folder.</div>
+          </div>
+          <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+            <div className="text-sm font-semibold mb-1 text-blue-600 dark:text-blue-400">2) Ask</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">Use This document for precise answers.</div>
+          </div>
+          <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+            <div className="text-sm font-semibold mb-1 text-blue-600 dark:text-blue-400">3) Export</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">Download JSONL or a ZIP snapshot.</div>
+          </div>
         </div>
-      </div>
 
-      {/* Start Here Button */}
-      <div style={{ marginBottom: 16 }}>
-        <button
-          onClick={handleStartHere}
-          disabled={demoLoading || uploadBusy}
-          style={{
-            fontSize: 14,
-            fontWeight: 600,
-            padding: '12px 24px',
-            borderRadius: 8,
-            border: 'none',
-            background: demoLoading || uploadBusy ? '#9ca3af' : '#1976d2',
-            color: '#fff',
-            cursor: demoLoading || uploadBusy ? 'not-allowed' : 'pointer',
-            boxShadow: demoLoading || uploadBusy ? 'none' : '0 2px 4px rgba(0,0,0,0.1)',
-            transition: 'all 0.2s'
-          }}
-          onMouseEnter={(e) => {
-            if (!demoLoading && !uploadBusy) {
-              e.currentTarget.style.background = '#1565c0';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!demoLoading && !uploadBusy) {
-              e.currentTarget.style.background = '#1976d2';
-            }
-          }}
-        >
-          {demoLoading ? 'Loading demo…' : 'Start here'}
-        </button>
-      </div>
+        {/* Start Here Button */}
+        <div style={{ marginBottom: 16 }}>
+          <button
+            onClick={handleStartHere}
+            disabled={demoLoading || uploadBusy}
+            className={`px-6 py-3 rounded-lg font-semibold text-sm transition-all shadow-sm ${demoLoading || uploadBusy
+              ? 'bg-gray-400 cursor-not-allowed text-white'
+              : 'bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg'
+              }`}
+          >
+            {demoLoading ? 'Loading demo…' : 'Start here'}
+          </button>
+        </div>
 
-      {/* What is this? Collapsible */}
-      <div style={{ marginBottom: 16 }}>
-        <button
-          onClick={() => setShowWhatIsThis(!showWhatIsThis)}
-          style={{
-            fontSize: 13,
-            fontWeight: 500,
-            padding: '8px 12px',
-            borderRadius: 6,
-            border: '1px solid #e5e7eb',
-            background: '#fff',
-            color: '#374151',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            width: '100%',
-            textAlign: 'left'
-          }}
-        >
-          <span style={{ transform: showWhatIsThis ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>▶</span>
-          <span>What is this?</span>
-        </button>
-        {showWhatIsThis && (
-          <div style={{ marginTop: 8, padding: 12, background: '#f9fafb', borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13, lineHeight: 1.6 }}>
-            <ul style={{ margin: 0, paddingLeft: 20, color: '#374151' }}>
-              <li style={{ marginBottom: 6 }}>Local-first indexing into JSONL chunks</li>
-              <li style={{ marginBottom: 6 }}>Vectors stored in Qdrant for semantic search</li>
-              <li style={{ marginBottom: 6 }}>Optional local LLM synthesis (Ollama)</li>
-              <li style={{ marginBottom: 8 }}>Export JSON / ZIP for portability</li>
-            </ul>
-            <div style={{ marginTop: 8, padding: 8, background: '#fef3c7', borderRadius: 4, fontSize: 12, color: '#92400e' }}>
-              <strong>Privacy note:</strong> data stays on your machine unless you expose ports publicly.
+        {/* What is this? Collapsible */}
+        <div style={{ marginBottom: 16 }}>
+          <button
+            onClick={() => setShowWhatIsThis(!showWhatIsThis)}
+            className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-md border text-sm font-medium transition-colors bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+          >
+            <span style={{ transform: showWhatIsThis ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>▶</span>
+            <span>What is this?</span>
+          </button>
+          {showWhatIsThis && (
+            <div className="mt-2 p-3 bg-gray-50 dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-800 text-sm leading-relaxed">
+              <ul className="m-0 pl-5 text-gray-700 dark:text-gray-300">
+                <li style={{ marginBottom: 6 }}>Local-first indexing into JSONL chunks</li>
+                <li style={{ marginBottom: 6 }}>Vectors stored in Qdrant for semantic search</li>
+                <li style={{ marginBottom: 6 }}>Optional local LLM synthesis (Ollama)</li>
+                <li style={{ marginBottom: 8 }}>Export JSON / ZIP for portability</li>
+              </ul>
+              <div className="mt-2 p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded border border-yellow-200 dark:border-yellow-900/50 text-xs text-yellow-800 dark:text-yellow-200">
+                <strong>Privacy note:</strong> data stays on your machine unless you expose ports publicly.
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 16, fontFamily: 'monospace' }}>
+          Build: {BUILD_STAMP}
+        </div>
+        <details className="mb-8 p-4 bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800">
+          <summary className="cursor-pointer font-medium text-gray-600 dark:text-gray-300 select-none hover:text-gray-900 dark:hover:text-white transition-colors">System Status & Ingestion Activity</summary>
+          <div className="mt-4 space-y-6">
+
+            {/* Status Counts */}
+            {!s && <div>Loading…</div>}
+            {s && (
+              <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>
+                <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700">
+                  <div style={{ opacity: .6, marginBottom: 6 }} className="dark:text-gray-400">Text Chunks</div>
+                  <div style={{ fontSize: 28, fontWeight: 700 }}>{s.counts.chunks}</div>
+                </div>
+                <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700">
+                  <div style={{ opacity: .6, marginBottom: 6 }} className="dark:text-gray-400">Images</div>
+                  <div style={{ fontSize: 28, fontWeight: 700 }}>{s.counts.images}</div>
+                </div>
+              </div>
+            )}
+
+            {/* Telemetry Chips */}
+            {s && (s.uptime_s !== undefined || s.ingest_total !== undefined || s.ingest_failed !== undefined || s.watcher_triggers_total !== undefined || s.export_total !== undefined || s.ask_synth_total !== undefined) && (
+              <div>
+                <div style={{ fontSize: 14, opacity: .6, marginBottom: 8 }} className="dark:text-gray-400">Telemetry</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {s.uptime_s !== undefined && (
+                    <div style={{ fontSize: 12, background: '#f0f9ff', color: '#0369a1', padding: '4px 8px', borderRadius: 12, border: '1px solid #bae6fd' }}>
+                      Uptime: {Math.floor(s.uptime_s / 3600)}h {Math.floor((s.uptime_s % 3600) / 60)}m
+                    </div>
+                  )}
+                  {s.ingest_total !== undefined && (
+                    <div style={{ fontSize: 12, background: '#f0fdf4', color: '#166534', padding: '4px 8px', borderRadius: 12, border: '1px solid #bbf7d0' }}>
+                      Ingested: {s.ingest_total}
+                    </div>
+                  )}
+                  {s.ingest_failed !== undefined && s.ingest_failed > 0 && (
+                    <div style={{ fontSize: 12, background: '#fef2f2', color: '#dc2626', padding: '4px 8px', borderRadius: 12, border: '1px solid #fecaca' }}>
+                      Failed: {s.ingest_failed}
+                    </div>
+                  )}
+                  {s.watcher_triggers_total !== undefined && (
+                    <div style={{ fontSize: 12, background: '#fefce8', color: '#a16207', padding: '4px 8px', borderRadius: 12, border: '1px solid #fde68a' }}>
+                      Watcher triggers: {s.watcher_triggers_total}
+                    </div>
+                  )}
+                  {s.export_total !== undefined && (
+                    <div style={{ fontSize: 12, background: '#f3e8ff', color: '#7c3aed', padding: '4px 8px', borderRadius: 12, border: '1px solid #d8b4fe' }}>
+                      Exported: {s.export_total}
+                    </div>
+                  )}
+                  {s.ask_synth_total !== undefined && (
+                    <div style={{ fontSize: 12, background: '#fef3c7', color: '#92400e', padding: '4px 8px', borderRadius: 12, border: '1px solid #fde68a' }}>
+                      Ask Synth: {s.ask_synth_total}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Ingestion Activity Feed */}
+            <div className="mt-4">
+              <h3 className="text-sm font-semibold mb-2 opacity-70">Activity Log</h3>
+              <IngestionActivity
+                activityFeed={activityFeed}
+                docs={docs}
+                askInputRef={askInputRef}
+                onClearActivity={clearActivityFeed}
+                onSetActiveDoc={setActiveDocId}
+                saveActiveDocId={saveActiveDocId}
+                setAskScope={setAskScope}
+                saveAskScope={saveAskScope}
+                showToast={showToast}
+              />
+            </div>
+
+          </div>
+        </details>
+
+        {/* Build Info */}
+        <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 16, fontFamily: 'monospace' }}>
+          Build: {BUILD_STAMP}
+        </div>
+
+        {/* Recent Documents Panel */}
+        {recentDocs.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 14, opacity: .6, marginBottom: 8 }}>Recent Documents</div>
+            <div style={{ display: 'grid', gap: 8 }}>
+              {recentDocs.map((doc, i) => (
+                <div key={i} className="p-3 border border-gray-200 dark:border-gray-800 rounded-lg bg-gray-50 dark:bg-gray-900">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <code style={{ fontSize: 11, fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
+                      {doc.document_id?.substring(0, 8)}...
+                    </code>
+                    {doc.path && (
+                      <span style={{ fontSize: 12, opacity: .7, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {doc.path.split('/').pop()}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span style={{ fontSize: 11, opacity: .6 }}>
+                      {doc.kind === 'image' ? 'images' : 'chunks'}
+                    </span>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button
+                        onClick={() => {
+                          if (doc.document_id) {
+                            copyToClipboard(doc.document_id)
+                            showToast('Document ID copied')
+                          }
+                        }}
+                        style={{ fontSize: 11, color: '#1976d2', textDecoration: 'underline', padding: '2px 4px' }}
+                      >
+                        Copy ID
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!doc.document_id) return;
+                          try {
+                            await exportJson(doc.document_id, doc.kind === 'image' ? 'image' : 'text');
+                          } catch (err: any) {
+                            showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+                          }
+                        }}
+                        style={{ fontSize: 11, color: '#1976d2', textDecoration: 'underline', padding: '2px 4px' }}
+                      >
+                        Export JSON ({doc.kind === 'image' ? 'images.jsonl' : 'chunks.jsonl'})
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!doc.document_id) return;
+                          try {
+                            await exportZip(doc.document_id, doc.kind === 'image' ? 'image' : 'text');
+                          } catch (err: any) {
+                            showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+                          }
+                        }}
+                        style={{ fontSize: 11, color: '#1976d2', textDecoration: 'underline', padding: '2px 4px' }}
+                      >
+                        Export ZIP (manifest + JSON)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
-      </div>
-
-      <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 16, fontFamily: 'monospace' }}>
-        Build: {BUILD_STAMP}
-      </div>
-      {!s && <div>Loading…</div>}
-      {s && (
-        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>
-          <div style={{ padding: 16, borderRadius: 12, boxShadow: '0 1px 4px rgba(0,0,0,.08)' }}>
-            <div style={{ opacity: .6, marginBottom: 6 }}>Text Chunks</div>
-            <div style={{ fontSize: 28, fontWeight: 700 }}>{s.counts.chunks}</div>
-          </div>
-          <div style={{ padding: 16, borderRadius: 12, boxShadow: '0 1px 4px rgba(0,0,0,.08)' }}>
-            <div style={{ opacity: .6, marginBottom: 6 }}>Images</div>
-            <div style={{ fontSize: 28, fontWeight: 700 }}>{s.counts.images}</div>
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
+            Upload from anywhere (recommended).
           </div>
         </div>
-      )}
-
-      {/* Theme controls */}
-      <div style={{ marginTop: 10 }}>
-        <ThemeControls />
-      </div>
-
-      {/* What you're seeing info panel */}
-      <div style={{ marginTop: 16, padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#f9fafb' }}>
-        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>What you're seeing</div>
-        <ul style={{ margin: 0, paddingLeft: 20, fontSize: 12, lineHeight: 1.6, color: '#374151' }}>
-          <li style={{ marginBottom: 4 }}>Uploads are normalized into a unified JSONL schema (chunks).</li>
-          <li style={{ marginBottom: 4 }}>Chunks are embedded (768-dim vectors) and stored in Qdrant for semantic search.</li>
-          <li style={{ marginBottom: 4 }}>Search + Ask read from the same Qdrant collection.</li>
-          <li style={{ marginBottom: 4 }}>The JSON preview and export buttons show you exactly what's in the index.</li>
-          <li style={{ marginBottom: 4 }}>If LLM is enabled, 'Answer' is synthesized locally using your chunks as context.</li>
-          {s && s.counts && (
-            <li style={{ marginBottom: 4, marginTop: 8, fontWeight: 500 }}>
-              Currently indexed: {s.counts.total || (s.counts.chunks + s.counts.images)} chunks
-            </li>
+        <div className="mb-4 flex items-center gap-3">
+          <input
+            type="file"
+            onChange={onUploadChange}
+            disabled={uploadBusy || demoLoading}
+            className="block w-full text-sm text-gray-500 dark:text-gray-400
+              file:mr-4 file:py-2 file:px-4
+              file:rounded-full file:border-0
+              file:text-sm file:font-semibold
+              file:bg-blue-50 file:text-blue-700
+              dark:file:bg-blue-900/30 dark:file:text-blue-300
+              hover:file:bg-blue-100 dark:hover:file:bg-blue-900/50
+              cursor-pointer file:cursor-pointer"
+          />
+          {uploadBusy && <span className="text-sm opacity-70">Uploading…</span>}
+          {demoLoading && <span className="text-sm opacity-70">Loading demo data…</span>}
+          {toast && (
+            <span
+              className="text-sm"
+              style={{
+                color: toast.includes('failed') || toast.includes('error') || toast.includes('Error') ? '#dc2626' : '#16a34a'
+              }}
+            >
+              {toast}
+            </span>
           )}
-        </ul>
-      </div>
+          <button
+            onClick={() => loadDemoData()}
+            disabled={uploadBusy || demoLoading}
+            title="Inject a few tiny example docs."
+            className={`px-3 py-2 rounded-md border text-xs transition-colors ${demoLoading
+              ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 border-gray-200 dark:border-gray-700 cursor-not-allowed'
+              : 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+              } ${uploadBusy || demoLoading ? 'opacity-60' : ''}`}
+          >
+            Load demo data
+          </button>
+        </div>
 
-      {/* Telemetry Chips */}
-      {s && (s.uptime_s !== undefined || s.ingest_total !== undefined || s.ingest_failed !== undefined || s.watcher_triggers_total !== undefined || s.export_total !== undefined || s.ask_synth_total !== undefined) && (
-        <div style={{ marginTop: 16 }}>
-          <div style={{ fontSize: 14, opacity: .6, marginBottom: 8 }}>Telemetry</div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {s.uptime_s !== undefined && (
-              <div style={{ fontSize: 12, background: '#f0f9ff', color: '#0369a1', padding: '4px 8px', borderRadius: 12, border: '1px solid #bae6fd' }}>
-                Uptime: {Math.floor(s.uptime_s / 3600)}h {Math.floor((s.uptime_s % 3600) / 60)}m
+        {/* Upload Results Panel */}
+        {uploadResult && (
+          <div className="p-4 mb-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, opacity: 0.7 }}>
+              Upload results
+            </div>
+            <div style={{ fontSize: 14, marginBottom: 8 }}>
+              <strong>{uploadResult.filename}</strong>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <span style={{
+                padding: '4px 8px',
+                borderRadius: 6,
+                fontSize: 12,
+                fontWeight: 500,
+                background:
+                  uploadResult.status === 'processed' ? '#c6f6d5' :
+                    uploadResult.status === 'uploading' ? '#dbeafe' :
+                      uploadResult.status === 'indexing' ? '#fed7aa' :
+                        uploadResult.status === 'skipped' ? '#fef3c7' :
+                          '#fed7d7',
+                color:
+                  uploadResult.status === 'processed' ? '#166534' :
+                    uploadResult.status === 'uploading' ? '#1e40af' :
+                      uploadResult.status === 'indexing' ? '#92400e' :
+                        uploadResult.status === 'skipped' ? '#78350f' :
+                          '#991b1b'
+              }}>
+                {uploadResult.status === 'processed' ? 'Processed' :
+                  uploadResult.status === 'uploading' ? 'Uploading…' :
+                    uploadResult.status === 'indexing' ? 'Indexing…' :
+                      uploadResult.status === 'skipped' ? 'Skipped' :
+                        'Error'}
+              </span>
+              {uploadResult.chunks !== undefined && uploadResult.status === 'processed' && (
+                <span style={{ fontSize: 12, opacity: 0.7 }}>
+                  {uploadResult.chunks} {uploadResult.chunks === 1 ? 'chunk' : 'chunks'}
+                </span>
+              )}
+            </div>
+            {uploadResult.skip_reason && (
+              <div style={{ fontSize: 12, marginTop: 8, color: '#92400e' }}>
+                {uploadResult.skip_reason === 'unsupported_extension' && 'Unsupported file type. Try .txt/.md/.pdf/.csv/.json'}
+                {uploadResult.skip_reason === 'empty_file' && 'File is empty'}
+                {uploadResult.skip_reason === 'extraction_failed' && `Extraction failed: ${uploadResult.error || 'Check worker logs'}`}
+                {uploadResult.skip_reason === 'processing_failed' && `Processing failed: ${uploadResult.error || 'Check worker logs'}`}
+                {!['unsupported_extension', 'empty_file', 'extraction_failed', 'processing_failed'].includes(uploadResult.skip_reason) &&
+                  `Skipped: ${uploadResult.error || uploadResult.skip_reason}`}
               </div>
             )}
-            {s.ingest_total !== undefined && (
-              <div style={{ fontSize: 12, background: '#f0fdf4', color: '#166534', padding: '4px 8px', borderRadius: 12, border: '1px solid #bbf7d0' }}>
-                Ingested: {s.ingest_total}
+            {uploadResult.error && uploadResult.status === 'error' && (
+              <div style={{ fontSize: 12, marginTop: 8, color: '#dc2626' }}>
+                Upload failed: {uploadResult.error}
               </div>
             )}
-            {s.ingest_failed !== undefined && s.ingest_failed > 0 && (
-              <div style={{ fontSize: 12, background: '#fef2f2', color: '#dc2626', padding: '4px 8px', borderRadius: 12, border: '1px solid #fecaca' }}>
-                Failed: {s.ingest_failed}
-              </div>
-            )}
-            {s.watcher_triggers_total !== undefined && (
-              <div style={{ fontSize: 12, background: '#fefce8', color: '#a16207', padding: '4px 8px', borderRadius: 12, border: '1px solid #fde68a' }}>
-                Watcher triggers: {s.watcher_triggers_total}
-              </div>
-            )}
-            {s.export_total !== undefined && (
-              <div style={{ fontSize: 12, background: '#f3e8ff', color: '#7c3aed', padding: '4px 8px', borderRadius: 12, border: '1px solid #d8b4fe' }}>
-                Exported: {s.export_total}
-              </div>
-            )}
-            {s.ask_synth_total !== undefined && (
-              <div style={{ fontSize: 12, background: '#fef3c7', color: '#92400e', padding: '4px 8px', borderRadius: 12, border: '1px solid #fde68a' }}>
-                Ask Synth: {s.ask_synth_total}
+            {uploadResult.status === 'indexing' && (
+              <div style={{ fontSize: 12, marginTop: 8, color: '#92400e', fontStyle: 'italic' }}>
+                Indexing… try Refresh documents
               </div>
             )}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Recent Documents Panel */}
-      {recentDocs.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <div style={{ fontSize: 14, opacity: .6, marginBottom: 8 }}>Recent Documents</div>
-          <div style={{ display: 'grid', gap: 8 }}>
-            {recentDocs.map((doc, i) => (
-              <div key={i} style={{ padding: 12, border: '1px solid #eee', borderRadius: 8, background: '#fafafa' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  <code style={{ fontSize: 11, fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
-                    {doc.document_id?.substring(0, 8)}...
-                  </code>
-                  {doc.path && (
-                    <span style={{ fontSize: 12, opacity: .7, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {doc.path.split('/').pop()}
-                    </span>
+
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          {(() => {
+            const previewedDoc = previewDocId ? docs.find(d => d.document_id === previewDocId) : null;
+            const isEnabled = previewedDoc !== null;
+            const kind = previewedDoc ? (previewedDoc.kinds.includes('image') ? 'image' : 'text') : 'text';
+
+            return (
+              <>
+                <button
+                  className="text-xs underline opacity-70 hover:opacity-100"
+                  disabled={!isEnabled}
+                  title={isEnabled ? undefined : "Preview a document first"}
+                  onClick={async () => {
+                    if (!previewedDoc) return;
+                    try {
+                      await exportJson(previewedDoc.document_id, kind);
+                    } catch (err: any) {
+                      showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+                    }
+                  }}
+                  style={{
+                    opacity: isEnabled ? 0.7 : 0.3,
+                    cursor: isEnabled ? 'pointer' : 'not-allowed'
+                  }}
+                >
+                  Download JSON
+                </button>
+                <button
+                  className="text-xs underline opacity-70 hover:opacity-100"
+                  disabled={!isEnabled}
+                  title={isEnabled ? undefined : "Preview a document first"}
+                  onClick={async () => {
+                    if (!previewedDoc) return;
+                    try {
+                      await exportZip(previewedDoc.document_id, kind);
+                    } catch (err: any) {
+                      showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
+                    }
+                  }}
+                  style={{
+                    opacity: isEnabled ? 0.7 : 0.3,
+                    cursor: isEnabled ? 'pointer' : 'not-allowed'
+                  }}
+                >
+                  Download ZIP
+                </button>
+              </>
+            );
+          })()}
+        </div>
+        {/* Dropzone/Watcher Help */}
+        <div style={{ marginTop: 12, marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
+            Dropzone is optional. Watcher only monitors the dropzone folder for new files.
+          </div>
+          <button
+            onClick={() => setShowDropzoneHelp(!showDropzoneHelp)}
+            className="text-xs px-2 py-1 rounded border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-blue-600 dark:text-blue-400 cursor-pointer hover:underline"
+          >
+            Where is dropzone?
+          </button>
+          {showDropzoneHelp && (
+            <div className="mt-2 p-3 rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
+              <div className="text-xs font-semibold mb-2 text-gray-900 dark:text-gray-100">
+                Optional hot folder for auto-ingest
+              </div>
+              <div className="text-xs mb-1.5 text-gray-700 dark:text-gray-300">
+                <strong>Inside Docker:</strong> <code className="bg-gray-100 dark:bg-black px-1 py-0.5 rounded text-gray-800 dark:text-gray-200">/data/dropzone</code>
+              </div>
+              <div className="text-xs mb-2 text-gray-700 dark:text-gray-300">
+                <strong>On your machine:</strong> Host path is configured in docker-compose.yml under the worker volume for /data/dropzone.
+              </div>
+              <button
+                onClick={() => {
+                  const text = `/data/dropzone\n(Host path configured in docker-compose.yml)`;
+                  copyToClipboard(text);
+                  showToast('Dropzone path copied');
+                }}
+                className="px-2 py-1 rounded border text-xs bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-blue-600 dark:text-blue-400 cursor-pointer"
+              >
+                Copy dropzone path
+              </button>
+            </div>
+          )}
+        </div>
+        <div style={{ fontSize: 11, opacity: 0.6, marginTop: 8 }}>
+          Works best with: .md, .txt, .pdf, .csv, .json. Other formats may be skipped by the worker.
+        </div>
+        <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4 }}>
+          Optional: You can also drop files into data/dropzone/ on disk; the watcher will ingest them automatically.
+        </div>
+        <LLMOnboardingPanel
+          status={s}
+          onStatusRefresh={loadStatus}
+        />
+        <AskPanel
+          askScope={askScope}
+          answerMode={answerMode}
+          askQ={askQ}
+          askLoading={askLoading}
+          activeDocId={activeDocId}
+          docs={docs}
+          status={s}
+          askInputRef={askInputRef}
+          onSetAskScope={setAskScope}
+          saveAskScope={saveAskScope}
+          onSetAnswerMode={setAnswerMode}
+          saveAnswerMode={saveAnswerMode}
+          onSetAskQ={setAskQ}
+          onAsk={handleAsk}
+          onClearActive={() => {
+            setActiveDocId(null);
+            saveActiveDocId(null);
+            setAskScope('all');
+            saveAskScope('all');
+          }}
+          onPreviewDoc={async (docId: string, collection: string) => {
+            currentFetchDocIdRef.current = docId;
+            setPreviewDocId(docId);
+            setActiveDocId(docId);
+            saveActiveDocId(docId);
+            setAskScope('doc');
+            saveAskScope('doc');
+            setPreviewLoading(true);
+            setPreviewError(null);
+            setPreviewLines(null);
+            setPreviewTotal(null);
+            try {
+              const result = await fetchJsonPreview(docId, collection, 100);
+              if (currentFetchDocIdRef.current === docId) {
+                setPreviewLines(result.lines);
+                if (result.total !== undefined) {
+                  setPreviewTotal(result.total);
+                }
+              }
+            } catch (err: any) {
+              if (currentFetchDocIdRef.current === docId) {
+                setPreviewError(err?.message || 'Failed to load JSON preview');
+              }
+            } finally {
+              if (currentFetchDocIdRef.current === docId) {
+                setPreviewLoading(false);
+              }
+            }
+          }}
+          exportJson={exportJson}
+          exportZip={exportZip}
+          copyToClipboard={copyToClipboard}
+          showToast={showToast}
+          getActiveDocument={getActiveDocument}
+          collectionForDoc={collectionForDoc}
+          generateSuggestionChips={generateSuggestionChips}
+          models={models}
+          activeModel={activeModel}
+          onSelectModel={setActiveModel}
+          modelsLoading={modelsLoading}
+        />
+        {askScope === 'all' && (
+          <div style={{ marginTop: 16, marginBottom: 16, fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>
+            Global mode is for finding relevant documents.
+          </div>
+        )}
+        <AssistantOutput
+          result={quickActionResult}
+          status={s}
+          loading={quickActionsLoading !== null}
+          error={quickActionError}
+          actionName={quickActionName || undefined}
+          showToast={showToast}
+          scope={askScope}
+          activeDocFilename={(() => {
+            if (askScope === 'doc') {
+              const activeDoc = getActiveDocument(true); // strictMode = true for doc scope
+              if (activeDoc && activeDoc.paths[0]) {
+                return activeDoc.paths[0].split('/').pop() || activeDoc.paths[0];
+              }
+            }
+            return undefined;
+          })()}
+          onUseDoc={(documentId, llmReachable) => {
+            setActiveDocId(documentId);
+            saveActiveDocId(documentId);
+            setAskScope('doc');
+            saveAskScope('doc');
+            if (llmReachable) {
+              setAnswerMode('synthesize');
+              saveAnswerMode('synthesize', 'doc');
+            }
+          }}
+          documents={docs}
+        />
+        {/* Existing Ask results (for backward compatibility) */}
+        {askLoading && (
+          <div style={{ marginTop: 12, padding: 12, color: '#666', fontSize: 14 }}>
+            Searching your data…
+          </div>
+        )}
+        {askError && (
+          <div style={{ marginTop: 12, padding: 12, border: '1px solid #fecaca', borderRadius: 8, background: '#fef2f2', color: '#dc2626', fontSize: 14 }}>
+            {askError}
+          </div>
+        )}
+        {!askLoading && !askError && !ans && (
+          <div style={{ marginTop: 12, padding: 12, color: '#999', fontSize: 13, fontStyle: 'italic' }}>
+            Run a question to see answers and sources here.
+          </div>
+        )}
+        {!askLoading && ans && (
+          <div style={{ marginTop: 12, padding: 12, border: '1px solid #eee', borderRadius: 10 }}>
+            {(ans.final && ans.final.trim()) || (ans.answer && ans.answer.trim()) ? (
+              <div style={{ marginBottom: 16, padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fafafa' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <div style={{ fontWeight: 600, fontSize: 16 }}>Answer</div>
+                  {s && s.llm?.provider === "ollama" && s.llm?.reachable === true ? (
+                    <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 999, background: '#eef2ff', color: '#3730a3' }}>local (ollama)</span>
+                  ) : (
+                    <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 999, background: '#f3f4f6', color: '#6b7280' }}>Top matches below</span>
                   )}
                 </div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <span style={{ fontSize: 11, opacity: .6 }}>
-                    {doc.kind === 'image' ? 'images' : 'chunks'}
-                  </span>
-                  <div style={{ display: 'flex', gap: 4 }}>
+                <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: 14 }}>
+                  {ans.final && ans.final.trim() ? ans.final : (ans.answer || '')}
+                </div>
+              </div>
+            ) : null}
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 12 }}>
+                {ans.mode === 'retrieve' ? 'Retrieved sources' : 'Sources'}
+              </div>
+              {(() => {
+                const sources = ans.sources || ans.answers || [];
+                if (sources.length === 0) {
+                  return (
+                    <div style={{ color: '#666', fontSize: 14, padding: 12, background: '#f9fafb', borderRadius: 6 }}>
+                      No matching snippets yet. Try a different query or upload more files.
+                    </div>
+                  );
+                }
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {sources.map((h: any, i: number) => {
+                      // Use standardized Source shape: id, document_id, text, meta, score, path, kind, idx
+                      const sourceId = h.id || `source-${i}`;
+                      const docId = h.document_id || '';
+                      const title = h.meta?.title || (h.path ? h.path.split('/').pop() || h.path : docId.substring(0, 12) || `Source ${i + 1}`);
+                      const logicalPath = h.meta?.logical_path;
+                      const path = h.path;
+                      const kind = h.kind;
+                      const snippet = h.text || h.caption || '';
+                      const score = h.score !== undefined ? h.score : null;
+                      const chunkIdx = h.idx !== undefined ? h.idx : null;
+
+                      return (
+                        <div key={i} style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 500, fontSize: 13 }}>{title}</span>
+                            {kind && (
+                              <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: '#e3f2fd', color: '#1976d2', fontWeight: 500 }}>
+                                {kind}
+                              </span>
+                            )}
+                            {docId && (
+                              <code style={{ fontSize: 11, fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
+                                {docId.substring(0, 12)}...
+                              </code>
+                            )}
+                            {score !== null && (
+                              <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: '#f0f9ff', color: '#0369a1' }}>
+                                score: {score.toFixed(2)}
+                              </span>
+                            )}
+                            <button
+                              onClick={() => {
+                                copyToClipboard(sourceId);
+                                showToast('Chunk ID copied');
+                              }}
+                              style={{
+                                fontSize: 10,
+                                padding: '2px 6px',
+                                borderRadius: 4,
+                                border: '1px solid #ddd',
+                                background: '#fff',
+                                color: '#666',
+                                cursor: 'pointer',
+                                marginLeft: 'auto'
+                              }}
+                              title={`Copy chunk ID: ${sourceId}`}
+                            >
+                              Copy ID
+                            </button>
+                          </div>
+                          {(logicalPath || path) && (
+                            <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6 }}>
+                              {logicalPath || path}
+                            </div>
+                          )}
+                          {chunkIdx !== null && (
+                            <div style={{ fontSize: 10, color: '#9ca3af', marginBottom: 6 }}>
+                              Chunk index: {chunkIdx}
+                            </div>
+                          )}
+                          {snippet && (
+                            <div style={{
+                              fontSize: 13,
+                              lineHeight: 1.5,
+                              color: '#374151',
+                              fontFamily: 'ui-monospace, monospace',
+                              background: '#f9fafb',
+                              padding: 8,
+                              borderRadius: 4,
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word'
+                            }}>
+                              {snippet}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+        <div style={{ marginTop: 24, display: 'flex', gap: 8 }}>
+          <input
+            value={q}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQ(e.target.value)}
+            placeholder="search…"
+            className="flex-1 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <select
+            value={kind}
+            onChange={e => setKind(e.target.value as any)}
+            className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="text">text</option>
+            <option value="pdf">pdf</option>
+            <option value="image">image</option>
+            <option value="audio">audio</option>
+          </select>
+          <button
+            onClick={handleSearch}
+            disabled={searchLoading}
+            className={`px-4 py-3 rounded-lg border border-gray-200 dark:border-gray-700 font-medium transition-colors ${searchLoading
+              ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
+              : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700'
+              }`}
+          >
+            {searchLoading ? 'Searching...' : 'Search'}
+          </button>
+        </div>
+        {res.length > 0 && (
+          <div style={{ marginTop: 16, display: 'grid', gap: 8 }}>
+            {res.map((h, i) => (
+              <div key={i} className="mb-2 p-2 rounded border">
+                <div className="text-sm opacity-70">score: {h.score?.toFixed?.(3) ?? "-"}</div>
+                <div className="text-xs">
+                  <span className="inline-block px-2 py-0.5 bg-gray-100 rounded mr-2">{h.path}</span>
+                  <span className="inline-block px-2 py-0.5 bg-gray-100 rounded mr-2">idx: {h.idx}</span>
+                </div>
+                <div className="text-xs opacity-60">
+                  {h.kind === "image" ? "images" : "chunks"} • idx: {h.idx}
+                </div>
+                <div className="mt-1">{h.caption || h.text || '(no text)'}</div>
+                {h.document_id && (
+                  <div className="mt-1">
                     <button
-                      onClick={() => {
-                        if (doc.document_id) {
-                          copyToClipboard(doc.document_id)
-                          showToast('Document ID copied')
-                        }
-                      }}
-                      style={{ fontSize: 11, color: '#1976d2', textDecoration: 'underline', padding: '2px 4px' }}
-                    >
-                      Copy ID
-                    </button>
-                    <button
+                      className="text-xs underline opacity-70 hover:opacity-100"
                       onClick={async () => {
-                        if (!doc.document_id) return;
+                        if (!h.document_id) return;
                         try {
-                          await exportJson(doc.document_id, doc.kind === 'image' ? 'image' : 'text');
+                          await exportJson(h.document_id, h.kind === 'image' ? 'image' : 'text');
                         } catch (err: any) {
                           showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
                         }
                       }}
-                      style={{ fontSize: 11, color: '#1976d2', textDecoration: 'underline', padding: '2px 4px' }}
                     >
-                      Export JSON ({doc.kind === 'image' ? 'images.jsonl' : 'chunks.jsonl'})
-                    </button>
-                    <button
-                      onClick={async () => {
-                        if (!doc.document_id) return;
-                        try {
-                          await exportZip(doc.document_id, doc.kind === 'image' ? 'image' : 'text');
-                        } catch (err: any) {
-                          showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
-                        }
-                      }}
-                      style={{ fontSize: 11, color: '#1976d2', textDecoration: 'underline', padding: '2px 4px' }}
-                    >
-                      Export ZIP (manifest + JSON)
+                      Export JSON ({h.kind === 'image' ? 'images.jsonl' : 'chunks.jsonl'})
                     </button>
                   </div>
-                </div>
+                )}
               </div>
             ))}
           </div>
-        </div>
-      )}
-      <div style={{ marginBottom: 8 }}>
-        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
-          Upload from anywhere (recommended).
-        </div>
-      </div>
-      <div className="mb-4 flex items-center gap-3">
-        <input type="file" onChange={onUploadChange} disabled={uploadBusy || demoLoading} />
-        {uploadBusy && <span className="text-sm opacity-70">Uploading…</span>}
-        {demoLoading && <span className="text-sm opacity-70">Loading demo data…</span>}
-        {toast && (
-          <span
-            className="text-sm"
-            style={{
-              color: toast.includes('failed') || toast.includes('error') || toast.includes('Error') ? '#dc2626' : '#16a34a'
-            }}
-          >
-            {toast}
-          </span>
         )}
-        <button
-          onClick={() => loadDemoData()}
-          disabled={uploadBusy || demoLoading}
-          title="Inject a few tiny example docs."
-          style={{
-            fontSize: 12,
-            padding: '8px 12px',
-            borderRadius: 6,
-            border: '1px solid #ddd',
-            background: demoLoading ? '#f3f4f6' : '#fff',
-            color: demoLoading ? '#9ca3af' : '#1976d2',
-            cursor: demoLoading ? 'not-allowed' : 'pointer',
-            opacity: (uploadBusy || demoLoading) ? 0.6 : 1
-          }}
-        >
-          Load demo data
-        </button>
-      </div>
 
-      {/* Upload Results Panel */}
-      {uploadResult && (
-        <div style={{
-          padding: 16,
-          borderRadius: 12,
-          boxShadow: '0 1px 4px rgba(0,0,0,.08)',
-          marginBottom: 16,
-          background: 'var(--bg)',
-          border: '1px solid rgba(0,0,0,.1)'
-        }}>
-          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, opacity: 0.7 }}>
-            Upload results
+        <div style={{ marginTop: 24, marginBottom: 12 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, fontWeight: 500, color: '#666' }}>Time filter:</span>
+            {(['all', '24h', '7d', '30d'] as const).map((filter) => (
+              <button
+                key={filter}
+                onClick={() => {
+                  setTimeFilter(filter);
+                  // Reload documents and refresh search if needed
+                  loadDocuments();
+                }}
+                className={`px-3 py-1 rounded-md text-xs border transition-colors ${timeFilter === filter
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+                  }`}
+              >
+                {filter === 'all' ? 'All' : filter === '24h' ? 'Last 24h' : filter === '7d' ? 'Last 7d' : 'Last 30d'}
+              </button>
+            ))}
           </div>
-          <div style={{ fontSize: 14, marginBottom: 8 }}>
-            <strong>{uploadResult.filename}</strong>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <span style={{
-              padding: '4px 8px',
-              borderRadius: 6,
-              fontSize: 12,
-              fontWeight: 500,
-              background:
-                uploadResult.status === 'processed' ? '#c6f6d5' :
-                  uploadResult.status === 'uploading' ? '#dbeafe' :
-                    uploadResult.status === 'indexing' ? '#fed7aa' :
-                      uploadResult.status === 'skipped' ? '#fef3c7' :
-                        '#fed7d7',
-              color:
-                uploadResult.status === 'processed' ? '#166534' :
-                  uploadResult.status === 'uploading' ? '#1e40af' :
-                    uploadResult.status === 'indexing' ? '#92400e' :
-                      uploadResult.status === 'skipped' ? '#78350f' :
-                        '#991b1b'
-            }}>
-              {uploadResult.status === 'processed' ? 'Processed' :
-                uploadResult.status === 'uploading' ? 'Uploading…' :
-                  uploadResult.status === 'indexing' ? 'Indexing…' :
-                    uploadResult.status === 'skipped' ? 'Skipped' :
-                      'Error'}
-            </span>
-            {uploadResult.chunks !== undefined && uploadResult.status === 'processed' && (
-              <span style={{ fontSize: 12, opacity: 0.7 }}>
-                {uploadResult.chunks} {uploadResult.chunks === 1 ? 'chunk' : 'chunks'}
-              </span>
-            )}
-          </div>
-          {uploadResult.skip_reason && (
-            <div style={{ fontSize: 12, marginTop: 8, color: '#92400e' }}>
-              {uploadResult.skip_reason === 'unsupported_extension' && 'Unsupported file type. Try .txt/.md/.pdf/.csv/.json'}
-              {uploadResult.skip_reason === 'empty_file' && 'File is empty'}
-              {uploadResult.skip_reason === 'extraction_failed' && `Extraction failed: ${uploadResult.error || 'Check worker logs'}`}
-              {uploadResult.skip_reason === 'processing_failed' && `Processing failed: ${uploadResult.error || 'Check worker logs'}`}
-              {!['unsupported_extension', 'empty_file', 'extraction_failed', 'processing_failed'].includes(uploadResult.skip_reason) &&
-                `Skipped: ${uploadResult.error || uploadResult.skip_reason}`}
-            </div>
-          )}
-          {uploadResult.error && uploadResult.status === 'error' && (
-            <div style={{ fontSize: 12, marginTop: 8, color: '#dc2626' }}>
-              Upload failed: {uploadResult.error}
-            </div>
-          )}
-          {uploadResult.status === 'indexing' && (
-            <div style={{ fontSize: 12, marginTop: 8, color: '#92400e', fontStyle: 'italic' }}>
-              Indexing… try Refresh documents
-            </div>
-          )}
         </div>
-      )}
-
-      {/* Ingestion Activity Feed */}
-      {hideIngestionActivity ? (
-        <div style={{ marginBottom: 16 }}>
-          <button
-            onClick={showIngestionActivity}
-            style={{
-              fontSize: 12,
-              padding: '4px 8px',
-              borderRadius: 6,
-              border: '1px solid #ddd',
-              background: '#fff',
-              color: '#666',
-              cursor: 'pointer',
-              textDecoration: 'underline'
-            }}
-          >
-            Show activity
-          </button>
-        </div>
-      ) : (
-        <IngestionActivity
-          activityFeed={activityFeed}
+        <DocumentList
           docs={docs}
-          askInputRef={askInputRef}
-          onClearActivity={clearActivityFeed}
-          onSetActiveDoc={setActiveDocId}
+          activeDocId={activeDocId}
+          previewDocId={previewDocId}
+          selectedDocIds={selectedDocIds}
+          openMenuDocId={openMenuDocId}
+          docSearchFilter={docSearchFilter}
+          docSortBy={docSortBy}
+          onSetActiveDoc={(docId: string) => {
+            setActiveDocId(docId);
+            saveActiveDocId(docId);
+            setAskScope('doc');
+            saveAskScope('doc');
+            showToast('Document set as active');
+          }}
           saveActiveDocId={saveActiveDocId}
           setAskScope={setAskScope}
           saveAskScope={saveAskScope}
-          showToast={showToast}
-        />
-      )}
-
-      <div style={{ display: 'flex', gap: 8 }}>
-        {(() => {
-          const previewedDoc = previewDocId ? docs.find(d => d.document_id === previewDocId) : null;
-          const isEnabled = previewedDoc !== null;
-          const kind = previewedDoc ? (previewedDoc.kinds.includes('image') ? 'image' : 'text') : 'text';
-
-          return (
-            <>
-              <button
-                className="text-xs underline opacity-70 hover:opacity-100"
-                disabled={!isEnabled}
-                title={isEnabled ? undefined : "Preview a document first"}
-                onClick={async () => {
-                  if (!previewedDoc) return;
-                  try {
-                    await exportJson(previewedDoc.document_id, kind);
-                  } catch (err: any) {
-                    showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
-                  }
-                }}
-                style={{
-                  opacity: isEnabled ? 0.7 : 0.3,
-                  cursor: isEnabled ? 'pointer' : 'not-allowed'
-                }}
-              >
-                Download JSON
-              </button>
-              <button
-                className="text-xs underline opacity-70 hover:opacity-100"
-                disabled={!isEnabled}
-                title={isEnabled ? undefined : "Preview a document first"}
-                onClick={async () => {
-                  if (!previewedDoc) return;
-                  try {
-                    await exportZip(previewedDoc.document_id, kind);
-                  } catch (err: any) {
-                    showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
-                  }
-                }}
-                style={{
-                  opacity: isEnabled ? 0.7 : 0.3,
-                  cursor: isEnabled ? 'pointer' : 'not-allowed'
-                }}
-              >
-                Download ZIP
-              </button>
-            </>
-          );
-        })()}
-      </div>
-      {/* Dropzone/Watcher Help */}
-      <div style={{ marginTop: 12, marginBottom: 8 }}>
-        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
-          Dropzone is optional. Watcher only monitors the dropzone folder for new files.
-        </div>
-        <button
-          onClick={() => setShowDropzoneHelp(!showDropzoneHelp)}
-          style={{
-            fontSize: 11,
-            padding: '4px 8px',
-            borderRadius: 6,
-            border: '1px solid #ddd',
-            background: '#fff',
-            color: '#1976d2',
-            cursor: 'pointer',
-            textDecoration: 'underline'
-          }}
-        >
-          Where is dropzone?
-        </button>
-        {showDropzoneHelp && (
-          <div style={{
-            marginTop: 8,
-            padding: 12,
-            borderRadius: 8,
-            border: '1px solid #e5e7eb',
-            background: '#f9fafb'
-          }}>
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
-              Optional hot folder for auto-ingest
-            </div>
-            <div style={{ fontSize: 12, marginBottom: 6 }}>
-              <strong>Inside Docker:</strong> <code style={{ background: '#f5f5f5', padding: '2px 4px', borderRadius: 4 }}>/data/dropzone</code>
-            </div>
-            <div style={{ fontSize: 12, marginBottom: 8 }}>
-              <strong>On your machine:</strong> Host path is configured in docker-compose.yml under the worker volume for /data/dropzone.
-            </div>
-            <button
-              onClick={() => {
-                const text = `/data/dropzone\n(Host path configured in docker-compose.yml)`;
-                copyToClipboard(text);
-                showToast('Dropzone path copied');
-              }}
-              style={{
-                fontSize: 11,
-                padding: '4px 8px',
-                borderRadius: 6,
-                border: '1px solid #ddd',
-                background: '#fff',
-                color: '#1976d2',
-                cursor: 'pointer'
-              }}
-            >
-              Copy dropzone path
-            </button>
-          </div>
-        )}
-      </div>
-      <div style={{ fontSize: 11, opacity: 0.6, marginTop: 8 }}>
-        Works best with: .md, .txt, .pdf, .csv, .json. Other formats may be skipped by the worker.
-      </div>
-      <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4 }}>
-        Optional: You can also drop files into data/dropzone/ on disk; the watcher will ingest them automatically.
-      </div>
-      <LLMOnboardingPanel
-        status={s}
-        onStatusRefresh={loadStatus}
-      />
-      <AskPanel
-        askScope={askScope}
-        answerMode={answerMode}
-        askQ={askQ}
-        askLoading={askLoading}
-        activeDocId={activeDocId}
-        docs={docs}
-        status={s}
-        askInputRef={askInputRef}
-        onSetAskScope={setAskScope}
-        saveAskScope={saveAskScope}
-        onSetAnswerMode={setAnswerMode}
-        saveAnswerMode={saveAnswerMode}
-        onSetAskQ={setAskQ}
-        onAsk={handleAsk}
-        onClearActive={() => {
-          setActiveDocId(null);
-          saveActiveDocId(null);
-          setAskScope('all');
-          saveAskScope('all');
-        }}
-        onPreviewDoc={async (docId: string, collection: string) => {
-          currentFetchDocIdRef.current = docId;
-          setPreviewDocId(docId);
-          setActiveDocId(docId);
-          saveActiveDocId(docId);
-          setAskScope('doc');
-          saveAskScope('doc');
-          setPreviewLoading(true);
-          setPreviewError(null);
-          setPreviewLines(null);
-          setPreviewTotal(null);
-          try {
-            const result = await fetchJsonPreview(docId, collection, 100);
-            if (currentFetchDocIdRef.current === docId) {
-              setPreviewLines(result.lines);
-              if (result.total !== undefined) {
-                setPreviewTotal(result.total);
-              }
-            }
-          } catch (err: any) {
-            if (currentFetchDocIdRef.current === docId) {
-              setPreviewError(err?.message || 'Failed to load JSON preview');
-            }
-          } finally {
-            if (currentFetchDocIdRef.current === docId) {
-              setPreviewLoading(false);
-            }
-          }
-        }}
-        exportJson={exportJson}
-        exportZip={exportZip}
-        copyToClipboard={copyToClipboard}
-        showToast={showToast}
-        getActiveDocument={getActiveDocument}
-        collectionForDoc={collectionForDoc}
-        generateSuggestionChips={generateSuggestionChips}
-      />
-      {askScope === 'doc' ? (
-        <QuickActions
-          previewDocId={previewDocId}
-          documents={docs}
-          status={s}
-          onActionComplete={handleQuickActionComplete}
-          onActionError={handleQuickActionError}
-          loading={quickActionsLoading}
-          setLoading={setQuickActionsLoading}
-          showToast={showToast}
-          activeDocId={activeDocId}
-          askScope={askScope}
-          answerMode={answerMode}
-        />
-      ) : (
-        <div style={{ marginTop: 16, marginBottom: 16, fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>
-          Global mode is for finding relevant documents. Use 'Use this doc' in the results below to enable Quick Actions.
-        </div>
-      )}
-      <AssistantOutput
-        result={quickActionResult}
-        status={s}
-        loading={quickActionsLoading !== null}
-        error={quickActionError}
-        actionName={quickActionName || undefined}
-        showToast={showToast}
-        scope={askScope}
-        activeDocFilename={(() => {
-          if (askScope === 'doc') {
-            const activeDoc = getActiveDocument(true); // strictMode = true for doc scope
-            if (activeDoc && activeDoc.paths[0]) {
-              return activeDoc.paths[0].split('/').pop() || activeDoc.paths[0];
-            }
-          }
-          return undefined;
-        })()}
-        onUseDoc={(documentId, llmReachable) => {
-          setActiveDocId(documentId);
-          saveActiveDocId(documentId);
-          setAskScope('doc');
-          saveAskScope('doc');
-          if (llmReachable) {
-            setAnswerMode('synthesize');
-            saveAnswerMode('synthesize', 'doc');
-          }
-        }}
-        documents={docs}
-      />
-      {/* Existing Ask results (for backward compatibility) */}
-      {askLoading && (
-        <div style={{ marginTop: 12, padding: 12, color: '#666', fontSize: 14 }}>
-          Searching your data…
-        </div>
-      )}
-      {askError && (
-        <div style={{ marginTop: 12, padding: 12, border: '1px solid #fecaca', borderRadius: 8, background: '#fef2f2', color: '#dc2626', fontSize: 14 }}>
-          {askError}
-        </div>
-      )}
-      {!askLoading && !askError && !ans && (
-        <div style={{ marginTop: 12, padding: 12, color: '#999', fontSize: 13, fontStyle: 'italic' }}>
-          Run a question to see answers and sources here.
-        </div>
-      )}
-      {!askLoading && ans && (
-        <div style={{ marginTop: 12, padding: 12, border: '1px solid #eee', borderRadius: 10 }}>
-          {(ans.final && ans.final.trim()) || (ans.answer && ans.answer.trim()) ? (
-            <div style={{ marginBottom: 16, padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fafafa' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <div style={{ fontWeight: 600, fontSize: 16 }}>Answer</div>
-                {s && s.llm?.provider === "ollama" && s.llm?.reachable === true ? (
-                  <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 999, background: '#eef2ff', color: '#3730a3' }}>local (ollama)</span>
-                ) : (
-                  <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 999, background: '#f3f4f6', color: '#6b7280' }}>Top matches below</span>
-                )}
-              </div>
-              <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: 14 }}>
-                {ans.final && ans.final.trim() ? ans.final : (ans.answer || '')}
-              </div>
-            </div>
-          ) : null}
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 12 }}>
-              {ans.mode === 'retrieve' ? 'Retrieved sources' : 'Sources'}
-            </div>
-            {(() => {
-              const sources = ans.sources || ans.answers || [];
-              if (sources.length === 0) {
-                return (
-                  <div style={{ color: '#666', fontSize: 14, padding: 12, background: '#f9fafb', borderRadius: 6 }}>
-                    No matching snippets yet. Try a different query or upload more files.
-                  </div>
-                );
-              }
-              return (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {sources.map((h: any, i: number) => {
-                    // Use standardized Source shape: id, document_id, text, meta, score, path, kind, idx
-                    const sourceId = h.id || `source-${i}`;
-                    const docId = h.document_id || '';
-                    const title = h.meta?.title || (h.path ? h.path.split('/').pop() || h.path : docId.substring(0, 12) || `Source ${i + 1}`);
-                    const logicalPath = h.meta?.logical_path;
-                    const path = h.path;
-                    const kind = h.kind;
-                    const snippet = h.text || h.caption || '';
-                    const score = h.score !== undefined ? h.score : null;
-                    const chunkIdx = h.idx !== undefined ? h.idx : null;
-
-                    return (
-                      <div key={i} style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                          <span style={{ fontWeight: 500, fontSize: 13 }}>{title}</span>
-                          {kind && (
-                            <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: '#e3f2fd', color: '#1976d2', fontWeight: 500 }}>
-                              {kind}
-                            </span>
-                          )}
-                          {docId && (
-                            <code style={{ fontSize: 11, fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
-                              {docId.substring(0, 12)}...
-                            </code>
-                          )}
-                          {score !== null && (
-                            <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: '#f0f9ff', color: '#0369a1' }}>
-                              score: {score.toFixed(2)}
-                            </span>
-                          )}
-                          <button
-                            onClick={() => {
-                              copyToClipboard(sourceId);
-                              showToast('Chunk ID copied');
-                            }}
-                            style={{
-                              fontSize: 10,
-                              padding: '2px 6px',
-                              borderRadius: 4,
-                              border: '1px solid #ddd',
-                              background: '#fff',
-                              color: '#666',
-                              cursor: 'pointer',
-                              marginLeft: 'auto'
-                            }}
-                            title={`Copy chunk ID: ${sourceId}`}
-                          >
-                            Copy ID
-                          </button>
-                        </div>
-                        {(logicalPath || path) && (
-                          <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6 }}>
-                            {logicalPath || path}
-                          </div>
-                        )}
-                        {chunkIdx !== null && (
-                          <div style={{ fontSize: 10, color: '#9ca3af', marginBottom: 6 }}>
-                            Chunk index: {chunkIdx}
-                          </div>
-                        )}
-                        {snippet && (
-                          <div style={{
-                            fontSize: 13,
-                            lineHeight: 1.5,
-                            color: '#374151',
-                            fontFamily: 'ui-monospace, monospace',
-                            background: '#f9fafb',
-                            padding: 8,
-                            borderRadius: 4,
-                            whiteSpace: 'pre-wrap',
-                            wordBreak: 'break-word'
-                          }}>
-                            {snippet}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-          </div>
-        </div>
-      )}
-      <div style={{ marginTop: 24, display: 'flex', gap: 8 }}>
-        <input
-          value={q}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQ(e.target.value)}
-          placeholder="search…"
-          style={{ flex: 1, padding: 12, borderRadius: 8, border: '1px solid #ddd' }}
-        />
-        <select
-          value={kind}
-          onChange={e => setKind(e.target.value as any)}
-          style={{ padding: 12, borderRadius: 8, border: '1px solid #ddd' }}
-        >
-          <option value="text">text</option>
-          <option value="pdf">pdf</option>
-          <option value="image">image</option>
-          <option value="audio">audio</option>
-        </select>
-        <button
-          onClick={handleSearch}
-          disabled={searchLoading}
-          style={{
-            padding: '12px 16px',
-            borderRadius: 8,
-            border: '1px solid #ddd',
-            opacity: searchLoading ? 0.6 : 1,
-            cursor: searchLoading ? 'not-allowed' : 'pointer'
-          }}
-        >
-          {searchLoading ? 'Searching...' : 'Search'}
-        </button>
-      </div>
-      {res.length > 0 && (
-        <div style={{ marginTop: 16, display: 'grid', gap: 8 }}>
-          {res.map((h, i) => (
-            <div key={i} className="mb-2 p-2 rounded border">
-              <div className="text-sm opacity-70">score: {h.score?.toFixed?.(3) ?? "-"}</div>
-              <div className="text-xs">
-                <span className="inline-block px-2 py-0.5 bg-gray-100 rounded mr-2">{h.path}</span>
-                <span className="inline-block px-2 py-0.5 bg-gray-100 rounded mr-2">idx: {h.idx}</span>
-              </div>
-              <div className="text-xs opacity-60">
-                {h.kind === "image" ? "images" : "chunks"} • idx: {h.idx}
-              </div>
-              <div className="mt-1">{h.caption || h.text || '(no text)'}</div>
-              {h.document_id && (
-                <div className="mt-1">
-                  <button
-                    className="text-xs underline opacity-70 hover:opacity-100"
-                    onClick={async () => {
-                      if (!h.document_id) return;
-                      try {
-                        await exportJson(h.document_id, h.kind === 'image' ? 'image' : 'text');
-                      } catch (err: any) {
-                        showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
-                      }
-                    }}
-                  >
-                    Export JSON ({h.kind === 'image' ? 'images.jsonl' : 'chunks.jsonl'})
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div style={{ marginTop: 24, marginBottom: 12 }}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 12, fontWeight: 500, color: '#666' }}>Time filter:</span>
-          {(['all', '24h', '7d', '30d'] as const).map((filter) => (
-            <button
-              key={filter}
-              onClick={() => {
-                setTimeFilter(filter);
-                // Reload documents and refresh search if needed
-                loadDocuments();
-              }}
-              style={{
-                padding: '4px 12px',
-                fontSize: 12,
-                border: '1px solid #ddd',
-                borderRadius: 6,
-                background: timeFilter === filter ? '#3b82f6' : '#fff',
-                color: timeFilter === filter ? '#fff' : '#333',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-              onMouseEnter={(e) => {
-                if (timeFilter !== filter) {
-                  e.currentTarget.style.background = '#f5f5f5';
+          onOpenDrawer={setDrawerDocId}
+          onPreviewDoc={async (docId: string, collection: string) => {
+            currentFetchDocIdRef.current = docId;
+            setPreviewDocId(docId);
+            setActiveDocId(docId);
+            saveActiveDocId(docId);
+            setAskScope('doc');
+            saveAskScope('doc');
+            setPreviewLoading(true);
+            setPreviewError(null);
+            setPreviewLines(null);
+            setPreviewTotal(null);
+            try {
+              const result = await fetchJsonPreview(docId, collection, 100);
+              if (currentFetchDocIdRef.current === docId) {
+                setPreviewLines(result.lines);
+                if (result.total !== undefined) {
+                  setPreviewTotal(result.total);
                 }
-              }}
-              onMouseLeave={(e) => {
-                if (timeFilter !== filter) {
-                  e.currentTarget.style.background = '#fff';
-                }
-              }}
-            >
-              {filter === 'all' ? 'All' : filter === '24h' ? 'Last 24h' : filter === '7d' ? 'Last 7d' : 'Last 30d'}
-            </button>
-          ))}
-        </div>
-      </div>
-      <DocumentList
-        docs={docs}
-        activeDocId={activeDocId}
-        previewDocId={previewDocId}
-        selectedDocIds={selectedDocIds}
-        openMenuDocId={openMenuDocId}
-        docSearchFilter={docSearchFilter}
-        docSortBy={docSortBy}
-        onSetActiveDoc={(docId: string) => {
-          setActiveDocId(docId);
-          saveActiveDocId(docId);
-          setAskScope('doc');
-          saveAskScope('doc');
-          showToast('Document set as active');
-        }}
-        saveActiveDocId={saveActiveDocId}
-        setAskScope={setAskScope}
-        saveAskScope={saveAskScope}
-        onOpenDrawer={setDrawerDocId}
-        onPreviewDoc={async (docId: string, collection: string) => {
-          currentFetchDocIdRef.current = docId;
-          setPreviewDocId(docId);
-          setActiveDocId(docId);
-          saveActiveDocId(docId);
-          setAskScope('doc');
-          saveAskScope('doc');
-          setPreviewLoading(true);
-          setPreviewError(null);
-          setPreviewLines(null);
-          setPreviewTotal(null);
-          try {
-            const result = await fetchJsonPreview(docId, collection, 100);
-            if (currentFetchDocIdRef.current === docId) {
-              setPreviewLines(result.lines);
-              if (result.total !== undefined) {
-                setPreviewTotal(result.total);
+              }
+            } catch (err: any) {
+              if (currentFetchDocIdRef.current === docId) {
+                setPreviewError(err?.message || 'Failed to load JSON preview');
+              }
+            } finally {
+              if (currentFetchDocIdRef.current === docId) {
+                setPreviewLoading(false);
               }
             }
-          } catch (err: any) {
-            if (currentFetchDocIdRef.current === docId) {
-              setPreviewError(err?.message || 'Failed to load JSON preview');
+          }}
+          onExportJson={async (docId: string, kind: string) => {
+            try {
+              await exportJson(docId, kind);
+            } catch (err: any) {
+              showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
             }
-          } finally {
-            if (currentFetchDocIdRef.current === docId) {
-              setPreviewLoading(false);
+          }}
+          onExportZip={async (docId: string, kind: string) => {
+            try {
+              await exportZip(docId, kind);
+            } catch (err: any) {
+              showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
             }
-          }
-        }}
-        onExportJson={async (docId: string, kind: string) => {
-          try {
-            await exportJson(docId, kind);
-          } catch (err: any) {
-            showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
-          }
-        }}
-        onExportZip={async (docId: string, kind: string) => {
-          try {
-            await exportZip(docId, kind);
-          } catch (err: any) {
-            showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
-          }
-        }}
-        onDeleteDoc={async (docId: string) => {
-          const doc = docs.find(d => d.document_id === docId);
-          const filename = doc?.paths[0] ? doc.paths[0].split('/').pop() || doc.paths[0] : docId;
-          const confirmed = window.confirm(`Are you sure you want to delete "${filename}"?\n\nThis will remove all chunks and images for this document from the index.`);
-          if (!confirmed) return;
+          }}
+          onDeleteDoc={async (docId: string) => {
+            const doc = docs.find(d => d.document_id === docId);
+            const filename = doc?.paths[0] ? doc.paths[0].split('/').pop() || doc.paths[0] : docId;
+            const confirmed = window.confirm(`Are you sure you want to delete "${filename}"?\n\nThis will remove all chunks and images for this document from the index.`);
+            if (!confirmed) return;
 
-          try {
-            await deleteDocument(docId);
-            showToast('Document deleted successfully');
+            try {
+              await deleteDocument(docId);
+              showToast('Document deleted successfully');
+              setSelectedDocIds(prev => {
+                const next = new Set(prev);
+                next.delete(docId);
+                return next;
+              });
+              await loadDocuments();
+              if (activeDocId === docId) {
+                setActiveDocId(null);
+                saveActiveDocId(null);
+                if (askScope === 'doc') {
+                  setAskScope('all');
+                  saveAskScope('all');
+                }
+              }
+              if (previewDocId === docId) {
+                setPreviewDocId(null);
+                setPreviewLines(null);
+                setPreviewError(null);
+              }
+              if (drawerDocId === docId) {
+                setDrawerDocId(null);
+              }
+              if (openMenuDocId === docId) {
+                setOpenMenuDocId(null);
+              }
+            } catch (err: any) {
+              const errorMsg = err?.message || String(err) || "Unknown error";
+              showToast(errorMsg, true);
+            }
+          }}
+          onToggleSelection={(docId: string) => {
             setSelectedDocIds(prev => {
               const next = new Set(prev);
-              next.delete(docId);
+              if (next.has(docId)) {
+                next.delete(docId);
+              } else {
+                next.add(docId);
+              }
               return next;
             });
-            await loadDocuments();
-            if (activeDocId === docId) {
-              setActiveDocId(null);
-              saveActiveDocId(null);
-              if (askScope === 'doc') {
-                setAskScope('all');
-                saveAskScope('all');
-              }
-            }
-            if (previewDocId === docId) {
-              setPreviewDocId(null);
-              setPreviewLines(null);
-              setPreviewError(null);
-            }
-            if (drawerDocId === docId) {
-              setDrawerDocId(null);
-            }
-            if (openMenuDocId === docId) {
-              setOpenMenuDocId(null);
-            }
-          } catch (err: any) {
-            const errorMsg = err?.message || String(err) || "Unknown error";
-            showToast(errorMsg, true);
-          }
-        }}
-        onToggleSelection={(docId: string) => {
-          setSelectedDocIds(prev => {
-            const next = new Set(prev);
-            if (next.has(docId)) {
-              next.delete(docId);
-            } else {
-              next.add(docId);
-            }
-            return next;
-          });
-        }}
-        onSetOpenMenu={setOpenMenuDocId}
-        onSetFilter={setDocSearchFilter}
-        onSetSort={setDocSortBy}
-        onBulkDelete={handleBulkDelete}
-        onClearSelection={() => setSelectedDocIds(new Set())}
-        onLoadDocuments={loadDocuments}
-        showToast={showToast}
-        getDocumentStatus={getDocumentStatus}
-        collectionForDoc={collectionForDoc}
-      />
-      {/* JSON Preview Modal */}
-      {previewDocId && (() => {
-        const previewedDoc = docs.find(d => d.document_id === previewDocId);
-        const collection = previewedDoc ? collectionForDoc(previewedDoc) : '';
-        const docTitle = previewedDoc && (previewedDoc as any).meta?.title
-          ? (previewedDoc as any).meta.title
-          : previewDocId.length > 40 ? previewDocId.substring(0, 40) + '...' : previewDocId;
-        const previewStatus = previewedDoc ? getDocumentStatus(previewedDoc) : null;
-        const linesLoaded = previewLines ? previewLines.length : 0;
-        const hasMore = previewTotal !== null ? linesLoaded < previewTotal : true;
+          }}
+          onSetOpenMenu={setOpenMenuDocId}
+          onSetFilter={setDocSearchFilter}
+          onSetSort={setDocSortBy}
+          onBulkDelete={handleBulkDelete}
+          onClearSelection={() => setSelectedDocIds(new Set())}
+          onLoadDocuments={loadDocuments}
+          showToast={showToast}
+          getDocumentStatus={getDocumentStatus}
+          collectionForDoc={collectionForDoc}
+        />
+        {/* JSON Preview Modal */}
+        {previewDocId && (() => {
+          const previewedDoc = docs.find(d => d.document_id === previewDocId);
+          const collection = previewedDoc ? collectionForDoc(previewedDoc) : '';
+          const docTitle = previewedDoc && (previewedDoc as any).meta?.title
+            ? (previewedDoc as any).meta.title
+            : previewDocId.length > 40 ? previewDocId.substring(0, 40) + '...' : previewDocId;
+          const previewStatus = previewedDoc ? getDocumentStatus(previewedDoc) : null;
+          const linesLoaded = previewLines ? previewLines.length : 0;
+          const hasMore = previewTotal !== null ? linesLoaded < previewTotal : true;
 
-        const handleLoadMore = async () => {
-          if (!previewDocId || !collection) return;
-          setPreviewLoading(true);
-          try {
-            const result = await fetchJsonPreview(previewDocId, collection, 100, linesLoaded);
-            if (result.lines && result.lines.length > 0) {
-              setPreviewLines(prev => [...(prev || []), ...result.lines]);
-              if (result.total !== undefined) {
-                setPreviewTotal(result.total);
+          const handleLoadMore = async () => {
+            if (!previewDocId || !collection) return;
+            setPreviewLoading(true);
+            try {
+              const result = await fetchJsonPreview(previewDocId, collection, 100, linesLoaded);
+              if (result.lines && result.lines.length > 0) {
+                setPreviewLines(prev => [...(prev || []), ...result.lines]);
+                if (result.total !== undefined) {
+                  setPreviewTotal(result.total);
+                }
               }
+            } catch (err: any) {
+              setPreviewError(err?.message || 'Failed to load more lines');
+            } finally {
+              setPreviewLoading(false);
             }
-          } catch (err: any) {
-            setPreviewError(err?.message || 'Failed to load more lines');
-          } finally {
+          };
+
+          const handleClose = () => {
+            setPreviewDocId(null);
+            setPreviewLines(null);
+            setPreviewTotal(null);
+            setPreviewError(null);
             setPreviewLoading(false);
-          }
-        };
+          };
 
-        const handleClose = () => {
-          setPreviewDocId(null);
-          setPreviewLines(null);
-          setPreviewTotal(null);
-          setPreviewError(null);
-          setPreviewLoading(false);
-        };
-
-        return (
-          <div
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.5)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 1000,
-              padding: 20
-            }}
-            onClick={(e) => {
-              if (e.target === e.currentTarget) handleClose();
-            }}
-          >
+          return (
             <div
               style={{
-                background: 'var(--bg)',
-                borderRadius: 12,
-                boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-                maxWidth: '90vw',
-                maxHeight: '90vh',
-                width: '800px',
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.5)',
                 display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden'
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 1000,
+                padding: 20
               }}
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                if (e.target === e.currentTarget) handleClose();
+              }}
             >
-              {/* Modal Header */}
-              <div style={{
-                padding: 16,
-                borderBottom: '1px solid #e5e7eb',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'flex-start'
-              }}>
-                <div style={{ flex: 1 }}>
-                  <h3 style={{ fontSize: 16, marginBottom: 4, fontFamily: 'monospace', fontWeight: 600 }}>
-                    Preview: {docTitle}
-                  </h3>
-                  {collection && (
-                    <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>
-                      Collection: {collection}
-                    </p>
+              <div
+                style={{
+                  borderRadius: 12,
+                  boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+                  maxWidth: '90vw',
+                  maxHeight: '90vh',
+                  width: '800px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden'
+                }}
+                className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Modal Header */}
+                <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex justify-between items-start">
+                  <div style={{ flex: 1 }}>
+                    <h3 className="text-base font-semibold font-mono mb-1 text-gray-900 dark:text-gray-100">
+                      Preview: {docTitle}
+                    </h3>
+                    {collection && (
+                      <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>
+                        Collection: {collection}
+                      </p>
+                    )}
+                    {previewStatus && (
+                      <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>
+                        Status: {previewStatus === 'indexed' ? 'Indexed' : 'Pending'}
+                      </p>
+                    )}
+                    {previewLines && previewLines.length > 0 && (
+                      <p style={{ fontSize: 12, opacity: 0.7 }}>
+                        {previewTotal !== null
+                          ? `Showing ${linesLoaded} of ${previewTotal} lines`
+                          : `Showing ${linesLoaded} lines`}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleClose}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: 6,
+                      border: '1px solid #ddd',
+                      background: '#fff',
+                      cursor: 'pointer',
+                      fontSize: 14,
+                      marginLeft: 16
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Modal Content */}
+                <div style={{
+                  padding: 16,
+                  overflow: 'auto',
+                  flex: 1,
+                  minHeight: 0
+                }}>
+                  {previewLoading && linesLoaded === 0 && (
+                    <p style={{ fontSize: 14, opacity: 0.7 }}>Loading JSON preview…</p>
                   )}
-                  {previewStatus && (
-                    <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>
-                      Status: {previewStatus === 'indexed' ? 'Indexed' : 'Pending'}
+                  {previewError && (
+                    <p style={{ color: '#dc2626', fontSize: 14 }}>Failed to load JSON preview: {previewError}</p>
+                  )}
+                  {!previewLoading && !previewError && (!previewLines || previewLines.length === 0) && (
+                    <p style={{ fontSize: 14, opacity: 0.7, fontStyle: 'italic' }}>
+                      No JSON rows yet. The document may not be fully indexed. Try Refresh documents.
                     </p>
                   )}
                   {previewLines && previewLines.length > 0 && (
-                    <p style={{ fontSize: 12, opacity: 0.7 }}>
-                      {previewTotal !== null
-                        ? `Showing ${linesLoaded} of ${previewTotal} lines`
-                        : `Showing ${linesLoaded} lines`}
-                    </p>
+                    <>
+                      <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 12 }}>
+                        Each line below is one JSON chunk. This is what gets stored in Qdrant.
+                      </p>
+                      <pre className="p-3 bg-gray-50 dark:bg-gray-950 rounded border border-gray-200 dark:border-gray-800 text-xs text-gray-800 dark:text-gray-200 overflow-auto max-h-[60vh] font-mono mb-3">
+                        {previewLines.map((line, idx) => {
+                          try {
+                            const obj = JSON.parse(line);
+                            return JSON.stringify(obj, null, 2) + (idx < previewLines.length - 1 ? '\n\n' : '');
+                          } catch {
+                            return line + (idx < previewLines.length - 1 ? '\n\n' : '');
+                          }
+                        }).join('')}
+                      </pre>
+                      {hasMore && (
+                        <button
+                          onClick={handleLoadMore}
+                          disabled={previewLoading}
+                          style={{
+                            padding: '8px 16px',
+                            borderRadius: 6,
+                            border: '1px solid #ddd',
+                            background: previewLoading ? '#f3f4f6' : '#fff',
+                            cursor: previewLoading ? 'not-allowed' : 'pointer',
+                            fontSize: 14,
+                            opacity: previewLoading ? 0.6 : 1
+                          }}
+                        >
+                          {previewLoading ? 'Loading...' : 'Load more'}
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
-                <button
-                  onClick={handleClose}
-                  style={{
-                    padding: '4px 8px',
-                    borderRadius: 6,
-                    border: '1px solid #ddd',
-                    background: '#fff',
-                    cursor: 'pointer',
-                    fontSize: 14,
-                    marginLeft: 16
-                  }}
-                >
-                  ✕
-                </button>
-              </div>
-
-              {/* Modal Content */}
-              <div style={{
-                padding: 16,
-                overflow: 'auto',
-                flex: 1,
-                minHeight: 0
-              }}>
-                {previewLoading && linesLoaded === 0 && (
-                  <p style={{ fontSize: 14, opacity: 0.7 }}>Loading JSON preview…</p>
-                )}
-                {previewError && (
-                  <p style={{ color: '#dc2626', fontSize: 14 }}>Failed to load JSON preview: {previewError}</p>
-                )}
-                {!previewLoading && !previewError && (!previewLines || previewLines.length === 0) && (
-                  <p style={{ fontSize: 14, opacity: 0.7, fontStyle: 'italic' }}>
-                    No JSON rows yet. The document may not be fully indexed. Try Refresh documents.
-                  </p>
-                )}
-                {previewLines && previewLines.length > 0 && (
-                  <>
-                    <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 12 }}>
-                      Each line below is one JSON chunk. This is what gets stored in Qdrant.
-                    </p>
-                    <pre style={{
-                      background: '#fff',
-                      padding: 12,
-                      borderRadius: 4,
-                      border: '1px solid #e5e7eb',
-                      overflow: 'auto',
-                      fontSize: 12,
-                      lineHeight: 1.5,
-                      maxHeight: '60vh',
-                      fontFamily: 'monospace',
-                      marginBottom: 12
-                    }}>
-                      {previewLines.map((line, idx) => {
-                        try {
-                          const obj = JSON.parse(line);
-                          return JSON.stringify(obj, null, 2) + (idx < previewLines.length - 1 ? '\n\n' : '');
-                        } catch {
-                          return line + (idx < previewLines.length - 1 ? '\n\n' : '');
-                        }
-                      }).join('')}
-                    </pre>
-                    {hasMore && (
-                      <button
-                        onClick={handleLoadMore}
-                        disabled={previewLoading}
-                        style={{
-                          padding: '8px 16px',
-                          borderRadius: 6,
-                          border: '1px solid #ddd',
-                          background: previewLoading ? '#f3f4f6' : '#fff',
-                          cursor: previewLoading ? 'not-allowed' : 'pointer',
-                          fontSize: 14,
-                          opacity: previewLoading ? 0.6 : 1
-                        }}
-                      >
-                        {previewLoading ? 'Loading...' : 'Load more'}
-                      </button>
-                    )}
-                  </>
-                )}
               </div>
             </div>
-          </div>
-        );
-      })()}
-      <DocumentDrawer
-        drawerDocId={drawerDocId}
-        docs={docs}
-        previewDocId={previewDocId}
-        previewLines={previewLines}
-        ans={ans}
-        askScope={askScope}
-        activeDocId={activeDocId}
-        llmReachable={s?.llm?.reachable === true}
-        askInputRef={askInputRef}
-        openMenuDocId={openMenuDocId}
-        onClose={() => setDrawerDocId(null)}
-        onUseThisDoc={(docId: string) => {
-          setDrawerDocId(null);
-          setActiveDocId(docId);
-          saveActiveDocId(docId);
-          setAskScope('doc');
-          saveAskScope('doc');
-          const llmReachable = s?.llm?.reachable === true;
-          if (llmReachable) {
-            setAnswerMode('synthesize');
-            saveAnswerMode('synthesize', 'doc');
-          }
-          showToast('Document ready — Ask panel focused');
+          );
+        })()}
+        <DocumentDrawer
+          drawerDocId={drawerDocId}
+          docs={docs}
+          previewDocId={previewDocId}
+          previewLines={previewLines}
+          ans={ans}
+          askScope={askScope}
+          activeDocId={activeDocId}
+          llmReachable={s?.llm?.reachable === true}
+          askInputRef={askInputRef}
+          openMenuDocId={openMenuDocId}
+          onClose={() => setDrawerDocId(null)}
+          onUseThisDoc={(docId: string) => {
+            setDrawerDocId(null);
+            setActiveDocId(docId);
+            saveActiveDocId(docId);
+            setAskScope('doc');
+            saveAskScope('doc');
+            const llmReachable = s?.llm?.reachable === true;
+            if (llmReachable) {
+              setAnswerMode('synthesize');
+              saveAnswerMode('synthesize', 'doc');
+            }
+            showToast('Document ready — Ask panel focused');
 
-          // Scroll to Ask and focus input
-          setTimeout(() => {
-            askInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // Scroll to Ask and focus input
             setTimeout(() => {
-              askInputRef.current?.focus();
-            }, 300);
-          }, 100);
-        }}
-        onPreviewDoc={async (docId: string, collection: string) => {
-          setDrawerDocId(null);
-          currentFetchDocIdRef.current = docId;
-          setPreviewDocId(docId);
-          setActiveDocId(docId);
-          saveActiveDocId(docId);
-          setAskScope('doc');
-          saveAskScope('doc');
-          setPreviewLoading(true);
-          setPreviewError(null);
-          setPreviewLines(null);
-          setPreviewTotal(null);
-          try {
-            const result = await fetchJsonPreview(docId, collection, 100);
-            if (currentFetchDocIdRef.current === docId) {
-              setPreviewLines(result.lines);
-              if (result.total !== undefined) {
-                setPreviewTotal(result.total);
+              askInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              setTimeout(() => {
+                askInputRef.current?.focus();
+              }, 300);
+            }, 100);
+          }}
+          onPreviewDoc={async (docId: string, collection: string) => {
+            setDrawerDocId(null);
+            currentFetchDocIdRef.current = docId;
+            setPreviewDocId(docId);
+            setActiveDocId(docId);
+            saveActiveDocId(docId);
+            setAskScope('doc');
+            saveAskScope('doc');
+            setPreviewLoading(true);
+            setPreviewError(null);
+            setPreviewLines(null);
+            setPreviewTotal(null);
+            try {
+              const result = await fetchJsonPreview(docId, collection, 100);
+              if (currentFetchDocIdRef.current === docId) {
+                setPreviewLines(result.lines);
+                if (result.total !== undefined) {
+                  setPreviewTotal(result.total);
+                }
+              }
+            } catch (err: any) {
+              if (currentFetchDocIdRef.current === docId) {
+                setPreviewError(err?.message || 'Failed to load JSON preview');
+              }
+            } finally {
+              if (currentFetchDocIdRef.current === docId) {
+                setPreviewLoading(false);
               }
             }
-          } catch (err: any) {
-            if (currentFetchDocIdRef.current === docId) {
-              setPreviewError(err?.message || 'Failed to load JSON preview');
+          }}
+          onExportJson={async (docId: string, kind: string) => {
+            setDrawerDocId(null);
+            try {
+              await exportJson(docId, kind);
+            } catch (err: any) {
+              showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
             }
-          } finally {
-            if (currentFetchDocIdRef.current === docId) {
-              setPreviewLoading(false);
+          }}
+          onExportZip={async (docId: string, kind: string) => {
+            setDrawerDocId(null);
+            try {
+              await exportZip(docId, kind);
+            } catch (err: any) {
+              showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
             }
-          }
-        }}
-        onExportJson={async (docId: string, kind: string) => {
-          setDrawerDocId(null);
-          try {
-            await exportJson(docId, kind);
-          } catch (err: any) {
-            showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
-          }
-        }}
-        onExportZip={async (docId: string, kind: string) => {
-          setDrawerDocId(null);
-          try {
-            await exportZip(docId, kind);
-          } catch (err: any) {
-            showToast("Export failed: not found or not yet indexed. Try again or check logs.", true);
-          }
-        }}
-        onDeleteDoc={async (docId: string, filename: string) => {
-          setDrawerDocId(null);
-          const confirmed = window.confirm(`Are you sure you want to delete "${filename}"?\n\nThis will remove all chunks and images for this document from the index.`);
-          if (!confirmed) return;
+          }}
+          onDeleteDoc={async (docId: string, filename: string) => {
+            setDrawerDocId(null);
+            const confirmed = window.confirm(`Are you sure you want to delete "${filename}"?\n\nThis will remove all chunks and images for this document from the index.`);
+            if (!confirmed) return;
 
-          try {
-            await deleteDocument(docId);
-            showToast('Document deleted successfully');
-            setSelectedDocIds(prev => {
-              const next = new Set(prev);
-              next.delete(docId);
-              return next;
-            });
-            await loadDocuments();
-            if (activeDocId === docId) {
-              setActiveDocId(null);
-              saveActiveDocId(null);
-              if (askScope === 'doc') {
-                setAskScope('all');
-                saveAskScope('all');
+            try {
+              await deleteDocument(docId);
+              showToast('Document deleted successfully');
+              setSelectedDocIds(prev => {
+                const next = new Set(prev);
+                next.delete(docId);
+                return next;
+              });
+              await loadDocuments();
+              if (activeDocId === docId) {
+                setActiveDocId(null);
+                saveActiveDocId(null);
+                if (askScope === 'doc') {
+                  setAskScope('all');
+                  saveAskScope('all');
+                }
               }
+              if (previewDocId === docId) {
+                setPreviewDocId(null);
+                setPreviewLines(null);
+                setPreviewError(null);
+              }
+              if (openMenuDocId === docId) {
+                setOpenMenuDocId(null);
+              }
+            } catch (err: any) {
+              const errorMsg = err?.message || String(err) || "Unknown error";
+              showToast(errorMsg, true);
             }
-            if (previewDocId === docId) {
-              setPreviewDocId(null);
-              setPreviewLines(null);
-              setPreviewError(null);
-            }
-            if (openMenuDocId === docId) {
-              setOpenMenuDocId(null);
-            }
-          } catch (err: any) {
-            const errorMsg = err?.message || String(err) || "Unknown error";
-            showToast(errorMsg, true);
-          }
-        }}
-        copyToClipboard={copyToClipboard}
-        showToast={showToast}
-        getDocumentStatus={getDocumentStatus}
-        collectionForDoc={collectionForDoc}
-      />
-      <div style={{ marginTop: 16, opacity: .7, fontSize: 12 }}>API: {apiBase}</div>
+          }}
+          copyToClipboard={copyToClipboard}
+          showToast={showToast}
+          getDocumentStatus={getDocumentStatus}
+          collectionForDoc={collectionForDoc}
+        />
+        <div style={{ marginTop: 16, opacity: .7, fontSize: 12 }}>API: {apiBase}</div>
+      </div>
     </div>
-  )
+  );
 }
 
 export default App

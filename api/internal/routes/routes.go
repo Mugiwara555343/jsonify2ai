@@ -323,6 +323,10 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 	// Add ask/search routes with config
 	// addAskSearchRoutes(r, getWorkerBase(), cfg) // Commented out due to duplicate /search route
 
+	// ----------------------------- /api/models -----------------------------
+	// GET /api/models (protected) - List available models from Ollama
+	r.GET("/api/models", middleware.AuthMiddleware(cfg), (&ModelsHandler{Config: cfg}).ListModels)
+
 	// ----------------------------- /ask -----------------------------
 	// POST /ask (protected + rate limited)
 	r.POST("/ask",

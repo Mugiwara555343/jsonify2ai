@@ -157,26 +157,19 @@ export default function DocumentDrawer({
           bottom: 0,
           width: '400px',
           maxWidth: '90vw',
-          background: '#fff',
           boxShadow: '-2px 0 8px rgba(0,0,0,0.15)',
           zIndex: 1001,
           overflowY: 'auto',
           padding: 24
         }}
+        className="bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-800 text-gray-900 dark:text-gray-100"
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <h2 style={{ fontSize: 18, margin: 0 }}>Document Details</h2>
           <button
             onClick={onClose}
-            style={{
-              fontSize: 24,
-              border: 'none',
-              background: 'transparent',
-              cursor: 'pointer',
-              padding: '4px 8px',
-              lineHeight: 1
-            }}
+            className="text-2xl border-none bg-transparent cursor-pointer p-2 leading-none text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           >
             ×
           </button>
@@ -189,24 +182,14 @@ export default function DocumentDrawer({
           </div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
             {drawerDoc.kinds.map((k, j) => (
-              <span key={j} style={{
-                fontSize: 11,
-                padding: '2px 6px',
-                borderRadius: 12,
-                background: '#e3f2fd',
-                color: '#1976d2'
-              }}>
+              <span key={j} className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">
                 {k}
               </span>
             ))}
-            <span style={{
-              padding: '3px 8px',
-              borderRadius: 6,
-              fontSize: 11,
-              fontWeight: 500,
-              background: status === 'indexed' ? '#c6f6d5' : '#fef3c7',
-              color: status === 'indexed' ? '#166534' : '#78350f'
-            }}>
+            <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${status === 'indexed'
+              ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border-green-200 dark:border-green-900/50'
+              : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300 border-yellow-200 dark:border-yellow-900/50'
+              }`}>
               {status === 'indexed' ? `Indexed (${totalChunks} ${totalChunks === 1 ? 'chunk' : 'chunks'})` : 'Pending'}
             </span>
           </div>
@@ -215,14 +198,7 @@ export default function DocumentDrawer({
         <div style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Document ID</div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <code style={{
-              fontSize: 11,
-              fontFamily: 'monospace',
-              background: '#f5f5f5',
-              padding: '4px 8px',
-              borderRadius: 4,
-              flex: 1
-            }}>
+            <code className="flex-1 px-2 py-1 rounded text-xs font-mono bg-gray-100 dark:bg-black text-gray-800 dark:text-gray-200 break-all">
               {drawerDoc.document_id}
             </code>
             <button
@@ -230,14 +206,7 @@ export default function DocumentDrawer({
                 copyToClipboard(drawerDoc.document_id);
                 showToast('Document ID copied');
               }}
-              style={{
-                fontSize: 12,
-                padding: '4px 8px',
-                border: '1px solid #ddd',
-                borderRadius: 4,
-                background: '#fff',
-                cursor: 'pointer'
-              }}
+              className="px-2 py-1 text-xs border rounded bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
             >
               Copy
             </button>
@@ -260,28 +229,11 @@ export default function DocumentDrawer({
             {snippetSource === 'none' && 'Sample Content'}
           </div>
           {snippetSource === 'none' ? (
-            <div style={{
-              padding: 12,
-              background: '#f9fafb',
-              borderRadius: 6,
-              fontSize: 12,
-              color: '#6b7280',
-              fontStyle: 'italic'
-            }}>
+            <div className="p-3 rounded-md text-xs italic bg-gray-50 dark:bg-gray-800/50 text-gray-500 dark:text-gray-400">
               Preview JSON to see sample content
             </div>
           ) : (
-            <div style={{
-              padding: 12,
-              background: '#f9fafb',
-              borderRadius: 6,
-              fontSize: 12,
-              color: '#374151',
-              maxHeight: '200px',
-              overflowY: 'auto',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word'
-            }}>
+            <div className="p-3 rounded-md text-xs max-h-[200px] overflow-y-auto whitespace-pre-wrap break-words bg-gray-50 dark:bg-slate-900 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700 font-mono">
               {snippet}
             </div>
           )}
@@ -290,16 +242,7 @@ export default function DocumentDrawer({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <button
             onClick={() => onUseThisDoc(drawerDoc.document_id)}
-            style={{
-              padding: '12px 16px',
-              border: 'none',
-              borderRadius: 6,
-              background: '#1976d2',
-              color: '#fff',
-              cursor: 'pointer',
-              fontSize: 14,
-              fontWeight: 600
-            }}
+            className="w-full py-2.5 px-4 rounded-md text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 border border-transparent shadow-sm transition-colors"
           >
             Use this doc
           </button>
@@ -307,14 +250,7 @@ export default function DocumentDrawer({
             onClick={async () => {
               await onPreviewDoc(drawerDoc.document_id, collection);
             }}
-            style={{
-              padding: '8px 16px',
-              border: '1px solid #ddd',
-              borderRadius: 6,
-              background: '#fff',
-              cursor: 'pointer',
-              fontSize: 13
-            }}
+            className="px-4 py-2 border rounded-md text-sm cursor-pointer bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
           >
             Preview JSON
           </button>
@@ -322,14 +258,7 @@ export default function DocumentDrawer({
             onClick={async () => {
               await onExportJson(drawerDoc.document_id, kind);
             }}
-            style={{
-              padding: '8px 16px',
-              border: '1px solid #ddd',
-              borderRadius: 6,
-              background: '#fff',
-              cursor: 'pointer',
-              fontSize: 13
-            }}
+            className="px-4 py-2 border rounded-md text-sm cursor-pointer bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
           >
             Export JSON
           </button>
@@ -337,14 +266,7 @@ export default function DocumentDrawer({
             onClick={async () => {
               await onExportZip(drawerDoc.document_id, kind);
             }}
-            style={{
-              padding: '8px 16px',
-              border: '1px solid #ddd',
-              borderRadius: 6,
-              background: '#fff',
-              cursor: 'pointer',
-              fontSize: 13
-            }}
+            className="px-4 py-2 border rounded-md text-sm cursor-pointer bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
           >
             Export ZIP
           </button>
@@ -352,20 +274,12 @@ export default function DocumentDrawer({
             onClick={async () => {
               await onDeleteDoc(drawerDoc.document_id, filename);
             }}
-            style={{
-              padding: '8px 16px',
-              border: '1px solid #dc2626',
-              borderRadius: 6,
-              background: '#fff',
-              cursor: 'pointer',
-              fontSize: 13,
-              color: '#dc2626'
-            }}
+            className="px-4 py-2 border border-red-200 dark:border-red-900/50 rounded-md text-sm cursor-pointer bg-white dark:bg-gray-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10"
           >
             Delete
           </button>
         </div>
-      </div>
+      </div >
     </>
   );
 }
