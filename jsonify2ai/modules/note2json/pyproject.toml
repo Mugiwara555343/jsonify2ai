@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "note-to-json"
+version = "0.2.3"
+description = "Convert Markdown or text files to structured JSON, offline."
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Note to JSON Team"}
+]
+keywords = ["markdown", "json", "cli", "privacy", "notes"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Text Processing :: Markup",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "jsonschema>=4.0.0",
+    "chardet>=5.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pre-commit>=3.0.0",
+    "black>=24",
+    "ruff>=0.5",
+]
+watch = [
+    "watchdog>=3.0.0",
+]
+
+[project.scripts]
+note2json = "note_to_json.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Mugiwara555343/note2json"
+Repository = "https://github.com/Mugiwara555343/note2json"
+Issues = "https://github.com/Mugiwara555343/note2json/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["note_to_json*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')"
+]
