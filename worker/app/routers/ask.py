@@ -252,9 +252,6 @@ def _ollama_generate(prompt: str, model: str = None):
 
 @router.post("/ask")
 def ask(body: AskBody):
-    # DEBUG: Input Check
-    print(f"DEBUG: Request received - query: {body.query}, k: {body.k}")
-
     print(f"--- Using model: {body.model} ---")
     text_hits, img_hits = _search(
         body.query,
