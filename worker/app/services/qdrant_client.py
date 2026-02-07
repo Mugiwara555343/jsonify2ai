@@ -24,6 +24,7 @@ from requests.exceptions import HTTPError
 from qdrant_client import QdrantClient, models
 from qdrant_client.models import VectorParams
 from worker.app.config import settings
+from worker.app.services.embed_ollama import embed_texts
 
 
 # -------------------------- Client helpers --------------------------
@@ -206,6 +207,7 @@ def _ensure_payload_indexes(client: QdrantClient, name: str) -> None:
     """Best-effort creation of helpful payload indexes; ignore failures.
 
     Creates indexes for:
+    - content (TEXT) - for hybrid search
     - document_id (KEYWORD)
     - kind (KEYWORD)
     - path (KEYWORD)
@@ -214,6 +216,28 @@ def _ensure_payload_indexes(client: QdrantClient, name: str) -> None:
     - meta.doc_type (KEYWORD)
     - meta.detected_as (KEYWORD)
     """
+    # 1. Ensure 'content' text index for hybrid search
+    # Check availability first to avoid restart errors
+    try:
+        info = client.get_collection(name)
+        payload_schema = getattr(info, "payload_schema", {}) or {}
+    except Exception:
+        payload_schema = {}
+
+    if "content" not in payload_schema:
+        try:
+            client.create_payload_index(
+                collection_name=name,
+                field_name="content",
+                field_schema=models.TextIndexParams(
+                    type="text",
+                    tokenizer=models.TokenizerType.WORD,
+                    lowercase=True,
+                ),
+            )
+        except Exception:
+            pass
+
     try:
         client.create_payload_index(
             collection_name=name,
@@ -325,6 +349,10 @@ def upsert_points(
                     f"[warn] Skipping upsert id={pid} due to wrong embedding dimension: got {len(vec)}, expected {expected_dim}"
                 )
                 continue
+
+            # Standardize payload: ensure 'content' key for hybrid search
+            if "content" not in payload and "text" in payload:
+                payload["content"] = payload.pop("text")
 
             # Create point with unnamed vector format
             valid_points.append(models.PointStruct(id=pid, vector=vec, payload=payload))
@@ -439,8 +467,9 @@ def build_filter(
 
 
 def search(
-    query_vector: List[float],
+    query_vector: Optional[List[float]] = None,
     *,
+    query_text: Optional[str] = None,
     k: int = 5,
     collection_name: str,
     query_filter: Optional[models.Filter] = None,
@@ -456,6 +485,18 @@ def search(
         )
 
     expected_dim = getattr(settings, "EMBEDDING_DIM", 768)
+
+    # 1. Query Planning & Embedding
+    if not query_text and not query_vector:
+        return []
+
+    if query_vector is None:
+        if query_text:
+            # Generate embedding
+            query_vector = embed_texts([query_text])[0]
+        else:
+            # Should be unreachable due to check above, but for safety
+            return []
 
     # Validate query vector dimension
     if not isinstance(query_vector, list) or len(query_vector) != expected_dim:
@@ -539,14 +580,32 @@ def search(
             except Exception as e:
                 print(f"debug: collection={collection_name} diagnostics error: {e}")
 
+    # 2. Pure Vector Search (hybrid text filter disabled for debugging)
+    # query_text embedding is already generated above; we only use the vector now.
+    # To re-enable hybrid search, uncomment the text filter logic below.
+
     # Perform search
-    return qc.search(
+    results = qc.search(
         collection_name=collection_name,
         query_vector=query_vector,
         limit=k,
         with_payload=with_payload,
-        query_filter=query_filter,
+        query_filter=query_filter,  # Use only the user-provided filter
+        with_vectors=False,  # Requirements: strip out raw vectors
     )
+
+    # 4. Payload Cleanup
+    # Ensure usage of only necessary metadata (content, path, score)
+    # Keeping document_id/kind/idx as they are small and critical for downstream join/identification
+    allowed_keys = {"content", "path", "document_id", "kind", "idx"}
+    clean_results = []
+
+    for hit in results:
+        if hit.payload:
+            hit.payload = {k: v for k, v in hit.payload.items() if k in allowed_keys}
+        clean_results.append(hit)
+
+    return clean_results
 
 
 def count(

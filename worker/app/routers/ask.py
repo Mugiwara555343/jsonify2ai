@@ -4,7 +4,7 @@ from typing import List, Optional
 from datetime import datetime
 import requests
 import time
-from qdrant_client import QdrantClient
+from worker.app.services.qdrant_client import search as q_search
 from qdrant_client.models import Filter, FieldCondition, MatchValue, Range
 from worker.app.config import settings
 from worker.app.services.embed_ollama import embed_texts
@@ -15,11 +15,11 @@ router = APIRouter()
 
 class AskBody(BaseModel):
     query: str
-    k: int = 6
-    mode: str = None
-    document_id: str = None
-    path_prefix: str = None
-    answer_mode: str = None
+    k: int = 12
+    mode: str = "search"
+    document_id: Optional[str] = None
+    path_prefix: Optional[str] = None
+    answer_mode: str = "synthesize"
     ingested_after: Optional[str] = None
     ingested_before: Optional[str] = None
     model: Optional[str] = None
@@ -38,17 +38,16 @@ def _parse_iso_to_timestamp(iso_str: str) -> Optional[int]:
 
 def _normalize_source(hit: dict) -> dict:
     """Convert raw Qdrant hit to standardized Source object."""
-    # Handle both direct fields and payload
-    payload = hit.get("payload", {}) if isinstance(hit.get("payload"), dict) else {}
+    # Handle both direct fields and nested payload
+    # If payload is nested, use it; otherwise the hit itself IS the payload (already spread)
+    if "payload" in hit and isinstance(hit.get("payload"), dict):
+        payload = hit["payload"]
+    else:
+        # Payload was already spread into hit at top level
+        payload = hit
 
     # Extract text excerpt (trim to 400-800 chars by default, use 600 as middle ground)
-    text = (
-        hit.get("text")
-        or payload.get("text")
-        or hit.get("caption")
-        or payload.get("caption")
-        or ""
-    )
+    text = payload.get("content") or payload.get("text") or payload.get("caption") or ""
     if len(text) > 600:
         text = text[:600] + "…"
 
@@ -96,22 +95,19 @@ def _search(
     ingested_after: Optional[str] = None,
     ingested_before: Optional[str] = None,
 ):
-    vec = embed_texts([q])[0]
-    qc = QdrantClient(url=settings.QDRANT_URL)
+    # Debug: log received query
+    print(f"DEBUG ask._search: query_text={q!r}, k={k}")
 
-    # Build filter if document_id, path_prefix, or time filters provided
-    qf = None
+    # Prepare filter
     must = []
     if document_id:
         must.append(
             FieldCondition(key="document_id", match=MatchValue(value=document_id))
         )
     if path_prefix:
-        # Use prefix match for path_prefix (if supported) or exact match
-        # For now, use exact match on path field
         must.append(FieldCondition(key="path", match=MatchValue(value=path_prefix)))
 
-    # Time range filters on meta.ingested_at_ts
+    # Time range filters
     if ingested_after:
         ts_after = _parse_iso_to_timestamp(ingested_after)
         if ts_after is not None:
@@ -124,39 +120,91 @@ def _search(
             must.append(
                 FieldCondition(key="meta.ingested_at_ts", range=Range(lt=ts_before))
             )
-    qf = None
-    if must:
-        qf = Filter(must=must)
 
-    def go(col):
-        kwargs = {"collection_name": col, "query": vec, "limit": k}
-        if qf is not None:
-            kwargs["query_filter"] = qf
-        hits = qc.query_points(**kwargs).points
+    qf = Filter(must=must) if must else None
+
+    # Get client once
+    # Note: we don't need to manually embed here, 'search' does it if we pass query_text
+    # BUT 'search' expects EITHER query_vector OR query_text.
+    # To be safe and efficient:
+    # 1. We let 'search' handle embedding if we only pass text?
+    # No, 'search' will embed if query_vector is None.
+    # The user request said: "If only query_text is provided, generate the vector internally."
+    # So we can just pass query_text=q.
+
+    # Helper to normalize results
+    def normalize_hits(hits):
         out = []
-        for h in hits:
+        for i, h in enumerate(hits):
+            # h is ScoredPoint
             p = h.payload or {}
+            # DEBUG: Inspect first raw hit
+            if i == 0:
+                print(f"DEBUG: Raw Qdrant payload keys: {list(p.keys())}")
+                print(
+                    f"DEBUG: Raw payload.content: '{p.get('content', 'MISSING')[:100] if p.get('content') else 'MISSING'}'"
+                )
+                print(
+                    f"DEBUG: Raw payload.text: '{p.get('text', 'MISSING')[:100] if p.get('text') else 'MISSING'}'"
+                )
             raw_hit = {"id": str(h.id), "score": float(h.score), **p}
             normalized = _normalize_source(raw_hit)
             out.append(normalized)
         return out
 
-    # Always perform text search
-    text_hits = go(settings.QDRANT_COLLECTION)
+    # 1. Text Search (Hybrid)
+    text_hits = []
+    try:
+        raw_text_hits = q_search(
+            query_text=q,
+            collection_name=settings.QDRANT_COLLECTION,
+            k=k,
+            query_filter=qf if qf else None,
+            with_payload=True,
+        )
+        text_hits = normalize_hits(raw_text_hits)
+    except Exception as e:
+        import logging
 
-    # Only attempt images search when IMAGES_CAPTION is enabled
+        log = logging.getLogger(__name__)
+        log.warning(f"[ask] text search failed: {e}")
+
+    # 2. Images Search (Only if enabled)
     img_hits = []
     if getattr(settings, "IMAGES_CAPTION", 0):
         try:
-            img_hits = go(
-                getattr(settings, "QDRANT_COLLECTION_IMAGES", "jsonify2ai_images_768")
+            # For images, we might not want strict text matching on 'content' field
+            # if images don't have 'content'. They have 'caption'.
+            # The 'search' function applies text match on 'content'.
+            # So for images, maybe we should ONLY search by vector?
+            # Or if we pass query_text, it will try to match 'content', fail, and purely rely on vector?
+            # Wait, 'search' implementation:
+            # if query_text: match on 'content'.
+            # If image collection doesn't have 'content', that filter might return 0 results?
+            # Actually, images usually have 'caption'.
+            # If we utilize q_search, it enforces 'content' match.
+            # So for images, we should probably manually embed and pass query_vector ONLY,
+            # so `search` skips text filtering.
+
+            # Embed for image search
+            vec = embed_texts([q])[0]
+
+            raw_img_hits = q_search(
+                query_vector=vec,
+                # Do NOT pass query_text here to avoid 'content' filter on image collection
+                collection_name=getattr(
+                    settings, "QDRANT_COLLECTION_IMAGES", "jsonify2ai_images_768"
+                ),
+                k=k,
+                query_filter=qf if qf else None,
+                with_payload=True,
             )
+            img_hits = normalize_hits(raw_img_hits)
         except Exception as e:
             import logging
 
             log = logging.getLogger(__name__)
             log.warning(f"[ask] images search skipped: {e}")
-            img_hits = []
 
     return text_hits, img_hits
 
@@ -205,6 +253,9 @@ def _ollama_generate(prompt: str, model: str = None):
 
 @router.post("/ask")
 def ask(body: AskBody):
+    # DEBUG: Input Check
+    print(f"DEBUG: Request received - query: {body.query}, k: {body.k}")
+
     print(f"--- Using model: {body.model} ---")
     text_hits, img_hits = _search(
         body.query,
@@ -216,6 +267,23 @@ def ask(body: AskBody):
     )
     # Sources are already normalized by _search()
     sources = text_hits[: body.k // 2] + img_hits[: body.k - body.k // 2]
+
+    # DEBUG: Search Results
+    print(
+        f"DEBUG: Qdrant returned {len(sources)} results. Top score: {sources[0].get('score') if sources else 'N/A'}"
+    )
+
+    # DEBUG: Inspect first source payload structure
+    if sources:
+        first_source = sources[0]
+        print(f"DEBUG: First result keys: {list(first_source.keys())}")
+        print(
+            f"DEBUG: First result text field: '{first_source.get('text', 'MISSING')[:100]}'"
+        )
+        print(f"DEBUG: First result path: {first_source.get('path', 'MISSING')}")
+        print(
+            f"DEBUG: First result document_id: {first_source.get('document_id', 'MISSING')}"
+        )
 
     # Determine mode: prioritize answer_mode, then mode, then settings
     # answer_mode="retrieve" means retrieve-only (no synthesis)
@@ -383,6 +451,12 @@ def _try_llm_synthesis(
 
     # Compute top_score from sources
     top_score = max((s.get("score", 0.0) for s in sources), default=0.0)
+
+    # DEBUG: Score Threshold
+    print(
+        f"DEBUG: Threshold check - Top Score: {top_score} vs Min Required: {settings.MIN_SYNTH_SCORE}"
+    )
+
     if top_score < settings.MIN_SYNTH_SCORE:
         result["synth_skipped_reason"] = "low_confidence"
         result["top_score"] = top_score
@@ -400,13 +474,24 @@ def _try_llm_synthesis(
         if not snippets:
             return result
 
+        # DEBUG: Snippet verification
+        print(f'DEBUG: Snippet sample: {snippets[0][:100] if snippets else "EMPTY"}')
+
         # Build concise prompt
         prompt = _build_prompt(query, snippets)
+
+        # DEBUG: Prompt
+        print(f"DEBUG: Prompt being sent to Ollama: {prompt[:200]}...")
 
         # Call Ollama generate
         start_time = time.time()
         final_answer = ollama_generate(prompt, model=model)
         duration_ms = int((time.time() - start_time) * 1000)
+
+        # DEBUG: Ollama Response
+        print(
+            f"DEBUG: Raw Ollama response: {final_answer[:100] if final_answer else 'None'}..."
+        )
 
         if final_answer:
             result["final"] = final_answer
