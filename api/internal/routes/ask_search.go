@@ -3,6 +3,7 @@ package routes
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -53,6 +54,42 @@ func addAskSearchRoutes(r *gin.Engine, base string, cfg *config.Config) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), cfg.GetSearchTimeout())
 		defer cancel()
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		// Forward Request-ID to worker
+		if requestID := c.GetString("request_id"); requestID != "" {
+			req.Header.Set("X-Request-Id", requestID)
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "worker unreachable", "detail": err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+
+		c.Header("Content-Type", "application/json")
+		c.Status(resp.StatusCode)
+		_, _ = io.Copy(c.Writer, resp.Body)
+	})
+
+	// POST /search (json body translated) (protected)
+	r.POST("/search", middleware.AuthMiddleware(cfg), func(c *gin.Context) {
+		var bodyMap map[string]interface{}
+		if err := c.ShouldBindJSON(&bodyMap); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": "invalid json"})
+			return
+		}
+
+		// Translate "query" -> "query_text"
+		if q, ok := bodyMap["query"]; ok {
+			bodyMap["query_text"] = q
+		}
+
+		newBody, _ := json.Marshal(bodyMap)
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), cfg.GetSearchTimeout())
+		defer cancel()
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, w+"/search", bytes.NewReader(newBody))
+		req.Header.Set("Content-Type", "application/json")
 		// Forward Request-ID to worker
 		if requestID := c.GetString("request_id"); requestID != "" {
 			req.Header.Set("X-Request-Id", requestID)

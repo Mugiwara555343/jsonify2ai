@@ -6,7 +6,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -171,56 +170,6 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 		forwardResp(c, resp)
 	})
 
-	// ----------------------------- /search -----------------------------
-	// GET /search?q=...&k=...&document_id=...&kind=...&path=... (protected)
-	r.GET("/search", middleware.AuthMiddleware(cfg), func(c *gin.Context) {
-		q := c.Query("q")
-		if q == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": "missing q"})
-			return
-		}
-
-		qb := url.Values{}
-		qb.Set("q", q)
-		if v := c.Query("k"); v != "" {
-			qb.Set("k", v)
-		}
-		// optional scoping filters
-		if v := c.Query("document_id"); v != "" {
-			qb.Set("document_id", v)
-		}
-		if v := c.Query("kind"); v != "" {
-			qb.Set("kind", v)
-		}
-		if v := c.Query("path"); v != "" {
-			qb.Set("path", v)
-		}
-		// optional time filters
-		if v := c.Query("ingested_after"); v != "" {
-			qb.Set("ingested_after", v)
-		}
-		if v := c.Query("ingested_before"); v != "" {
-			qb.Set("ingested_before", v)
-		}
-
-		target := getWorkerBase() + "/search?" + qb.Encode()
-		req, err := http.NewRequestWithContext(c.Request.Context(), "GET", target, nil)
-		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "request build failed", "detail": err.Error()})
-			return
-		}
-		// Forward Request-ID to worker
-		if requestID := c.GetString("request_id"); requestID != "" {
-			req.Header.Set("X-Request-Id", requestID)
-		}
-		resp, err := httpClient.Do(req)
-		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "worker unreachable", "detail": err.Error()})
-			return
-		}
-		forwardResp(c, resp)
-	})
-
 	// ----------------------------- /export -----------------------------
 	// GET /export?document_id=...&collection=... (protected)
 	r.GET("/export", middleware.AuthMiddleware(cfg), func(c *gin.Context) {
@@ -320,16 +269,10 @@ func RegisterRoutes(r *gin.Engine, db *sql.DB, docsDir string, workerBase string
 		forwardResp(c, resp)
 	})
 
-	// Add ask/search routes with config
-	// addAskSearchRoutes(r, getWorkerBase(), cfg) // Commented out due to duplicate /search route
-
 	// ----------------------------- /api/models -----------------------------
 	// GET /api/models (protected) - List available models from Ollama
 	r.GET("/api/models", middleware.AuthMiddleware(cfg), (&ModelsHandler{Config: cfg}).ListModels)
 
-	// ----------------------------- /ask -----------------------------
-	// POST /ask (protected + rate limited)
-	r.POST("/ask",
-		middleware.AuthMiddleware(cfg),
-		rateLimiter.Wrap("ask", (&AskHandler{Config: cfg}).Post))
+	// Add ask/search routes from ask_search.go
+	addAskSearchRoutes(r, getWorkerBase(), cfg)
 }

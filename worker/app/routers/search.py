@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Query
 from typing import Literal, Optional, List
 from datetime import datetime
-from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue, Range
 from worker.app.config import settings
 from worker.app.services.embed_ollama import embed_texts
+from worker.app.services.qdrant_client import search as q_search
 
 router = APIRouter()
 
@@ -22,17 +22,16 @@ def _parse_iso_to_timestamp(iso_str: str) -> Optional[int]:
 
 def _normalize_source(hit: dict) -> dict:
     """Convert raw Qdrant hit to standardized Source object."""
-    # Handle both direct fields and payload
-    payload = hit.get("payload", {}) if isinstance(hit.get("payload"), dict) else {}
+    # Handle both direct fields and nested payload
+    # If payload is nested, use it; otherwise the hit itself IS the payload (already spread)
+    if "payload" in hit and isinstance(hit.get("payload"), dict):
+        payload = hit["payload"]
+    else:
+        # Payload was already spread into hit at top level
+        payload = hit
 
     # Extract text excerpt (trim to 400-800 chars by default, use 600 as middle ground)
-    text = (
-        hit.get("text")
-        or payload.get("text")
-        or hit.get("caption")
-        or payload.get("caption")
-        or ""
-    )
+    text = payload.get("content") or payload.get("text") or payload.get("caption") or ""
     if len(text) > 600:
         text = text[:600] + "…"
 
@@ -110,22 +109,26 @@ def _search(
     collection: str,
     vec,
     k: int,
+    query_text: Optional[str] = None,
     path: Optional[str] = None,
     document_id: Optional[str] = None,
     kind: Optional[str] = None,
     ingested_after: Optional[str] = None,
     ingested_before: Optional[str] = None,
 ):
-    q = QdrantClient(url=settings.QDRANT_URL)
+    # Debug: log received parameters
+    print(f"DEBUG _search: query_text={query_text!r}, collection={collection}, k={k}")
+
     qf = _build_filter(path, document_id, kind, ingested_after, ingested_before)
 
-    # NOTE: older/newer qdrant-client versions need `query_filter`, not `filter`
-    hits = q.search(
-        collection_name=collection,
+    # Use shared search wrapper which supports both query_vector and query_text
+    hits = q_search(
         query_vector=vec,
-        limit=k,
+        query_text=query_text,
+        collection_name=collection,
+        k=k,
+        query_filter=qf,
         with_payload=True,
-        query_filter=qf,  # ← fixed: was `filter=...` causing 500s
     )
 
     out = []
@@ -163,6 +166,7 @@ def search(
                 col,
                 vec,
                 k,
+                query_text=q,
                 path=path,
                 document_id=document_id,
                 kind=kind,
@@ -179,7 +183,7 @@ def search(
 
 @router.post("/search")
 def search_post(body: dict):
-    q = body.get("q")
+    q = body.get("query_text") or body.get("query") or body.get("q")
     kind = body.get("kind", "text")
     k = body.get("k") or body.get("top_k", 10)
     path = body.get("path")
@@ -201,6 +205,7 @@ def search_post(body: dict):
                 col,
                 vec,
                 k,
+                query_text=q,
                 path=path,
                 document_id=document_id,
                 kind=kind,

@@ -706,8 +706,6 @@ function App() {
         const newUnique = newEvents.filter(e => {
           const aid = (e as any).activity_id;
           return aid && !existingIds.has(aid);
-
-          return !aid || !existingIds.has(aid);
         });
         // Keep most recent first, limit to last 100
         const merged = [...newUnique, ...prev].slice(0, 100);

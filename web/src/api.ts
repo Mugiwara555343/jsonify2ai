@@ -183,27 +183,23 @@ export async function doSearch(
   ingestedAfter?: string,
   ingestedBefore?: string
 ): Promise<any> {
-  try {
-    let url = `/search?q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&k=${k}`;
-    if (ingestedAfter) {
-      url += `&ingested_after=${encodeURIComponent(ingestedAfter)}`;
-    }
-    if (ingestedBefore) {
-      url += `&ingested_before=${encodeURIComponent(ingestedBefore)}`;
-    }
-    const r = await apiRequest(url, { method: "GET" }, true);
-    if (r.ok) return await r.json();
+  // Guard against empty query
+  if (!q || q.trim() === '') {
+    return { ok: true, kind, q: '', results: [] };
+  }
 
-    // fallback to POST body if GET not supported
-    const body: any = { q, kind, k };
+  try {
+    // Hybrid search now uses POST /search to support query translation
+    const body: any = { query: q, kind, k };
     if (ingestedAfter) body.ingested_after = ingestedAfter;
     if (ingestedBefore) body.ingested_before = ingestedBefore;
-    const r2 = await apiRequest("/search", {
+
+    const r = await apiRequest("/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }, true);
-    return await r2.json();
+    return await r.json();
   } catch (e) {
     return { ok: false, error: String(e) };
   }

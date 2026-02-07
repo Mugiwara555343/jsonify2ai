@@ -54,6 +54,18 @@ _TEXT_EXTS = {".txt", ".md", ".rst", ".json", ".csv"}
 _IMAGE_EXTS = IMAGE_EXTS
 _AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".flac", ".ogg"}
 
+# Ignored filename prefixes (smoke/test/temp files)
+IGNORED_PREFIXES = ("smoke_", "test_", "temp_")
+
+
+def _should_skip(fp: Path) -> bool:
+    """Return True if file should be skipped based on name patterns."""
+    name_lower = fp.name.lower()
+    for prefix in IGNORED_PREFIXES:
+        if name_lower.startswith(prefix):
+            return True
+    return False
+
 
 def _infer_kind(fp: Path) -> str:
     ext = fp.suffix.lower()
@@ -100,6 +112,8 @@ def discover_candidates(
                 return []
             if fp.suffix.lower() in IGNORED_EXTS:
                 return []
+            if _should_skip(fp):
+                return []
             kind = _infer_kind(fp)
             if kinds_set and kind not in kinds_set:
                 return []
@@ -117,6 +131,8 @@ def discover_candidates(
             continue
         ext = fp.suffix.lower()
         if ext in IGNORED_EXTS:
+            continue
+        if _should_skip(fp):
             continue
         kind = _infer_kind(fp)
         if kinds_set and kind not in kinds_set:
