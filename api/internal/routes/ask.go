@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"time"
 
 	"jsonify2ai/api/internal/config"
 
@@ -91,7 +90,7 @@ func (h *AskHandler) Post(c *gin.Context) {
 	}
 	wbody, _ := json.Marshal(wreq)
 	wurl := fmt.Sprintf("%s/ask", h.workerBaseURL())
-	httpClient := &http.Client{Timeout: 60 * time.Second}
+	httpClient := &http.Client{Timeout: h.Config.GetAskTimeout()}
 
 	fwd, err := http.NewRequest(http.MethodPost, wurl, bytes.NewReader(wbody))
 	if err == nil {

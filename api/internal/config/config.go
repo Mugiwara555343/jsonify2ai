@@ -55,16 +55,16 @@ func Load() *Config {
 		WorkerBase:  getenv("WORKER_BASE", ""),
 		DocsDir:     getenv("DOCS_DIR", "./data/documents"),
 
-		// Default timeouts (in seconds)
-		HTTPTimeoutSeconds:   15,
-		UploadTimeoutSeconds: 60,
-		SearchTimeoutSeconds: 15,
-		AskTimeoutSeconds:    30,
+		// Default timeouts (in seconds) — tuned for Mistral-Small:24B on CPU
+		HTTPTimeoutSeconds:   180,
+		UploadTimeoutSeconds: 180,
+		SearchTimeoutSeconds: 180,
+		AskTimeoutSeconds:    180,
 
-		// Default API timeouts (in milliseconds)
-		APIReadTimeoutMs:  15000,
-		APIWriteTimeoutMs: 15000,
-		APIProxyTimeoutMs: 60000,
+		// Default API timeouts (in milliseconds) — tuned for Mistral-Small:24B on CPU
+		APIReadTimeoutMs:  180000,
+		APIWriteTimeoutMs: 180000,
+		APIProxyTimeoutMs: 180000,
 
 		// Default CORS origins
 		CORSOrigins: "http://localhost:5173,http://127.0.0.1:5173",

@@ -88,7 +88,7 @@ def embed_texts(
     payload = {"model": model, "input": texts}
 
     try:
-        resp = requests.post(url, json=payload, timeout=30)
+        resp = requests.post(url, json=payload, timeout=180)
         resp.raise_for_status()
         data = resp.json()
 

@@ -239,9 +239,8 @@ def _ollama_generate(prompt: str, model: str = None):
                     "top_p": settings.ASK_TOP_P,
                 },
                 "stream": False,
-                "keep_alive": "1m",
             },
-            timeout=60,
+            timeout=180,
         )
         if r.ok:
             j = r.json()
