@@ -10,7 +10,7 @@ services:
       - api
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:5173 || curl -fsSI http://localhost:5173"]
+      test: [ "CMD-SHELL", "wget -q --spider http://localhost:5173 || curl -fsSI http://localhost:5173" ]
       interval: 20s
       timeout: 5s
       retries: 10
@@ -38,7 +38,7 @@ services:
       - worker
       - qdrant
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/health/full || curl -fsS http://localhost:8082/health/full"]
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:8082/health/full || curl -fsS http://localhost:8082/health/full" ]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -46,11 +46,11 @@ services:
   worker:
     build: ./worker
     image: jsonify2ai-worker:latest
-    ports: ["8090:8090"]
+    ports: [ "8090:8090" ]
     volumes:
       - ./data:/app/data
       - ./scripts:/app/scripts
-      - ./worker:/app/worker           # ← NEW: mount ingest scripts
+      - ./worker:/app/worker # ← NEW: mount ingest scripts
     env_file:
       - ./.env
     environment:
@@ -64,12 +64,12 @@ services:
       IMAGES_CAPTION: ${IMAGES_CAPTION:-0}
       ASK_MODE: ${ASK_MODE}
       ASK_MODEL: ${ASK_MODEL}
-      PYTHONPATH: /app            # ← NEW: allow imports like `from app...`
+      PYTHONPATH: /app # ← NEW: allow imports like `from app...`
     restart: unless-stopped
     depends_on:
       - qdrant
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8090/status || curl -fsS http://localhost:8090/status"]
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:8090/status || curl -fsS http://localhost:8090/status" ]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -83,30 +83,31 @@ services:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:6333/readyz || curl -fsS http://localhost:6333/readyz"]
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:6333/readyz || curl -fsS http://localhost:6333/readyz" ]
       interval: 20s
       timeout: 5s
       retries: 15
 
   watcher:
-    image: python:3.11-slim
-    command: ["bash","-lc","pip install --no-cache-dir requests && python scripts/filewatcher.py"]
+    image: jsonify2ai-worker:latest
+    command: [ "python", "scripts/dev/tools/filewatcher.py" ]
     working_dir: /app
     volumes:
       - ./:/app
     environment:
       - WATCH_DIR=data/dropzone
       - WORKER_BASE=http://worker:8090
+      - WORKER_AUTH_TOKEN=${WORKER_AUTH_TOKEN}
       - WATCH_INTERVAL_SEC=2.0
       - WATCH_STRIP_PREFIX=/app/
       - WATCH_REQUIRE_PREFIX=data/dropzone/
     depends_on:
       - worker
     restart: unless-stopped
-    profiles: ["watcher"]
 
 volumes:
   qdrant_data:
+
 
 networks:
   default:

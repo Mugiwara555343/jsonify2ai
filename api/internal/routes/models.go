@@ -30,7 +30,7 @@ func (h *ModelsHandler) ListModels(c *gin.Context) {
 	target := ollamaHost + "/api/tags"
 
 	// Create request with timeout
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 180 * time.Second}
 	req, err := http.NewRequestWithContext(c.Request.Context(), "GET", target, nil)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{

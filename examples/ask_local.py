@@ -154,9 +154,8 @@ def _ask_llm(prompt: str, model: str, max_tokens: int, temperature: float) -> st
                 "prompt": prompt,
                 "stream": False,
                 "options": {"temperature": temperature},
-                "keep_alive": "5m",
             },
-            timeout=60,
+            timeout=180,
         )
         r.raise_for_status()
         data = r.json()

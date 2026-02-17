@@ -9,7 +9,7 @@ Usage:
         prompt="Answer this...",
         host="http://localhost:11434",
         model="llama3.1:8b",
-        timeout=60
+        timeout=180
     )
 """
 
@@ -22,7 +22,7 @@ def generate(
     prompt: str,
     host: Optional[str] = None,
     model: Optional[str] = None,
-    timeout: int = 60,
+    timeout: int = 180,
 ) -> str:
     """
     Generate text using Ollama API.
@@ -31,7 +31,7 @@ def generate(
         prompt: The prompt to send to the LLM
         host: Ollama host (default: settings.OLLAMA_HOST or http://localhost:11434)
         model: Model to use (default: settings.OLLAMA_MODEL or llama3.1:8b)
-        timeout: Request timeout in seconds (default: 60)
+        timeout: Request timeout in seconds (default: 180)
 
     Returns:
         Generated text on success, empty string on failure

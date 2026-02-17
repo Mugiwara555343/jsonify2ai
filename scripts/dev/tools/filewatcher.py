@@ -21,6 +21,7 @@ import threading
 # NOTE: Watcher only monitors DROPZONE - not repo folders like scripts/fixtures
 DROPZONE = os.getenv("WATCH_DIR", "data/dropzone")
 WORKER_BASE = os.getenv("WORKER_BASE", "http://worker:8090")
+WORKER_AUTH_TOKEN = os.getenv("WORKER_AUTH_TOKEN", "")
 STATE_FILE = os.getenv("WATCH_STATE", "data/.watcher_state.json")
 INTERVAL = float(os.getenv("WATCH_INTERVAL_SEC", "2.0"))
 STRIP_PREFIX = os.getenv("WATCH_STRIP_PREFIX", "")
@@ -192,10 +193,11 @@ def log_event(event: str, level: str = "info", **kwargs):
 
 def trigger(kind: str, path: str):
     url = f"{WORKER_BASE}/process/{kind}"
+    headers = {"X-From-Watcher": "1"}
+    if WORKER_AUTH_TOKEN:
+        headers["Authorization"] = f"Bearer {WORKER_AUTH_TOKEN}"
     try:
-        r = requests.post(
-            url, json={"path": path}, timeout=30, headers={"X-From-Watcher": "1"}
-        )
+        r = requests.post(url, json={"path": path}, timeout=30, headers=headers)
         ok = r.status_code == 200 and r.json().get("ok", True)
         print(f"[watcher] trigger {kind} -> {path} status={r.status_code} ok={ok}")
         return ok, r.status_code
