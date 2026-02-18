@@ -212,7 +212,8 @@ export async function askQuestion(
   answerMode?: 'retrieve' | 'synthesize',
   ingestedAfter?: string,
   ingestedBefore?: string,
-  model?: string
+  model?: string,
+  temperature?: number
 ): Promise<any> {
   // Build URL with optional query parameters
   let url = "/ask";
@@ -242,6 +243,9 @@ export async function askQuestion(
   }
   if (model) {
     body.model = model;
+  }
+  if (typeof temperature === 'number') {
+    body.temperature = temperature;
   }
 
   const r = await apiRequest(url, {
