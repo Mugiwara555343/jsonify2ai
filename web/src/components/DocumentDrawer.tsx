@@ -1,5 +1,5 @@
 import { RefObject } from 'react';
-import { Document } from './IngestionActivity';
+import { Document } from '../types';
 
 type Hit = {
   id: string;
@@ -43,7 +43,7 @@ interface DocumentDrawerProps {
   activeDocId: string | null;
   llmReachable: boolean;
   askInputRef: RefObject<HTMLInputElement>;
-  openMenuDocId: string | null;
+  openMenuDocId?: string | null;
   onClose: () => void;
   onUseThisDoc: (docId: string) => void;
   onPreviewDoc: (docId: string, collection: string) => Promise<void>;

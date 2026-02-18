@@ -1,5 +1,5 @@
 import { RefObject } from 'react';
-import { Document } from './IngestionActivity';
+import { Document } from '../types';
 import ModelSelector from './ModelSelector';
 
 type Status = {

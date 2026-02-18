@@ -9,7 +9,7 @@ export function loadTheme(): Theme {
     if (raw) return JSON.parse(raw);
   } catch {}
   const prefersDark = typeof window !== "undefined" && (window as any).matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-  return { mode: prefersDark ? "dark" : "light", accent: "#6366f1" };
+  return { mode: "dark", accent: "#6366f1" };
 }
 
 export function saveTheme(t: Theme) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(t)); } catch {} }
